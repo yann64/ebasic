@@ -1,0 +1,7 @@
+build/
+*.gen.cpp
+*.o
+*.obj
+*.exe
+compile_commands.json
+.cache/

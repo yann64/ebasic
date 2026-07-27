@@ -19,3 +19,25 @@ The eBasic compiler is an extented version of the BASIC programmming language th
 - Windows
 - macOS
 - Haiku
+
+## Status
+
+eBasic is under active early development. See `docs/architecture/` for the compiler
+architecture and phased roadmap. The current milestone (M0) implements a minimal
+pipeline: `DIM`, `PRINT`, assignment, and arithmetic/string-concatenation expressions,
+compiled to C++ and built via `g++`/`clang++`.
+
+## Building
+
+```sh
+cmake --preset linux-gcc
+cmake --build --preset linux-gcc
+ctest --preset linux-gcc
+```
+
+## Usage
+
+```sh
+./build/linux-gcc/compiler/ebc examples/hello.bas -o hello
+./hello
+```
