@@ -40,7 +40,11 @@ enum class ExprKind {
     StringLiteral,
     BoolLiteral,
     Ident,
-    Index, // array element read: stringValue = array name, rhs = index expr
+    // Identifier applied to a parenthesized, comma-separated argument list:
+    // stringValue = name, args = arguments. Ambiguous at parse time between
+    // an array-element read (exactly 1 arg) and a function call - resolved
+    // by Sema/Codegen by looking up what `stringValue` actually names.
+    Call,
     Binary,
     UnaryNeg,
     UnaryNot,
@@ -167,10 +171,11 @@ struct Expr {
 
     long long intValue = 0;
     double doubleValue = 0.0;
-    std::string stringValue; // StringLiteral text, or Ident name
+    std::string stringValue; // StringLiteral text, or Ident/Call name
     BinOp binOp = BinOp::Add;
     std::unique_ptr<Expr> lhs;
     std::unique_ptr<Expr> rhs;
+    std::vector<std::unique_ptr<Expr>> args; // Call
 };
 
 using ExprPtr = std::unique_ptr<Expr>;
@@ -189,16 +194,34 @@ enum class StmtKind {
     Goto,
     Label,
     ExitLoop,
+    SubDecl,
+    FunctionDecl,
+    CallStmt,
+    Return,
 };
 
-// Which loop-introducing keyword a loop was opened with. EXIT FOR/DO/WHILE
-// each target the nearest enclosing loop of the matching kind specifically
-// (which may not be the innermost loop, e.g. EXIT FOR from inside a nested
-// DO loop exits the enclosing FOR, not just the DO).
+// Which loop- or procedure-introducing keyword a scope was opened with.
+// EXIT FOR/DO/WHILE each target the nearest enclosing loop of the matching
+// kind specifically (which may not be the innermost loop, e.g. EXIT FOR from
+// inside a nested DO loop exits the enclosing FOR, not just the DO). Sub and
+// Function reuse the same "search the stack for a matching kind" mechanism
+// for EXIT SUB/EXIT FUNCTION and to validate RETURN's context.
 enum class LoopKind {
     For,
     Do,
     While,
+    Sub,
+    Function,
+};
+
+// One SUB/FUNCTION parameter. `byRef` is resolved by the parser from an
+// explicit BYVAL/BYREF keyword, or FreeBASIC's default otherwise: BYREF for
+// STRING, BYVAL for every other built-in type.
+struct Param {
+    std::string name;
+    TypeKind type;
+    bool byRef;
+    SourceLoc loc;
 };
 
 // DO ... LOOP's optional pre-test (after DO) and post-test (after LOOP).
@@ -265,6 +288,13 @@ struct Stmt {
     ExprPtr postCond;
 
     LoopKind exitKind = LoopKind::For; // ExitLoop: which loop kind to exit
+
+    std::vector<Param> params;  // SubDecl/FunctionDecl (declaredType holds the FUNCTION's return type)
+    // Assign: true if `name` is not a real variable but the enclosing
+    // FUNCTION's own name, used as its return-value pseudo-assignment
+    // (`FuncName = value` inside FUNCTION FuncName ... END FUNCTION).
+    // Set by the parser, which already tracks the enclosing function.
+    bool isReturnAssign = false;
 };
 
 struct Module {

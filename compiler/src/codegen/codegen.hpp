@@ -17,6 +17,9 @@ public:
 private:
     void genStmt(const Stmt& stmt, std::ostringstream& out, int indent);
     void genBlock(const std::vector<StmtPtr>& stmts, std::ostringstream& out, int indent);
+    // Emits a SUB/FUNCTION's prototype (into protoOut_) and body (into
+    // procOut_). Only ever called for top-level SubDecl/FunctionDecl stmts.
+    void genProcedure(const Stmt& stmt);
     std::string genExpr(const Expr& expr);
     std::string genCondition(const Expr& expr);
 
@@ -35,10 +38,16 @@ private:
     // many nested loops separate it from the loop kind it targets.
     std::vector<std::pair<LoopKind, std::string>> loopStack_;
     // Canonical array name -> the mangled name of the C++ variable holding
-    // its lower bound, cached once at DIM time so later Index/element-assign
-    // codegen can subtract it (arrays are runtime-sized std::vectors, so
-    // their bound must be captured once at declaration, not re-evaluated).
+    // its lower bound, cached once at DIM time so later Call(as array-read)/
+    // element-assign codegen can subtract it (arrays are runtime-sized
+    // std::vectors, so their bound must be captured once at declaration, not
+    // re-evaluated). Also doubles as the array-vs-function disambiguator for
+    // a Call expression: present here => array, else => function call.
     std::unordered_map<std::string, std::string> arrayLowerBoundVar_;
+    // Forward declarations and bodies for SUB/FUNCTION, accumulated across
+    // the whole generate() call and emitted before main().
+    std::ostringstream protoOut_;
+    std::ostringstream procOut_;
 };
 
 } // namespace ebasic

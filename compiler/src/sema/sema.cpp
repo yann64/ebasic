@@ -1,5 +1,6 @@
 #include "sema/sema.hpp"
 
+#include <algorithm>
 #include <cctype>
 
 namespace ebasic {
@@ -20,6 +21,7 @@ bool isAssignCompatible(TypeKind targetType, TypeKind valueType) {
 
 void Sema::check(Module& module) {
     collectLabels(module.stmts);
+    collectProcedures(module.stmts);
     checkBlock(module.stmts, /*atTopLevel=*/true);
 }
 
@@ -30,6 +32,68 @@ void Sema::collectLabels(std::vector<StmtPtr>& stmts) {
         if (!labels_.insert(key).second) {
             diags_.error(stmt->loc, "label '" + stmt->name + "' is already declared");
         }
+    }
+}
+
+void Sema::collectProcedures(std::vector<StmtPtr>& stmts) {
+    for (auto& stmt : stmts) {
+        if (stmt->kind != StmtKind::SubDecl && stmt->kind != StmtKind::FunctionDecl) continue;
+        std::string key = canonicalName(stmt->name);
+        if (symbols_.count(key) || procedures_.count(key)) {
+            diags_.error(stmt->loc, "'" + stmt->name + "' is already declared");
+            continue;
+        }
+        ProcedureInfo info;
+        info.isFunction = stmt->kind == StmtKind::FunctionDecl;
+        info.returnType = stmt->declaredType;
+        info.params = stmt->params;
+        procedures_[key] = std::move(info);
+    }
+}
+
+bool Sema::lookupSymbol(const std::string& key, SymbolInfo& out) const {
+    auto lit = locals_.find(key);
+    if (lit != locals_.end()) {
+        out = lit->second;
+        return true;
+    }
+    auto git = symbols_.find(key);
+    if (git != symbols_.end()) {
+        out = git->second;
+        return true;
+    }
+    return false;
+}
+
+void Sema::checkCallArgs(const ProcedureInfo& proc, std::vector<ExprPtr>& args, SourceLoc loc) {
+    if (args.size() != proc.params.size()) {
+        diags_.error(loc, "expected " + std::to_string(proc.params.size()) + " argument(s), got " +
+                               std::to_string(args.size()));
+    }
+    size_t n = std::min(args.size(), proc.params.size());
+    for (size_t i = 0; i < n; ++i) {
+        const Param& param = proc.params[i];
+        Expr& arg = *args[i];
+        TypeKind argType = checkExpr(arg);
+        if (!isAssignCompatible(param.type, argType)) {
+            diags_.error(arg.loc, "argument " + std::to_string(i + 1) +
+                                       " type does not match parameter '" + param.name + "'");
+        }
+        if (param.byRef) {
+            bool isPlainVar = arg.kind == ExprKind::Ident;
+            SymbolInfo info;
+            bool isConstVar = isPlainVar && lookupSymbol(canonicalName(arg.stringValue), info) &&
+                               info.isConst;
+            if (!isPlainVar || isConstVar) {
+                diags_.error(arg.loc, "argument " + std::to_string(i + 1) + " passed to BYREF "
+                                       "parameter '" + param.name + "' must be a plain variable");
+            }
+        }
+    }
+    // Any extra args beyond the parameter count still get type-checked so
+    // their own errors (undeclared names, etc.) aren't silently skipped.
+    for (size_t i = n; i < args.size(); ++i) {
+        checkExpr(*args[i]);
     }
 }
 
@@ -50,8 +114,9 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
     switch (stmt.kind) {
         case StmtKind::Dim: {
             std::string key = canonicalName(stmt.name);
-            if (symbols_.count(key)) {
-                diags_.error(stmt.loc, "variable '" + stmt.name + "' is already declared");
+            auto& scope = insideProcedure_ ? locals_ : symbols_;
+            if (scope.count(key) || procedures_.count(key)) {
+                diags_.error(stmt.loc, "'" + stmt.name + "' is already declared");
                 return;
             }
             if (stmt.isArray) {
@@ -62,12 +127,13 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                     diags_.error(stmt.arrayUpper->loc, "array upper bound must be an integer expression");
                 }
             }
-            symbols_[key] = SymbolInfo{stmt.declaredType, /*isConst=*/false, stmt.isArray};
+            scope[key] = SymbolInfo{stmt.declaredType, /*isConst=*/false, stmt.isArray};
             return;
         }
         case StmtKind::Const: {
             std::string key = canonicalName(stmt.name);
-            if (symbols_.count(key)) {
+            auto& scope = insideProcedure_ ? locals_ : symbols_;
+            if (scope.count(key) || procedures_.count(key)) {
                 diags_.error(stmt.loc, "'" + stmt.name + "' is already declared");
                 return;
             }
@@ -83,10 +149,11 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                              "CONST initializer must be a constant expression (literals and "
                              "other CONST/ENUM names only)");
             }
-            symbols_[key] = SymbolInfo{constType, /*isConst=*/true, false};
+            scope[key] = SymbolInfo{constType, /*isConst=*/true, false};
             return;
         }
         case StmtKind::Enum: {
+            auto& scope = insideProcedure_ ? locals_ : symbols_;
             long long next = 0;
             for (auto& member : stmt.enumMembers) {
                 long long value = next;
@@ -96,10 +163,10 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                 }
                 member.resolvedValue = value;
                 std::string key = canonicalName(member.name);
-                if (symbols_.count(key)) {
+                if (scope.count(key) || procedures_.count(key)) {
                     diags_.error(member.loc, "'" + member.name + "' is already declared");
                 } else {
-                    symbols_[key] = SymbolInfo{TypeKind::Integer, /*isConst=*/true, false};
+                    scope[key] = SymbolInfo{TypeKind::Integer, /*isConst=*/true, false};
                     constIntValues_[key] = value;
                 }
                 next = value + 1;
@@ -107,13 +174,20 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
             return;
         }
         case StmtKind::Assign: {
+            if (stmt.isReturnAssign) {
+                TypeKind exprType = checkExpr(*stmt.expr);
+                if (!isAssignCompatible(currentFunctionReturnType_, exprType)) {
+                    diags_.error(stmt.loc, "return value type does not match FUNCTION '" + stmt.name +
+                                               "'s declared return type");
+                }
+                return;
+            }
             std::string key = canonicalName(stmt.name);
-            auto it = symbols_.find(key);
-            if (it == symbols_.end()) {
+            SymbolInfo info;
+            if (!lookupSymbol(key, info)) {
                 diags_.error(stmt.loc, "variable '" + stmt.name + "' is not declared");
                 return;
             }
-            const SymbolInfo& info = it->second;
             if (info.isConst) {
                 diags_.error(stmt.loc, "cannot assign to constant '" + stmt.name + "'");
                 return;
@@ -175,14 +249,14 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
         }
         case StmtKind::ForNext: {
             std::string key = canonicalName(stmt.name);
-            auto it = symbols_.find(key);
-            if (it == symbols_.end()) {
+            SymbolInfo info;
+            if (!lookupSymbol(key, info)) {
                 diags_.error(stmt.loc, "variable '" + stmt.name + "' is not declared");
-            } else if (it->second.isConst) {
+            } else if (info.isConst) {
                 diags_.error(stmt.loc, "FOR loop variable '" + stmt.name + "' cannot be a constant");
-            } else if (it->second.isArray) {
+            } else if (info.isArray) {
                 diags_.error(stmt.loc, "FOR loop variable '" + stmt.name + "' cannot be an array");
-            } else if (!isNumericType(it->second.type)) {
+            } else if (!isNumericType(info.type)) {
                 diags_.error(stmt.loc, "FOR loop variable '" + stmt.name + "' must be numeric");
             }
             checkCondition(*stmt.expr, "FOR start value");
@@ -236,11 +310,88 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                 }
             }
             if (!found) {
-                const char* kind = stmt.exitKind == LoopKind::For   ? "FOR"
-                                   : stmt.exitKind == LoopKind::Do  ? "DO"
-                                                                    : "WHILE";
+                const char* kind = stmt.exitKind == LoopKind::For        ? "FOR"
+                                   : stmt.exitKind == LoopKind::Do       ? "DO"
+                                   : stmt.exitKind == LoopKind::While    ? "WHILE"
+                                   : stmt.exitKind == LoopKind::Sub      ? "SUB"
+                                                                         : "FUNCTION";
                 diags_.error(stmt.loc,
-                             std::string("EXIT ") + kind + " used outside of a matching loop");
+                             std::string("EXIT ") + kind + " used outside of a matching " + kind);
+            }
+            return;
+        }
+        case StmtKind::SubDecl:
+        case StmtKind::FunctionDecl: {
+            if (!atTopLevel) {
+                diags_.error(stmt.loc,
+                             "SUB/FUNCTION declarations are only supported at the top level of a "
+                             "program");
+                return;
+            }
+            bool isFunction = stmt.kind == StmtKind::FunctionDecl;
+
+            std::unordered_map<std::string, SymbolInfo> savedLocals = std::move(locals_);
+            bool savedInsideProcedure = insideProcedure_;
+            TypeKind savedReturnType = currentFunctionReturnType_;
+
+            locals_.clear();
+            insideProcedure_ = true;
+            currentFunctionReturnType_ = isFunction ? stmt.declaredType : TypeKind::Unknown;
+
+            for (const Param& param : stmt.params) {
+                std::string key = canonicalName(param.name);
+                if (locals_.count(key)) {
+                    diags_.error(param.loc, "duplicate parameter name '" + param.name + "'");
+                    continue;
+                }
+                locals_[key] = SymbolInfo{param.type, /*isConst=*/false, /*isArray=*/false};
+            }
+
+            loopStack_.push_back(isFunction ? LoopKind::Function : LoopKind::Sub);
+            checkBlock(stmt.body, /*atTopLevel=*/false);
+            loopStack_.pop_back();
+
+            locals_ = std::move(savedLocals);
+            insideProcedure_ = savedInsideProcedure;
+            currentFunctionReturnType_ = savedReturnType;
+            return;
+        }
+        case StmtKind::CallStmt: {
+            std::string key = canonicalName(stmt.name);
+            auto procIt = procedures_.find(key);
+            if (procIt == procedures_.end()) {
+                diags_.error(stmt.loc, "'" + stmt.name + "' is not a declared SUB or FUNCTION");
+                for (auto& arg : stmt.args) checkExpr(*arg);
+                return;
+            }
+            checkCallArgs(procIt->second, stmt.args, stmt.loc);
+            return;
+        }
+        case StmtKind::Return: {
+            bool insideSub = false;
+            bool insideFunction = false;
+            for (auto it = loopStack_.rbegin(); it != loopStack_.rend(); ++it) {
+                if (*it == LoopKind::Sub) { insideSub = true; break; }
+                if (*it == LoopKind::Function) { insideFunction = true; break; }
+            }
+            if (!insideSub && !insideFunction) {
+                diags_.error(stmt.loc, "RETURN used outside of a SUB or FUNCTION");
+                if (stmt.expr) checkExpr(*stmt.expr);
+                return;
+            }
+            if (insideFunction) {
+                if (!stmt.expr) {
+                    diags_.error(stmt.loc, "RETURN inside a FUNCTION requires a value");
+                    return;
+                }
+                TypeKind exprType = checkExpr(*stmt.expr);
+                if (!isAssignCompatible(currentFunctionReturnType_, exprType)) {
+                    diags_.error(stmt.expr->loc,
+                                 "RETURN value type does not match the FUNCTION's declared return "
+                                 "type");
+                }
+            } else if (stmt.expr) {
+                diags_.error(stmt.expr->loc, "SUB cannot RETURN a value; use a bare RETURN or EXIT SUB");
             }
             return;
         }
@@ -263,35 +414,54 @@ TypeKind Sema::checkExpr(Expr& expr) {
             return expr.type;
         case ExprKind::Ident: {
             std::string key = canonicalName(expr.stringValue);
-            auto it = symbols_.find(key);
-            if (it == symbols_.end()) {
+            SymbolInfo info;
+            if (!lookupSymbol(key, info)) {
                 diags_.error(expr.loc, "variable '" + expr.stringValue + "' is not declared");
                 expr.type = TypeKind::Unknown;
                 return expr.type;
             }
-            if (it->second.isArray) {
+            if (info.isArray) {
                 diags_.error(expr.loc, "array '" + expr.stringValue + "' must be indexed, e.g. " +
                                            expr.stringValue + "(i)");
             }
-            expr.type = it->second.type;
+            expr.type = info.type;
             return expr.type;
         }
-        case ExprKind::Index: {
+        case ExprKind::Call: {
             std::string key = canonicalName(expr.stringValue);
-            auto it = symbols_.find(key);
-            if (it == symbols_.end()) {
-                diags_.error(expr.loc, "variable '" + expr.stringValue + "' is not declared");
-                checkExpr(*expr.rhs);
-                expr.type = TypeKind::Unknown;
+            SymbolInfo info;
+            bool isVar = lookupSymbol(key, info);
+            if (isVar && info.isArray) {
+                if (expr.args.size() != 1) {
+                    diags_.error(expr.loc,
+                                 "array '" + expr.stringValue + "' takes exactly one index");
+                }
+                for (auto& arg : expr.args) {
+                    if (!isIntegerFamily(checkExpr(*arg))) {
+                        diags_.error(arg->loc, "array index must be an integer expression");
+                    }
+                }
+                expr.type = info.type;
                 return expr.type;
             }
-            if (!it->second.isArray) {
-                diags_.error(expr.loc, "'" + expr.stringValue + "' is not an array");
+            auto procIt = procedures_.find(key);
+            if (procIt != procedures_.end()) {
+                const ProcedureInfo& proc = procIt->second;
+                if (!proc.isFunction) {
+                    diags_.error(expr.loc, "'" + expr.stringValue +
+                                                "' is a SUB and cannot be used in an expression");
+                }
+                checkCallArgs(proc, expr.args, expr.loc);
+                expr.type = proc.returnType;
+                return expr.type;
             }
-            if (!isIntegerFamily(checkExpr(*expr.rhs))) {
-                diags_.error(expr.rhs->loc, "array index must be an integer expression");
+            if (isVar) {
+                diags_.error(expr.loc, "'" + expr.stringValue + "' is not an array or function");
+            } else {
+                diags_.error(expr.loc, "'" + expr.stringValue + "' is not declared");
             }
-            expr.type = it->second.type;
+            for (auto& arg : expr.args) checkExpr(*arg);
+            expr.type = TypeKind::Unknown;
             return expr.type;
         }
         case ExprKind::UnaryNeg: {
@@ -424,11 +594,11 @@ bool Sema::isConstantExpr(const Expr& expr) const {
         case ExprKind::BoolLiteral:
             return true;
         case ExprKind::Ident: {
-            auto it = symbols_.find(canonicalName(expr.stringValue));
-            return it != symbols_.end() && it->second.isConst;
+            SymbolInfo info;
+            return lookupSymbol(canonicalName(expr.stringValue), info) && info.isConst;
         }
-        case ExprKind::Index:
-            return false; // array elements are never a compile-time constant here
+        case ExprKind::Call:
+            return false; // array elements and function calls are never compile-time constants here
         case ExprKind::UnaryNeg:
         case ExprKind::UnaryNot:
             return isConstantExpr(*expr.lhs);

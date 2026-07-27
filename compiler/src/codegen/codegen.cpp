@@ -74,10 +74,20 @@ std::string Codegen::genExpr(const Expr& expr) {
             return std::to_string(expr.intValue);
         case ExprKind::Ident:
             return mangleName(expr.stringValue);
-        case ExprKind::Index: {
-            const std::string& lowerVar = arrayLowerBoundVar_.at(canonicalName(expr.stringValue));
-            return mangleName(expr.stringValue) + "[static_cast<std::size_t>((" +
-                   genExpr(*expr.rhs) + ") - " + lowerVar + ")]";
+        case ExprKind::Call: {
+            std::string key = canonicalName(expr.stringValue);
+            auto arrIt = arrayLowerBoundVar_.find(key);
+            if (arrIt != arrayLowerBoundVar_.end()) {
+                return mangleName(expr.stringValue) + "[static_cast<std::size_t>((" +
+                       genExpr(*expr.args[0]) + ") - " + arrIt->second + ")]";
+            }
+            std::string result = mangleName(expr.stringValue) + "(";
+            for (size_t i = 0; i < expr.args.size(); ++i) {
+                if (i > 0) result += ", ";
+                result += genExpr(*expr.args[i]);
+            }
+            result += ")";
+            return result;
         }
         case ExprKind::UnaryNeg:
             return "(-" + genExpr(*expr.lhs) + ")";
@@ -179,6 +189,10 @@ void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out, int indent) {
             return;
         }
         case StmtKind::Assign: {
+            if (stmt.isReturnAssign) {
+                out << ind(indent) << "eb__ret = " << genExpr(*stmt.expr) << ";\n";
+                return;
+            }
             if (stmt.index) {
                 const std::string& lowerVar = arrayLowerBoundVar_.at(canonicalName(stmt.name));
                 out << ind(indent) << mangleName(stmt.name) << "[static_cast<std::size_t>(("
@@ -308,6 +322,17 @@ void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out, int indent) {
             out << mangleName(stmt.name) << ": ;\n";
             return;
         case StmtKind::ExitLoop: {
+            // EXIT SUB/FUNCTION need no label/goto: a plain C++ `return`
+            // already unwinds out of any number of enclosing loops within
+            // the current function, which is exactly what they mean.
+            if (stmt.exitKind == LoopKind::Sub) {
+                out << ind(indent) << "return;\n";
+                return;
+            }
+            if (stmt.exitKind == LoopKind::Function) {
+                out << ind(indent) << "return eb__ret;\n";
+                return;
+            }
             for (auto it = loopStack_.rbegin(); it != loopStack_.rend(); ++it) {
                 if (it->first == stmt.exitKind) {
                     out << ind(indent) << "goto " << it->second << ";\n";
@@ -317,18 +342,94 @@ void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out, int indent) {
             throw std::runtime_error("codegen: EXIT with no matching enclosing loop (sema should "
                                       "have caught this)");
         }
+        case StmtKind::SubDecl:
+        case StmtKind::FunctionDecl:
+            throw std::runtime_error("codegen: SUB/FUNCTION must be top-level (sema should have "
+                                      "caught this)");
+        case StmtKind::CallStmt: {
+            out << ind(indent) << mangleName(stmt.name) << "(";
+            for (size_t i = 0; i < stmt.args.size(); ++i) {
+                if (i > 0) out << ", ";
+                out << genExpr(*stmt.args[i]);
+            }
+            out << ");\n";
+            return;
+        }
+        case StmtKind::Return:
+            if (stmt.expr) {
+                out << ind(indent) << "return " << genExpr(*stmt.expr) << ";\n";
+            } else {
+                out << ind(indent) << "return;\n";
+            }
+            return;
     }
 }
 
+void Codegen::genProcedure(const Stmt& stmt) {
+    bool isFunction = stmt.kind == StmtKind::FunctionDecl;
+    std::string retType = isFunction ? cppType(stmt.declaredType) : "void";
+    std::string name = mangleName(stmt.name);
+
+    std::string paramList;
+    for (size_t i = 0; i < stmt.params.size(); ++i) {
+        if (i > 0) paramList += ", ";
+        const Param& p = stmt.params[i];
+        paramList += cppType(p.type);
+        paramList += p.byRef ? "& " : " ";
+        paramList += mangleName(p.name);
+    }
+
+    protoOut_ << retType << " " << name << "(" << paramList << ");\n";
+
+    procOut_ << retType << " " << name << "(" << paramList << ") {\n";
+    if (isFunction) {
+        procOut_ << ind(1) << retType << " eb__ret{};\n";
+    }
+    // A local array can shadow a global of the same name; save/restore so
+    // that mapping doesn't leak into code generated after this procedure.
+    auto savedArrayLowerBounds = arrayLowerBoundVar_;
+    genBlock(stmt.body, procOut_, 1);
+    arrayLowerBoundVar_ = savedArrayLowerBounds;
+    if (isFunction) {
+        procOut_ << ind(1) << "return eb__ret;\n";
+    }
+    procOut_ << "}\n\n";
+}
+
 std::string Codegen::generate(const Module& module) {
+    // Top-level DIM/CONST/ENUM become real C++ globals (declared before any
+    // function bodies) so SUB/FUNCTION can see them; SUB/FUNCTION become
+    // separate C++ functions (prototype + body); everything else still runs
+    // in main(), in its original relative order. Sema already enforces
+    // declare-before-use sequentially (including for globals referenced from
+    // a procedure body), so bucketing all globals before all procedures is
+    // always a safe superset of that ordering.
+    std::ostringstream globalsOut;
+    std::ostringstream mainOut;
+
+    for (const auto& stmtPtr : module.stmts) {
+        const Stmt& stmt = *stmtPtr;
+        if (stmt.kind == StmtKind::SubDecl || stmt.kind == StmtKind::FunctionDecl) {
+            genProcedure(stmt);
+        } else if (stmt.kind == StmtKind::Dim || stmt.kind == StmtKind::Const ||
+                   stmt.kind == StmtKind::Enum) {
+            genStmt(stmt, globalsOut, 0);
+        } else {
+            genStmt(stmt, mainOut, 1);
+        }
+    }
+
     std::ostringstream out;
     out << "// Generated by ebc. Do not edit.\n";
     out << "#include \"ebasic/runtime/runtime.hpp\"\n";
     out << "#include <cmath>\n";
     out << "#include <cstdint>\n";
     out << "#include <vector>\n\n";
+    if (!globalsOut.str().empty()) out << globalsOut.str() << "\n";
+    if (!protoOut_.str().empty()) out << protoOut_.str() << "\n";
+    out << procOut_.str();
     out << "int main() {\n";
-    genBlock(module.stmts, out, 1);
+    out << mainOut.str();
     out << "    return 0;\n";
     out << "}\n";
     return out.str();

@@ -40,6 +40,11 @@ private:
     StmtPtr parseGoto();
     StmtPtr parseLabel();
     StmtPtr parseExit();
+    StmtPtr parseSub();
+    StmtPtr parseFunction();
+    StmtPtr parseCallStmt();
+    StmtPtr parseReturn();
+    std::vector<Param> parseParamList();
 
     // Parses statements (skipping blank lines) until the next token is one
     // of `terminators` or end-of-input.
@@ -68,6 +73,10 @@ private:
     std::vector<Token> tokens_;
     size_t pos_ = 0;
     DiagnosticEngine& diags_;
+    // Canonical name of the FUNCTION currently being parsed, or empty. Lets
+    // parseAssign recognize `FuncName = value` as a return-value assignment
+    // rather than a regular variable assignment.
+    std::string currentFunctionName_;
 };
 
 } // namespace ebasic

@@ -199,13 +199,16 @@ StmtPtr Parser::parseAssign() {
     stmt->loc = loc;
     stmt->name = name;
 
-    if (match(TokenKind::LParen)) {
+    bool isReturnAssign =
+        !currentFunctionName_.empty() && canonicalName(name) == currentFunctionName_;
+    if (!isReturnAssign && match(TokenKind::LParen)) {
         stmt->index = parseExpr();
         expect(TokenKind::RParen, "expected ')' after array index");
     }
 
     expect(TokenKind::Equals, "expected '=' in assignment");
     stmt->expr = parseExpr();
+    stmt->isReturnAssign = isReturnAssign;
 
     expectStmtEnd();
     return stmt;
@@ -234,6 +237,10 @@ StmtPtr Parser::parseStatement() {
     if (check(TokenKind::KwWhile)) return parseWhile();
     if (check(TokenKind::KwGoto)) return parseGoto();
     if (check(TokenKind::KwExit)) return parseExit();
+    if (check(TokenKind::KwSub)) return parseSub();
+    if (check(TokenKind::KwFunction)) return parseFunction();
+    if (check(TokenKind::KwCall)) return parseCallStmt();
+    if (check(TokenKind::KwReturn)) return parseReturn();
     if (check(TokenKind::Identifier) && peek(1).kind == TokenKind::Newline &&
         peek(1).text == ":") {
         return parseLabel();
@@ -432,7 +439,124 @@ StmtPtr Parser::parseExit() {
     if (match(TokenKind::KwFor)) stmt->exitKind = LoopKind::For;
     else if (match(TokenKind::KwDo)) stmt->exitKind = LoopKind::Do;
     else if (match(TokenKind::KwWhile)) stmt->exitKind = LoopKind::While;
-    else diags_.error(peek().loc, "expected FOR, DO, or WHILE after EXIT");
+    else if (match(TokenKind::KwSub)) stmt->exitKind = LoopKind::Sub;
+    else if (match(TokenKind::KwFunction)) stmt->exitKind = LoopKind::Function;
+    else diags_.error(peek().loc, "expected FOR, DO, WHILE, SUB, or FUNCTION after EXIT");
+
+    expectStmtEnd();
+    return stmt;
+}
+
+std::vector<Param> Parser::parseParamList() {
+    std::vector<Param> params;
+    if (!match(TokenKind::LParen)) return params;
+    if (!check(TokenKind::RParen)) {
+        for (;;) {
+            SourceLoc loc = peek().loc;
+            bool explicitByRef = false;
+            bool explicitByVal = false;
+            if (match(TokenKind::KwByRef)) explicitByRef = true;
+            else if (match(TokenKind::KwByVal)) explicitByVal = true;
+
+            const Token& nameTok = expect(TokenKind::Identifier, "expected a parameter name");
+            expect(TokenKind::KwAs, "expected AS after parameter name");
+            TypeKind type = parseTypeKeyword();
+
+            bool byRef = explicitByRef || (!explicitByVal && type == TypeKind::StringT);
+
+            Param p;
+            p.name = nameTok.text;
+            p.type = type;
+            p.byRef = byRef;
+            p.loc = loc;
+            params.push_back(std::move(p));
+
+            if (!match(TokenKind::Comma)) break;
+        }
+    }
+    expect(TokenKind::RParen, "expected ')' after parameter list");
+    return params;
+}
+
+StmtPtr Parser::parseSub() {
+    SourceLoc loc = peek().loc;
+    advance(); // SUB
+    const Token& nameTok = expect(TokenKind::Identifier, "expected a name after SUB");
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->kind = StmtKind::SubDecl;
+    stmt->loc = loc;
+    stmt->name = nameTok.text;
+    stmt->params = parseParamList();
+    expectStmtEnd();
+
+    stmt->body = parseBlockUntil({TokenKind::KwEnd});
+    expect(TokenKind::KwEnd, "expected END SUB");
+    expect(TokenKind::KwSub, "expected END SUB");
+    expectStmtEnd();
+    return stmt;
+}
+
+StmtPtr Parser::parseFunction() {
+    SourceLoc loc = peek().loc;
+    advance(); // FUNCTION
+    const Token& nameTok = expect(TokenKind::Identifier, "expected a name after FUNCTION");
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->kind = StmtKind::FunctionDecl;
+    stmt->loc = loc;
+    stmt->name = nameTok.text;
+    stmt->params = parseParamList();
+    expect(TokenKind::KwAs, "expected AS <return type> after FUNCTION parameter list");
+    stmt->declaredType = parseTypeKeyword();
+    expectStmtEnd();
+
+    std::string outerFunction = currentFunctionName_;
+    currentFunctionName_ = canonicalName(stmt->name);
+    stmt->body = parseBlockUntil({TokenKind::KwEnd});
+    currentFunctionName_ = outerFunction;
+
+    expect(TokenKind::KwEnd, "expected END FUNCTION");
+    expect(TokenKind::KwFunction, "expected END FUNCTION");
+    expectStmtEnd();
+    return stmt;
+}
+
+StmtPtr Parser::parseCallStmt() {
+    SourceLoc loc = peek().loc;
+    advance(); // CALL
+    const Token& nameTok = expect(TokenKind::Identifier, "expected a procedure name after CALL");
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->kind = StmtKind::CallStmt;
+    stmt->loc = loc;
+    stmt->name = nameTok.text;
+
+    if (match(TokenKind::LParen)) {
+        if (!check(TokenKind::RParen)) {
+            stmt->args.push_back(parseExpr());
+            while (match(TokenKind::Comma)) {
+                stmt->args.push_back(parseExpr());
+            }
+        }
+        expect(TokenKind::RParen, "expected ')' after call arguments");
+    }
+
+    expectStmtEnd();
+    return stmt;
+}
+
+StmtPtr Parser::parseReturn() {
+    SourceLoc loc = peek().loc;
+    advance(); // RETURN
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->kind = StmtKind::Return;
+    stmt->loc = loc;
+
+    if (!check(TokenKind::Newline) && !check(TokenKind::End)) {
+        stmt->expr = parseExpr();
+    }
 
     expectStmtEnd();
     return stmt;
@@ -644,13 +768,17 @@ ExprPtr Parser::parsePrimary() {
     if (tok.kind == TokenKind::Identifier) {
         advance();
         if (match(TokenKind::LParen)) {
-            ExprPtr idx = parseExpr();
-            expect(TokenKind::RParen, "expected ')' after array index");
             auto expr = std::make_unique<Expr>();
-            expr->kind = ExprKind::Index;
+            expr->kind = ExprKind::Call;
             expr->loc = tok.loc;
             expr->stringValue = tok.text;
-            expr->rhs = std::move(idx);
+            if (!check(TokenKind::RParen)) {
+                expr->args.push_back(parseExpr());
+                while (match(TokenKind::Comma)) {
+                    expr->args.push_back(parseExpr());
+                }
+            }
+            expect(TokenKind::RParen, "expected ')'");
             return expr;
         }
         auto expr = std::make_unique<Expr>();

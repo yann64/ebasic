@@ -138,7 +138,10 @@ Token Lexer::lexIdentifierOrKeyword() {
         {"WHILE", TokenKind::KwWhile},     {"WEND", TokenKind::KwWend},
         {"UNTIL", TokenKind::KwUntil},     {"GOTO", TokenKind::KwGoto},
         {"EXIT", TokenKind::KwExit},       {"CONST", TokenKind::KwConst},
-        {"ENUM", TokenKind::KwEnum},
+        {"ENUM", TokenKind::KwEnum},       {"SUB", TokenKind::KwSub},
+        {"FUNCTION", TokenKind::KwFunction}, {"BYVAL", TokenKind::KwByVal},
+        {"BYREF", TokenKind::KwByRef},     {"RETURN", TokenKind::KwReturn},
+        {"CALL", TokenKind::KwCall},
     };
 
     auto it = keywords.find(upper);

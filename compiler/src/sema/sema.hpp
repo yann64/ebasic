@@ -18,6 +18,15 @@ struct SymbolInfo {
     bool isArray = false;
 };
 
+// A SUB/FUNCTION's signature, registered up front (before any body is
+// checked) so calls - including recursive and mutually-recursive ones -
+// resolve regardless of source order.
+struct ProcedureInfo {
+    bool isFunction = false;
+    TypeKind returnType = TypeKind::Unknown; // unused for SUB
+    std::vector<Param> params;
+};
+
 class Sema {
 public:
     explicit Sema(DiagnosticEngine& diags) : diags_(diags) {}
@@ -26,10 +35,21 @@ public:
 
 private:
     void collectLabels(std::vector<StmtPtr>& stmts);
+    void collectProcedures(std::vector<StmtPtr>& stmts);
     void checkBlock(std::vector<StmtPtr>& stmts, bool atTopLevel);
     void checkStmt(Stmt& stmt, bool atTopLevel);
     void checkCondition(Expr& expr, const char* what);
     TypeKind checkExpr(Expr& expr);
+
+    // Looks up `key` in locals_ first, then symbols_, copying the result out
+    // (SymbolInfo is small; this sidesteps any pointer-into-map lifetime
+    // concerns across subsequent inserts). Returns false if not found.
+    bool lookupSymbol(const std::string& key, SymbolInfo& out) const;
+
+    // Shared by both the Call expression (array read / function call) and
+    // CallStmt (procedure call as a statement): validates argument count and
+    // per-argument type/BYREF-lvalue compatibility against `proc`.
+    void checkCallArgs(const ProcedureInfo& proc, std::vector<ExprPtr>& args, SourceLoc loc);
 
     // Structural constant-expression check for CONST initializers: literals,
     // and Idents that refer to an already-declared CONST/ENUM member,
@@ -42,7 +62,11 @@ private:
     // returns false on failure.
     bool evalConstInt(const Expr& expr, long long& outValue);
 
-    std::unordered_map<std::string, SymbolInfo> symbols_;
+    std::unordered_map<std::string, SymbolInfo> symbols_; // module-level (global) names
+    std::unordered_map<std::string, SymbolInfo> locals_;   // current SUB/FUNCTION's params/DIMs
+    bool insideProcedure_ = false;
+    TypeKind currentFunctionReturnType_ = TypeKind::Unknown; // valid while insideProcedure_ and it's a FUNCTION
+    std::unordered_map<std::string, ProcedureInfo> procedures_;
     std::unordered_map<std::string, long long> constIntValues_; // CONST/ENUM int value, for evalConstInt
     std::unordered_set<std::string> labels_;
     std::vector<LoopKind> loopStack_;
