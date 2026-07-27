@@ -137,7 +137,8 @@ Token Lexer::lexIdentifierOrKeyword() {
         {"DO", TokenKind::KwDo},           {"LOOP", TokenKind::KwLoop},
         {"WHILE", TokenKind::KwWhile},     {"WEND", TokenKind::KwWend},
         {"UNTIL", TokenKind::KwUntil},     {"GOTO", TokenKind::KwGoto},
-        {"EXIT", TokenKind::KwExit},
+        {"EXIT", TokenKind::KwExit},       {"CONST", TokenKind::KwConst},
+        {"ENUM", TokenKind::KwEnum},
     };
 
     auto it = keywords.find(upper);

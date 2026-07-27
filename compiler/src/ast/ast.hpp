@@ -2,11 +2,20 @@
 
 #include "diagnostics/diagnostics.hpp"
 
+#include <cctype>
 #include <memory>
 #include <string>
 #include <vector>
 
 namespace ebasic {
+
+// BASIC identifiers are case-insensitive; this is the canonical form used to
+// key the symbol table.
+inline std::string canonicalName(const std::string& name) {
+    std::string r = name;
+    for (auto& c : r) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return r;
+}
 
 enum class TypeKind {
     Unknown,
@@ -31,6 +40,7 @@ enum class ExprKind {
     StringLiteral,
     BoolLiteral,
     Ident,
+    Index, // array element read: stringValue = array name, rhs = index expr
     Binary,
     UnaryNeg,
     UnaryNot,
@@ -167,6 +177,8 @@ using ExprPtr = std::unique_ptr<Expr>;
 
 enum class StmtKind {
     Dim,
+    Const,
+    Enum,
     Assign,
     Print,
     If,
@@ -208,14 +220,32 @@ struct CaseArm {
     std::vector<StmtPtr> body;
 };
 
+// One member of an ENUM: an optional explicit value (nullptr => previous + 1,
+// or 0 for the first member). `resolvedValue` is filled in by Sema (which
+// must evaluate it to support auto-increment) so Codegen doesn't need its
+// own constant evaluator.
+struct EnumMember {
+    std::string name;
+    ExprPtr value;
+    SourceLoc loc;
+    long long resolvedValue = 0;
+};
+
 struct Stmt {
     StmtKind kind;
     SourceLoc loc;
 
-    std::string name;                          // Dim, Assign, ForNext (loop var), Goto/Label
-    TypeKind declaredType = TypeKind::Unknown;  // Dim
-    ExprPtr expr;                               // Assign value; If/SelectCase/WhileWend condition/selector; ForNext start
+    std::string name;                          // Dim, Const, Assign, ForNext (loop var), Goto/Label
+    TypeKind declaredType = TypeKind::Unknown;  // Dim (required); Const (optional - inferred if Unknown)
+    ExprPtr expr;                               // Assign/Const value; If/SelectCase/WhileWend condition/selector; ForNext start
     std::vector<ExprPtr> args;                  // Print
+
+    bool isArray = false;         // Dim
+    ExprPtr arrayLower;           // Dim: array lower bound (nullptr => 0)
+    ExprPtr arrayUpper;           // Dim: array upper bound (inclusive, FB-style)
+    ExprPtr index;                // Assign: non-null => array-element assignment to name(index)
+
+    std::vector<EnumMember> enumMembers; // Enum
 
     // If: one condition per IF/ELSEIF branch, and one body per branch in
     // `blocks`. If hasElse, `blocks` has one extra trailing entry for ELSE.

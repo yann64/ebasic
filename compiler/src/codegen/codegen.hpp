@@ -4,6 +4,7 @@
 
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -33,6 +34,11 @@ private:
     // right after the loop so EXIT FOR/DO/WHILE can `goto` out of however
     // many nested loops separate it from the loop kind it targets.
     std::vector<std::pair<LoopKind, std::string>> loopStack_;
+    // Canonical array name -> the mangled name of the C++ variable holding
+    // its lower bound, cached once at DIM time so later Index/element-assign
+    // codegen can subtract it (arrays are runtime-sized std::vectors, so
+    // their bound must be captured once at declaration, not re-evaluated).
+    std::unordered_map<std::string, std::string> arrayLowerBoundVar_;
 };
 
 } // namespace ebasic

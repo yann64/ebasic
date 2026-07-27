@@ -73,6 +73,8 @@ enum class TokenKind {
     KwUntil,
     KwGoto,
     KwExit,
+    KwConst,
+    KwEnum,
 };
 
 struct Token {

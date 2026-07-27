@@ -95,15 +95,78 @@ StmtPtr Parser::parseDim() {
     advance(); // DIM
     const Token& nameTok = expect(TokenKind::Identifier, "expected variable name after DIM");
     std::string name = nameTok.text;
-    expect(TokenKind::KwAs, "expected AS after variable name");
-    TypeKind type = parseTypeKeyword();
 
     auto stmt = std::make_unique<Stmt>();
     stmt->kind = StmtKind::Dim;
     stmt->loc = loc;
     stmt->name = name;
-    stmt->declaredType = type;
 
+    if (match(TokenKind::LParen)) {
+        stmt->isArray = true;
+        ExprPtr first = parseExpr();
+        if (match(TokenKind::KwTo)) {
+            stmt->arrayLower = std::move(first);
+            stmt->arrayUpper = parseExpr();
+        } else {
+            stmt->arrayUpper = std::move(first); // lower bound defaults to 0
+        }
+        expect(TokenKind::RParen, "expected ')' after array bounds");
+    }
+
+    expect(TokenKind::KwAs, "expected AS after variable name");
+    stmt->declaredType = parseTypeKeyword();
+
+    expectStmtEnd();
+    return stmt;
+}
+
+StmtPtr Parser::parseConst() {
+    SourceLoc loc = peek().loc;
+    advance(); // CONST
+    const Token& nameTok = expect(TokenKind::Identifier, "expected constant name after CONST");
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->kind = StmtKind::Const;
+    stmt->loc = loc;
+    stmt->name = nameTok.text;
+
+    if (match(TokenKind::KwAs)) {
+        stmt->declaredType = parseTypeKeyword();
+    }
+    expect(TokenKind::Equals, "expected '=' in CONST declaration");
+    stmt->expr = parseExpr();
+
+    expectStmtEnd();
+    return stmt;
+}
+
+StmtPtr Parser::parseEnum() {
+    SourceLoc loc = peek().loc;
+    advance(); // ENUM
+    const Token& nameTok = expect(TokenKind::Identifier, "expected enum name after ENUM");
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->kind = StmtKind::Enum;
+    stmt->loc = loc;
+    stmt->name = nameTok.text;
+    expectStmtEnd();
+    skipNewlines();
+
+    while (!check(TokenKind::KwEnd) && !check(TokenKind::End)) {
+        const Token& memberTok = expect(TokenKind::Identifier, "expected an enumerator name");
+        EnumMember member;
+        member.name = memberTok.text;
+        member.loc = memberTok.loc;
+        if (match(TokenKind::Equals)) {
+            member.value = parseExpr();
+        }
+        expectStmtEnd();
+        stmt->enumMembers.push_back(std::move(member));
+        skipNewlines();
+    }
+
+    expect(TokenKind::KwEnd, "expected END ENUM");
+    expect(TokenKind::KwEnum, "expected END ENUM");
     expectStmtEnd();
     return stmt;
 }
@@ -130,14 +193,19 @@ StmtPtr Parser::parsePrint() {
 StmtPtr Parser::parseAssign() {
     SourceLoc loc = peek().loc;
     std::string name = advance().text; // identifier
-    expect(TokenKind::Equals, "expected '=' in assignment");
-    ExprPtr expr = parseExpr();
 
     auto stmt = std::make_unique<Stmt>();
     stmt->kind = StmtKind::Assign;
     stmt->loc = loc;
     stmt->name = name;
-    stmt->expr = std::move(expr);
+
+    if (match(TokenKind::LParen)) {
+        stmt->index = parseExpr();
+        expect(TokenKind::RParen, "expected ')' after array index");
+    }
+
+    expect(TokenKind::Equals, "expected '=' in assignment");
+    stmt->expr = parseExpr();
 
     expectStmtEnd();
     return stmt;
@@ -156,6 +224,8 @@ std::vector<StmtPtr> Parser::parseBlockUntil(std::initializer_list<TokenKind> te
 
 StmtPtr Parser::parseStatement() {
     if (check(TokenKind::KwDim)) return parseDim();
+    if (check(TokenKind::KwConst)) return parseConst();
+    if (check(TokenKind::KwEnum)) return parseEnum();
     if (check(TokenKind::KwPrint)) return parsePrint();
     if (check(TokenKind::KwIf)) return parseIf();
     if (check(TokenKind::KwSelect)) return parseSelectCase();
@@ -573,6 +643,16 @@ ExprPtr Parser::parsePrimary() {
     }
     if (tok.kind == TokenKind::Identifier) {
         advance();
+        if (match(TokenKind::LParen)) {
+            ExprPtr idx = parseExpr();
+            expect(TokenKind::RParen, "expected ')' after array index");
+            auto expr = std::make_unique<Expr>();
+            expr->kind = ExprKind::Index;
+            expr->loc = tok.loc;
+            expr->stringValue = tok.text;
+            expr->rhs = std::move(idx);
+            return expr;
+        }
         auto expr = std::make_unique<Expr>();
         expr->kind = ExprKind::Ident;
         expr->loc = tok.loc;

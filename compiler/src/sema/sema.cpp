@@ -4,15 +4,17 @@
 
 namespace ebasic {
 
-std::string Sema::canonicalName(const std::string& name) {
-    std::string r = name;
-    for (auto& c : r) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    return r;
-}
-
 namespace {
 bool isCaseCompatible(TypeKind a, TypeKind b) {
     return (isNumericType(a) && isNumericType(b)) || (a == TypeKind::StringT && b == TypeKind::StringT);
+}
+
+// Checks a value's type against a target variable/const type using the same
+// string-vs-numeric compatibility rule used throughout (no narrower checks).
+bool isAssignCompatible(TypeKind targetType, TypeKind valueType) {
+    bool targetIsString = targetType == TypeKind::StringT;
+    bool valueIsString = valueType == TypeKind::StringT;
+    return targetIsString == valueIsString;
 }
 } // namespace
 
@@ -52,7 +54,56 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                 diags_.error(stmt.loc, "variable '" + stmt.name + "' is already declared");
                 return;
             }
-            symbols_[key] = stmt.declaredType;
+            if (stmt.isArray) {
+                if (stmt.arrayLower && !isIntegerFamily(checkExpr(*stmt.arrayLower))) {
+                    diags_.error(stmt.arrayLower->loc, "array lower bound must be an integer expression");
+                }
+                if (!isIntegerFamily(checkExpr(*stmt.arrayUpper))) {
+                    diags_.error(stmt.arrayUpper->loc, "array upper bound must be an integer expression");
+                }
+            }
+            symbols_[key] = SymbolInfo{stmt.declaredType, /*isConst=*/false, stmt.isArray};
+            return;
+        }
+        case StmtKind::Const: {
+            std::string key = canonicalName(stmt.name);
+            if (symbols_.count(key)) {
+                diags_.error(stmt.loc, "'" + stmt.name + "' is already declared");
+                return;
+            }
+            TypeKind exprType = checkExpr(*stmt.expr);
+            TypeKind constType = (stmt.declaredType != TypeKind::Unknown) ? stmt.declaredType : exprType;
+            stmt.declaredType = constType; // resolve for codegen, even when inferred
+            if (!isAssignCompatible(constType, exprType)) {
+                diags_.error(stmt.loc, "CONST '" + stmt.name + "' initializer type does not match its "
+                                       "declared type");
+            }
+            if (!isConstantExpr(*stmt.expr)) {
+                diags_.error(stmt.expr->loc,
+                             "CONST initializer must be a constant expression (literals and "
+                             "other CONST/ENUM names only)");
+            }
+            symbols_[key] = SymbolInfo{constType, /*isConst=*/true, false};
+            return;
+        }
+        case StmtKind::Enum: {
+            long long next = 0;
+            for (auto& member : stmt.enumMembers) {
+                long long value = next;
+                if (member.value) {
+                    long long v = 0;
+                    if (evalConstInt(*member.value, v)) value = v;
+                }
+                member.resolvedValue = value;
+                std::string key = canonicalName(member.name);
+                if (symbols_.count(key)) {
+                    diags_.error(member.loc, "'" + member.name + "' is already declared");
+                } else {
+                    symbols_[key] = SymbolInfo{TypeKind::Integer, /*isConst=*/true, false};
+                    constIntValues_[key] = value;
+                }
+                next = value + 1;
+            }
             return;
         }
         case StmtKind::Assign: {
@@ -62,8 +113,24 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                 diags_.error(stmt.loc, "variable '" + stmt.name + "' is not declared");
                 return;
             }
+            const SymbolInfo& info = it->second;
+            if (info.isConst) {
+                diags_.error(stmt.loc, "cannot assign to constant '" + stmt.name + "'");
+                return;
+            }
+            if (stmt.index) {
+                if (!info.isArray) {
+                    diags_.error(stmt.loc, "'" + stmt.name + "' is not an array");
+                }
+                if (!isIntegerFamily(checkExpr(*stmt.index))) {
+                    diags_.error(stmt.index->loc, "array index must be an integer expression");
+                }
+            } else if (info.isArray) {
+                diags_.error(stmt.loc, "array '" + stmt.name + "' must be indexed, e.g. " + stmt.name +
+                                           "(i) = ...");
+            }
             TypeKind exprType = checkExpr(*stmt.expr);
-            TypeKind varType = it->second;
+            TypeKind varType = info.type;
             if (varType == TypeKind::StringT && exprType != TypeKind::StringT) {
                 diags_.error(stmt.loc,
                              "cannot assign a non-string value to string variable '" + stmt.name + "'");
@@ -111,7 +178,11 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
             auto it = symbols_.find(key);
             if (it == symbols_.end()) {
                 diags_.error(stmt.loc, "variable '" + stmt.name + "' is not declared");
-            } else if (!isNumericType(it->second)) {
+            } else if (it->second.isConst) {
+                diags_.error(stmt.loc, "FOR loop variable '" + stmt.name + "' cannot be a constant");
+            } else if (it->second.isArray) {
+                diags_.error(stmt.loc, "FOR loop variable '" + stmt.name + "' cannot be an array");
+            } else if (!isNumericType(it->second.type)) {
                 diags_.error(stmt.loc, "FOR loop variable '" + stmt.name + "' must be numeric");
             }
             checkCondition(*stmt.expr, "FOR start value");
@@ -198,7 +269,29 @@ TypeKind Sema::checkExpr(Expr& expr) {
                 expr.type = TypeKind::Unknown;
                 return expr.type;
             }
-            expr.type = it->second;
+            if (it->second.isArray) {
+                diags_.error(expr.loc, "array '" + expr.stringValue + "' must be indexed, e.g. " +
+                                           expr.stringValue + "(i)");
+            }
+            expr.type = it->second.type;
+            return expr.type;
+        }
+        case ExprKind::Index: {
+            std::string key = canonicalName(expr.stringValue);
+            auto it = symbols_.find(key);
+            if (it == symbols_.end()) {
+                diags_.error(expr.loc, "variable '" + expr.stringValue + "' is not declared");
+                checkExpr(*expr.rhs);
+                expr.type = TypeKind::Unknown;
+                return expr.type;
+            }
+            if (!it->second.isArray) {
+                diags_.error(expr.loc, "'" + expr.stringValue + "' is not an array");
+            }
+            if (!isIntegerFamily(checkExpr(*expr.rhs))) {
+                diags_.error(expr.rhs->loc, "array index must be an integer expression");
+            }
+            expr.type = it->second.type;
             return expr.type;
         }
         case ExprKind::UnaryNeg: {
@@ -321,6 +414,94 @@ TypeKind Sema::checkExpr(Expr& expr) {
     }
     expr.type = TypeKind::Unknown;
     return expr.type;
+}
+
+bool Sema::isConstantExpr(const Expr& expr) const {
+    switch (expr.kind) {
+        case ExprKind::IntLiteral:
+        case ExprKind::DoubleLiteral:
+        case ExprKind::StringLiteral:
+        case ExprKind::BoolLiteral:
+            return true;
+        case ExprKind::Ident: {
+            auto it = symbols_.find(canonicalName(expr.stringValue));
+            return it != symbols_.end() && it->second.isConst;
+        }
+        case ExprKind::Index:
+            return false; // array elements are never a compile-time constant here
+        case ExprKind::UnaryNeg:
+        case ExprKind::UnaryNot:
+            return isConstantExpr(*expr.lhs);
+        case ExprKind::Binary:
+            return isConstantExpr(*expr.lhs) && isConstantExpr(*expr.rhs);
+    }
+    return false;
+}
+
+bool Sema::evalConstInt(const Expr& expr, long long& outValue) {
+    switch (expr.kind) {
+        case ExprKind::IntLiteral:
+        case ExprKind::BoolLiteral:
+            outValue = expr.intValue;
+            return true;
+        case ExprKind::Ident: {
+            auto it = constIntValues_.find(canonicalName(expr.stringValue));
+            if (it == constIntValues_.end()) {
+                diags_.error(expr.loc,
+                             "'" + expr.stringValue + "' is not a constant integer expression");
+                return false;
+            }
+            outValue = it->second;
+            return true;
+        }
+        case ExprKind::UnaryNeg: {
+            long long v = 0;
+            if (!evalConstInt(*expr.lhs, v)) return false;
+            outValue = -v;
+            return true;
+        }
+        case ExprKind::UnaryNot: {
+            long long v = 0;
+            if (!evalConstInt(*expr.lhs, v)) return false;
+            outValue = ~v;
+            return true;
+        }
+        case ExprKind::Binary: {
+            long long l = 0, r = 0;
+            if (!evalConstInt(*expr.lhs, l) || !evalConstInt(*expr.rhs, r)) return false;
+            switch (expr.binOp) {
+                case BinOp::Add: outValue = l + r; return true;
+                case BinOp::Sub: outValue = l - r; return true;
+                case BinOp::Mul: outValue = l * r; return true;
+                case BinOp::IDiv:
+                case BinOp::Div:
+                    if (r == 0) {
+                        diags_.error(expr.loc, "division by zero in constant expression");
+                        return false;
+                    }
+                    outValue = l / r;
+                    return true;
+                case BinOp::Mod:
+                    if (r == 0) {
+                        diags_.error(expr.loc, "division by zero in constant expression");
+                        return false;
+                    }
+                    outValue = l % r;
+                    return true;
+                case BinOp::Shl: outValue = l << r; return true;
+                case BinOp::Shr: outValue = l >> r; return true;
+                case BinOp::And: outValue = l & r; return true;
+                case BinOp::Or: outValue = l | r; return true;
+                case BinOp::Xor: outValue = l ^ r; return true;
+                default:
+                    diags_.error(expr.loc, "expression is not a valid constant integer expression");
+                    return false;
+            }
+        }
+        default:
+            diags_.error(expr.loc, "expression is not a valid constant integer expression");
+            return false;
+    }
 }
 
 } // namespace ebasic

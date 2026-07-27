@@ -3,6 +3,7 @@
 #include "driver/process.hpp"
 #include "lexer/lexer.hpp"
 #include "parser/parser.hpp"
+#include "preprocessor/preprocessor.hpp"
 #include "sema/sema.hpp"
 
 #include <cstdlib>
@@ -82,9 +83,15 @@ int main(int argc, char** argv) {
     }
     std::ostringstream buf;
     buf << in.rdbuf();
-    std::string source = buf.str();
+    std::string rawSource = buf.str();
 
     ebasic::DiagnosticEngine diags;
+
+    std::string source = ebasic::preprocess(rawSource, diags);
+    if (diags.hasErrors()) {
+        diags.printAll(std::cerr, opts.inputPath);
+        return 1;
+    }
 
     ebasic::Lexer lexer(source, diags);
     auto tokens = lexer.tokenize();

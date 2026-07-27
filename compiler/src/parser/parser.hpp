@@ -28,6 +28,8 @@ private:
 
     StmtPtr parseStatement();
     StmtPtr parseDim();
+    StmtPtr parseConst();
+    StmtPtr parseEnum();
     StmtPtr parsePrint();
     StmtPtr parseAssign();
     StmtPtr parseIf();

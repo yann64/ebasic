@@ -3,6 +3,7 @@ add_executable(ebc
     src/driver/process.cpp
     src/diagnostics/diagnostics.cpp
     src/lexer/lexer.cpp
+    src/preprocessor/preprocessor.cpp
     src/parser/parser.cpp
     src/sema/sema.cpp
     src/codegen/codegen.cpp
