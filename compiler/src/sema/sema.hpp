@@ -31,10 +31,23 @@ struct ProcedureInfo {
     std::vector<Param> params;
 };
 
-// A declared TYPE's fields, registered up front (collectTypes) so a field
-// can reference another TYPE regardless of declaration order.
+// A declared TYPE's fields and member procedures, registered up front
+// (collectTypes) so a field/method can be referenced regardless of
+// declaration order. Methods follow FreeBASIC's own "declared within,
+// defined outside" split: `methods` holds the *declared* signatures (from
+// `Declare Sub/Function/Constructor/Destructor` inside the TYPE body);
+// `definedMethods`/`ctorDefined`/`dtorDefined` are filled in once the
+// matching out-of-line definitions (top-level Stmts with `ownerType` set)
+// are found, so a declared-but-never-defined method can be reported.
+// UNION never populates any of this (Sema-rejected).
 struct RecordInfo {
     std::vector<FieldDecl> fields;
+    std::unordered_map<std::string, ProcedureInfo> methods; // canonical method name -> signature
+    std::unordered_set<std::string> definedMethods;
+    bool hasCtor = false; // a Declare Constructor() was found
+    bool hasDtor = false; // a Declare Destructor() was found
+    bool ctorDefined = false;
+    bool dtorDefined = false;
 };
 
 class Sema {
@@ -109,6 +122,12 @@ private:
     // Canonical name of the NAMESPACE currently being checked, or empty.
     // Only one level deep - nested NAMESPACEs aren't supported yet.
     std::string currentNamespacePrefix_;
+    // Canonical name of the TYPE whose method/constructor/destructor body
+    // is currently being checked, or empty. Only one level deep - methods
+    // don't nest, mirroring insideProcedure_'s own simplification. Lets
+    // `This` resolve its type and bare identifiers fall back to a field
+    // lookup when no local/parameter/global matches.
+    std::string currentClassName_;
     std::unordered_map<std::string, long long> constIntValues_; // CONST/ENUM int value, for evalConstInt
     std::unordered_set<std::string> labels_;
     std::unordered_set<std::string> gosubTargets_; // labels referenced by at least one GOSUB

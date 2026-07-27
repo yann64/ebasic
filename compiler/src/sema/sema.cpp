@@ -138,6 +138,49 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
             }
             info.fields.push_back(field);
         }
+
+        // Method/constructor/destructor prototypes (Declare ... inside the
+        // TYPE body) - UNION cannot have any (FreeBASIC unions may not
+        // contain members with constructors/destructors).
+        if (stmt->kind == StmtKind::UnionDecl && !stmt->methods.empty()) {
+            diags_.error(stmt->methods.front()->loc,
+                         "UNION cannot have member procedures (constructors, destructors, or "
+                         "methods)");
+        } else {
+            for (const StmtPtr& method : stmt->methods) {
+                if (method->isCtor) {
+                    if (info.hasCtor) {
+                        diags_.error(method->loc, "TYPE '" + stmt->name + "' already has a "
+                                                   "declared constructor (only one is supported)");
+                    }
+                    info.hasCtor = true;
+                    continue;
+                }
+                if (method->isDtor) {
+                    if (info.hasDtor) {
+                        diags_.error(method->loc, "TYPE '" + stmt->name + "' already has a "
+                                                   "declared destructor (only one is allowed)");
+                    }
+                    info.hasDtor = true;
+                    continue;
+                }
+                std::string methodKey = canonicalName(method->name);
+                bool collides = info.methods.count(methodKey);
+                for (const FieldDecl& field : info.fields) {
+                    if (canonicalName(field.name) == methodKey) collides = true;
+                }
+                if (collides) {
+                    diags_.error(method->loc, "'" + method->name + "' is already declared as a "
+                                               "member of TYPE '" + stmt->name + "'");
+                    continue;
+                }
+                ProcedureInfo procInfo;
+                procInfo.isFunction = method->kind == StmtKind::FunctionDecl;
+                procInfo.returnType = method->declaredType;
+                procInfo.params = method->params;
+                info.methods[methodKey] = std::move(procInfo);
+            }
+        }
         it->second = std::move(info);
     }
     // Pass 3: UNION-only "no STRING, directly or nested" restriction. Run
@@ -153,6 +196,87 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
                 diags_.error(field.loc, "UNION member '" + field.name + "' cannot be or contain a "
                                          "STRING (FreeBASIC unions may not contain variable-length "
                                          "strings)");
+            }
+        }
+    }
+    // Pass 4: match each out-of-line method/constructor/destructor
+    // DEFINITION (a top-level SubDecl/FunctionDecl with `ownerType` set) to
+    // its declared prototype, marking it defined. A definition naming an
+    // unknown TYPE, an undeclared method, or a duplicate definition, is an
+    // error here - matches real FreeBASIC's "declared within, defined
+    // outside" split, just checked eagerly instead of surfacing as a
+    // backend link error.
+    for (auto& stmt : stmts) {
+        if (stmt->ownerType.empty()) continue;
+        std::string typeKey = canonicalName(stmt->ownerType);
+        auto it = structs_.find(typeKey);
+        if (it == structs_.end()) {
+            diags_.error(stmt->loc, "'" + stmt->ownerType + "' is not a declared TYPE");
+            continue;
+        }
+        RecordInfo& info = it->second;
+        if (stmt->isCtor) {
+            if (!info.hasCtor) {
+                diags_.error(stmt->loc, "TYPE '" + stmt->ownerType + "' has no declared constructor "
+                                         "(add 'Declare Constructor()' inside the TYPE body)");
+            } else if (info.ctorDefined) {
+                diags_.error(stmt->loc,
+                             "constructor for TYPE '" + stmt->ownerType + "' is already defined");
+            } else {
+                info.ctorDefined = true;
+            }
+            continue;
+        }
+        if (stmt->isDtor) {
+            if (!info.hasDtor) {
+                diags_.error(stmt->loc, "TYPE '" + stmt->ownerType + "' has no declared destructor "
+                                         "(add 'Declare Destructor()' inside the TYPE body)");
+            } else if (info.dtorDefined) {
+                diags_.error(stmt->loc,
+                             "destructor for TYPE '" + stmt->ownerType + "' is already defined");
+            } else {
+                info.dtorDefined = true;
+            }
+            continue;
+        }
+        std::string methodKey = canonicalName(stmt->name);
+        auto methodIt = info.methods.find(methodKey);
+        if (methodIt == info.methods.end()) {
+            diags_.error(stmt->loc, "'" + stmt->ownerType + "." + stmt->name + "' has no matching "
+                                     "'Declare Sub/Function' inside TYPE '" + stmt->ownerType + "'");
+            continue;
+        }
+        if (!info.definedMethods.insert(methodKey).second) {
+            diags_.error(stmt->loc,
+                         "method '" + stmt->ownerType + "." + stmt->name + "' is already defined");
+            continue;
+        }
+        if (methodIt->second.params.size() != stmt->params.size()) {
+            diags_.error(stmt->loc, "definition of '" + stmt->ownerType + "." + stmt->name +
+                                         "' has a different parameter count than its declaration");
+        }
+    }
+    // Pass 5: every declared method/constructor/destructor must have a
+    // matching out-of-line definition - an undefined one would otherwise
+    // only surface as a confusing backend "incomplete type"/link error.
+    for (auto& stmt : stmts) {
+        if (stmt->kind != StmtKind::TypeDecl) continue;
+        auto it = structs_.find(canonicalName(stmt->name));
+        if (it == structs_.end()) continue;
+        RecordInfo& info = it->second;
+        if (info.hasCtor && !info.ctorDefined) {
+            diags_.error(stmt->loc,
+                         "TYPE '" + stmt->name + "' declares a constructor but never defines it");
+        }
+        if (info.hasDtor && !info.dtorDefined) {
+            diags_.error(stmt->loc,
+                         "TYPE '" + stmt->name + "' declares a destructor but never defines it");
+        }
+        for (const auto& [methodName, procInfo] : info.methods) {
+            (void)procInfo;
+            if (!info.definedMethods.count(methodName)) {
+                diags_.error(stmt->loc, "TYPE '" + stmt->name + "' declares method '" + methodName +
+                                             "' but never defines it");
             }
         }
     }
@@ -196,6 +320,12 @@ void Sema::collectProcedures(std::vector<StmtPtr>& stmts, const std::string& pre
             continue;
         }
         if (stmt->kind != StmtKind::SubDecl && stmt->kind != StmtKind::FunctionDecl) continue;
+        // A TYPE method/constructor/destructor definition - registered
+        // into its own RecordInfo::methods by collectTypes, not the global
+        // procedures_ map (two different TYPEs' same-named methods, or a
+        // method sharing a name with an unrelated free function, must not
+        // collide here).
+        if (!stmt->ownerType.empty()) continue;
         std::string key = prefix.empty() ? canonicalName(stmt->name) : prefix + "::" + canonicalName(stmt->name);
         if (symbols_.count(key) || procedures_.count(key)) {
             diags_.error(stmt->loc, "'" + stmt->name + "' is already declared");
@@ -434,6 +564,23 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
             std::string key = canonicalName(stmt.name);
             SymbolInfo info;
             if (!lookupSymbol(key, info)) {
+                // Implicit `This.field = value` when inside a method, no
+                // array index, and no local/parameter/global matches -
+                // mirrors the read-side Ident fallback in checkExpr.
+                if (!stmt.index && !currentClassName_.empty()) {
+                    auto structIt = structs_.find(currentClassName_);
+                    if (structIt != structs_.end()) {
+                        for (const FieldDecl& field : structIt->second.fields) {
+                            if (canonicalName(field.name) != key) continue;
+                            Type exprType = checkExpr(*stmt.expr);
+                            if (!isAssignCompatible(field.type, exprType)) {
+                                diags_.error(stmt.loc, "assigned value's type does not match "
+                                                            "member '" + stmt.name + "'");
+                            }
+                            return;
+                        }
+                    }
+                }
                 diags_.error(stmt.loc, "variable '" + stmt.name + "' is not declared");
                 return;
             }
@@ -600,10 +747,16 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
             std::unordered_map<std::string, SymbolInfo> savedLocals = std::move(locals_);
             bool savedInsideProcedure = insideProcedure_;
             Type savedReturnType = currentFunctionReturnType_;
+            std::string savedClassName = currentClassName_;
 
             locals_.clear();
             insideProcedure_ = true;
             currentFunctionReturnType_ = isFunction ? stmt.declaredType : Type(TypeKind::Unknown);
+            // An out-of-line method/constructor/destructor definition
+            // (`ownerType` set) - not a free SUB/FUNCTION. Methods don't
+            // nest, so a plain save/restore (no stack) suffices, mirroring
+            // insideProcedure_'s own simplification.
+            currentClassName_ = stmt.ownerType.empty() ? std::string() : canonicalName(stmt.ownerType);
 
             for (const Param& param : stmt.params) {
                 std::string key = canonicalName(param.name);
@@ -621,23 +774,55 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
             locals_ = std::move(savedLocals);
             insideProcedure_ = savedInsideProcedure;
             currentFunctionReturnType_ = savedReturnType;
+            currentClassName_ = savedClassName;
             return;
         }
         case StmtKind::CallStmt: {
-            const ProcedureInfo* proc = nullptr;
             if (stmt.target) {
-                // CALL Namespace.Name(args) - target is the qualifier.
-                std::string nsKey = canonicalName(stmt.target->stringValue);
-                if (!namespaces_.count(nsKey)) {
-                    diags_.error(stmt.target->loc, "'" + stmt.target->stringValue + "' is not a namespace");
+                bool targetIsNamespaceIdent = stmt.target->kind == ExprKind::Ident &&
+                                               namespaces_.count(canonicalName(stmt.target->stringValue));
+                if (targetIsNamespaceIdent) {
+                    // CALL Namespace.Name(args) - target is the qualifier.
+                    std::string nsKey = canonicalName(stmt.target->stringValue);
+                    auto it = procedures_.find(nsKey + "::" + canonicalName(stmt.name));
+                    if (it == procedures_.end()) {
+                        diags_.error(stmt.loc, "namespace '" + stmt.target->stringValue +
+                                                    "' has no member '" + stmt.name + "'");
+                        for (auto& arg : stmt.args) checkExpr(*arg);
+                        return;
+                    }
+                    checkCallArgs(it->second, stmt.args, stmt.loc);
+                    return;
+                }
+                // CALL obj.Method(args) / CALL This.Method(args) - target is
+                // a receiver expression, resolved by what its type is.
+                Type receiverType = checkExpr(*stmt.target);
+                if (receiverType.kind != TypeKind::UserDefined) {
+                    if (receiverType.kind != TypeKind::Unknown) {
+                        diags_.error(stmt.target->loc, "'" + stmt.name + "' is not a namespace or "
+                                                            "method - the left-hand side is not a "
+                                                            "user-defined TYPE value");
+                    }
                     for (auto& arg : stmt.args) checkExpr(*arg);
                     return;
                 }
-                auto it = procedures_.find(nsKey + "::" + canonicalName(stmt.name));
-                if (it != procedures_.end()) proc = &it->second;
-            } else {
-                proc = findProcedure(canonicalName(stmt.name));
+                auto structIt = structs_.find(canonicalName(receiverType.typeName));
+                if (structIt == structs_.end()) {
+                    diags_.error(stmt.loc, "unknown TYPE '" + receiverType.typeName + "'");
+                    for (auto& arg : stmt.args) checkExpr(*arg);
+                    return;
+                }
+                auto methodIt = structIt->second.methods.find(canonicalName(stmt.name));
+                if (methodIt == structIt->second.methods.end()) {
+                    diags_.error(stmt.loc, "TYPE '" + receiverType.typeName + "' has no method '" +
+                                                stmt.name + "'");
+                    for (auto& arg : stmt.args) checkExpr(*arg);
+                    return;
+                }
+                checkCallArgs(methodIt->second, stmt.args, stmt.loc);
+                return;
             }
+            const ProcedureInfo* proc = findProcedure(canonicalName(stmt.name));
             if (!proc) {
                 diags_.error(stmt.loc, "'" + stmt.name + "' is not a declared SUB or FUNCTION");
                 for (auto& arg : stmt.args) checkExpr(*arg);
@@ -740,6 +925,20 @@ Type Sema::checkExpr(Expr& expr) {
             std::string key = canonicalName(expr.stringValue);
             SymbolInfo info;
             if (!lookupSymbol(key, info)) {
+                // Implicit `This.field` when inside a method and no
+                // local/parameter/global matches - a local/param always
+                // wins (verified FB rule: it "hides" the member).
+                if (!currentClassName_.empty()) {
+                    auto structIt = structs_.find(currentClassName_);
+                    if (structIt != structs_.end()) {
+                        for (const FieldDecl& field : structIt->second.fields) {
+                            if (canonicalName(field.name) == key) {
+                                expr.type = field.type;
+                                return expr.type;
+                            }
+                        }
+                    }
+                }
                 diags_.error(expr.loc, "variable '" + expr.stringValue + "' is not declared");
                 expr.type = TypeKind::Unknown;
                 return expr.type;
@@ -751,31 +950,80 @@ Type Sema::checkExpr(Expr& expr) {
             expr.type = info.type;
             return expr.type;
         }
+        case ExprKind::This: {
+            if (currentClassName_.empty()) {
+                diags_.error(expr.loc, "'This' can only be used inside a TYPE method");
+                expr.type = TypeKind::Unknown;
+                return expr.type;
+            }
+            Type t;
+            t.kind = TypeKind::UserDefined;
+            t.typeName = currentClassName_;
+            expr.type = t;
+            return expr.type;
+        }
         case ExprKind::Call: {
             if (expr.lhs) {
-                // Namespace.Name(args) - lhs is the qualifier.
-                std::string nsKey = canonicalName(expr.lhs->stringValue);
-                if (expr.lhs->kind != ExprKind::Ident || !namespaces_.count(nsKey)) {
-                    diags_.error(expr.lhs->loc, "'" + expr.lhs->stringValue + "' is not a namespace");
+                bool lhsIsNamespaceIdent = expr.lhs->kind == ExprKind::Ident &&
+                                           namespaces_.count(canonicalName(expr.lhs->stringValue));
+                if (lhsIsNamespaceIdent) {
+                    // Namespace.Name(args) - lhs is the qualifier.
+                    std::string nsKey = canonicalName(expr.lhs->stringValue);
+                    auto procIt = procedures_.find(nsKey + "::" + canonicalName(expr.stringValue));
+                    if (procIt == procedures_.end()) {
+                        diags_.error(expr.loc, "namespace '" + expr.lhs->stringValue +
+                                                    "' has no member '" + expr.stringValue + "'");
+                        for (auto& arg : expr.args) checkExpr(*arg);
+                        expr.type = TypeKind::Unknown;
+                        return expr.type;
+                    }
+                    const ProcedureInfo& proc = procIt->second;
+                    if (!proc.isFunction) {
+                        diags_.error(expr.loc, "'" + expr.stringValue +
+                                                    "' is a SUB and cannot be used in an expression");
+                    }
+                    checkCallArgs(proc, expr.args, expr.loc);
+                    expr.type = proc.returnType;
+                    return expr.type;
+                }
+                // obj.Method(args) / This.Method(args) - lhs is a receiver
+                // expression, resolved by looking up what its type actually
+                // is (a third instance of this codebase's "disambiguate by
+                // what it names" pattern, after array-vs-function Call and
+                // NAMESPACE's qualified lookup).
+                Type receiverType = checkExpr(*expr.lhs);
+                if (receiverType.kind != TypeKind::UserDefined) {
+                    if (receiverType.kind != TypeKind::Unknown) {
+                        diags_.error(expr.loc, "'" + expr.stringValue + "' is not a namespace or "
+                                                    "method - the left-hand side is not a "
+                                                    "user-defined TYPE value");
+                    }
                     for (auto& arg : expr.args) checkExpr(*arg);
                     expr.type = TypeKind::Unknown;
                     return expr.type;
                 }
-                auto procIt = procedures_.find(nsKey + "::" + canonicalName(expr.stringValue));
-                if (procIt == procedures_.end()) {
-                    diags_.error(expr.loc, "namespace '" + expr.lhs->stringValue + "' has no member '" +
-                                               expr.stringValue + "'");
+                auto structIt = structs_.find(canonicalName(receiverType.typeName));
+                if (structIt == structs_.end()) {
+                    diags_.error(expr.loc, "unknown TYPE '" + receiverType.typeName + "'");
                     for (auto& arg : expr.args) checkExpr(*arg);
                     expr.type = TypeKind::Unknown;
                     return expr.type;
                 }
-                const ProcedureInfo& proc = procIt->second;
-                if (!proc.isFunction) {
+                auto methodIt = structIt->second.methods.find(canonicalName(expr.stringValue));
+                if (methodIt == structIt->second.methods.end()) {
+                    diags_.error(expr.loc, "TYPE '" + receiverType.typeName + "' has no method '" +
+                                                expr.stringValue + "'");
+                    for (auto& arg : expr.args) checkExpr(*arg);
+                    expr.type = TypeKind::Unknown;
+                    return expr.type;
+                }
+                const ProcedureInfo& method = methodIt->second;
+                if (!method.isFunction) {
                     diags_.error(expr.loc, "'" + expr.stringValue +
                                                 "' is a SUB and cannot be used in an expression");
                 }
-                checkCallArgs(proc, expr.args, expr.loc);
-                expr.type = proc.returnType;
+                checkCallArgs(method, expr.args, expr.loc);
+                expr.type = method.returnType;
                 return expr.type;
             }
             std::string key = canonicalName(expr.stringValue);
@@ -1075,6 +1323,8 @@ bool Sema::isConstantExpr(const Expr& expr) const {
         case ExprKind::AddressOf:
         case ExprKind::Deref:
             return false; // pointer ops are never compile-time constants here
+        case ExprKind::This:
+            return false; // the current instance is never a compile-time constant
         case ExprKind::UnaryNeg:
         case ExprKind::UnaryNot:
             return isConstantExpr(*expr.lhs);

@@ -257,6 +257,15 @@ StmtPtr Parser::parseRecordDecl() {
     skipNewlines();
 
     while (!check(TokenKind::KwEnd) && !check(TokenKind::End)) {
+        if (check(TokenKind::KwDeclare)) {
+            // A method/constructor/destructor prototype - the real
+            // definition (body) lives in a separate top-level statement.
+            // Left for Sema to reject on a UNION (unions can't have
+            // members with constructors/destructors).
+            stmt->methods.push_back(parseMethodPrototype());
+            skipNewlines();
+            continue;
+        }
         const Token& fieldTok = expect(TokenKind::Identifier, "expected a field name");
         FieldDecl field;
         field.name = fieldTok.text;
@@ -270,6 +279,53 @@ StmtPtr Parser::parseRecordDecl() {
 
     expect(TokenKind::KwEnd, closingWhat);
     expect(closingKw, closingWhat);
+    expectStmtEnd();
+    return stmt;
+}
+
+/// Parses one `Declare Sub/Function/Constructor/Destructor` line inside a
+/// TYPE body - a method's signature only; its body is defined separately,
+/// out-of-line, at the top level (see `parseSub`/`parseFunction`'s `.`
+/// handling and `parseConstructor`/`parseDestructor`). A Constructor/
+/// Destructor has no name of its own (implicitly the owning TYPE) and, in
+/// this version, must take no parameters - parameterized construction and
+/// constructor overloading are deferred.
+StmtPtr Parser::parseMethodPrototype() {
+    SourceLoc loc = peek().loc;
+    advance(); // DECLARE
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->loc = loc;
+
+    if (match(TokenKind::KwConstructor)) {
+        stmt->kind = StmtKind::SubDecl;
+        stmt->isCtor = true;
+        stmt->params = parseParamList();
+        if (!stmt->params.empty()) {
+            diags_.error(loc, "parameterized constructors are not supported yet - only "
+                               "Declare Constructor() is allowed");
+        }
+    } else if (match(TokenKind::KwDestructor)) {
+        stmt->kind = StmtKind::SubDecl;
+        stmt->isDtor = true;
+        stmt->params = parseParamList();
+        if (!stmt->params.empty()) {
+            diags_.error(loc, "a destructor cannot take parameters");
+        }
+    } else if (match(TokenKind::KwSub)) {
+        stmt->kind = StmtKind::SubDecl;
+        stmt->name = expect(TokenKind::Identifier, "expected a method name after Declare Sub").text;
+        stmt->params = parseParamList();
+    } else if (match(TokenKind::KwFunction)) {
+        stmt->kind = StmtKind::FunctionDecl;
+        stmt->name = expect(TokenKind::Identifier, "expected a method name after Declare Function").text;
+        stmt->params = parseParamList();
+        expect(TokenKind::KwAs, "expected AS <return type> after Declare Function's parameter list");
+        stmt->declaredType = parseTypeKeyword();
+    } else {
+        diags_.error(peek().loc, "expected SUB, FUNCTION, CONSTRUCTOR, or DESTRUCTOR after DECLARE");
+    }
+
     expectStmtEnd();
     return stmt;
 }
@@ -371,6 +427,21 @@ StmtPtr Parser::parseAssign() {
         return stmt;
     }
 
+    if (check(TokenKind::KwThis)) {
+        // `This.field = expr` - assignment to a member of the current
+        // instance, explicitly qualified (needed when a parameter/local
+        // shadows the member name; otherwise the bare name already works).
+        advance();
+        auto thisExpr = std::make_unique<Expr>();
+        thisExpr->kind = ExprKind::This;
+        thisExpr->loc = loc;
+        stmt->target = parseMemberOrCallChain(std::move(thisExpr));
+        expect(TokenKind::Equals, "expected '=' in assignment");
+        stmt->expr = parseExpr();
+        expectStmtEnd();
+        return stmt;
+    }
+
     std::string name = advance().text; // identifier
     stmt->name = name;
 
@@ -441,6 +512,8 @@ StmtPtr Parser::parseStatement() {
     if (check(TokenKind::KwExit)) return parseExit();
     if (check(TokenKind::KwSub)) return parseSub();
     if (check(TokenKind::KwFunction)) return parseFunction();
+    if (check(TokenKind::KwConstructor)) return parseConstructor();
+    if (check(TokenKind::KwDestructor)) return parseDestructor();
     if (check(TokenKind::KwCall)) return parseCallStmt();
     if (check(TokenKind::KwReturn)) return parseReturn();
     if (check(TokenKind::Identifier) && peek(1).kind == TokenKind::Newline &&
@@ -449,6 +522,7 @@ StmtPtr Parser::parseStatement() {
     }
     if (check(TokenKind::Identifier)) return parseAssign();
     if (check(TokenKind::Star)) return parseAssign(); // `*p = expr`
+    if (check(TokenKind::KwThis)) return parseAssign(); // `This.field = expr`
 
     diags_.error(peek().loc, "expected a statement");
     synchronize();
@@ -706,7 +780,14 @@ StmtPtr Parser::parseSub() {
     auto stmt = std::make_unique<Stmt>();
     stmt->kind = StmtKind::SubDecl;
     stmt->loc = loc;
-    stmt->name = nameTok.text;
+    if (match(TokenKind::Dot)) {
+        // SUB TypeName.MethodName(...) - an out-of-line method definition,
+        // matching real FreeBASIC's "declared within, defined outside" rule.
+        stmt->ownerType = nameTok.text;
+        stmt->name = expect(TokenKind::Identifier, "expected a method name after '.'").text;
+    } else {
+        stmt->name = nameTok.text;
+    }
     stmt->params = parseParamList();
     expectStmtEnd();
 
@@ -725,7 +806,13 @@ StmtPtr Parser::parseFunction() {
     auto stmt = std::make_unique<Stmt>();
     stmt->kind = StmtKind::FunctionDecl;
     stmt->loc = loc;
-    stmt->name = nameTok.text;
+    if (match(TokenKind::Dot)) {
+        // FUNCTION TypeName.MethodName(...) - an out-of-line method definition.
+        stmt->ownerType = nameTok.text;
+        stmt->name = expect(TokenKind::Identifier, "expected a method name after '.'").text;
+    } else {
+        stmt->name = nameTok.text;
+    }
     stmt->params = parseParamList();
     expect(TokenKind::KwAs, "expected AS <return type> after FUNCTION parameter list");
     stmt->declaredType = parseTypeKeyword();
@@ -742,27 +829,92 @@ StmtPtr Parser::parseFunction() {
     return stmt;
 }
 
+/// `Constructor TypeName (...) ... End Constructor` - the out-of-line
+/// definition matching a `Declare Constructor(...)` prototype inside
+/// TypeName's body. Named after the owning TYPE itself, not a separate
+/// method name (there's only ever one, in this version - no overloading).
+StmtPtr Parser::parseConstructor() {
+    SourceLoc loc = peek().loc;
+    advance(); // CONSTRUCTOR
+    const Token& nameTok = expect(TokenKind::Identifier, "expected a TYPE name after CONSTRUCTOR");
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->kind = StmtKind::SubDecl;
+    stmt->loc = loc;
+    stmt->ownerType = nameTok.text;
+    stmt->isCtor = true;
+    stmt->params = parseParamList();
+    if (!stmt->params.empty()) {
+        diags_.error(loc, "parameterized constructors are not supported yet");
+    }
+    expectStmtEnd();
+
+    stmt->body = parseBlockUntil({TokenKind::KwEnd});
+    expect(TokenKind::KwEnd, "expected END CONSTRUCTOR");
+    expect(TokenKind::KwConstructor, "expected END CONSTRUCTOR");
+    expectStmtEnd();
+    return stmt;
+}
+
+/// `Destructor TypeName () ... End Destructor` - the out-of-line
+/// definition matching a `Declare Destructor()` prototype.
+StmtPtr Parser::parseDestructor() {
+    SourceLoc loc = peek().loc;
+    advance(); // DESTRUCTOR
+    const Token& nameTok = expect(TokenKind::Identifier, "expected a TYPE name after DESTRUCTOR");
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->kind = StmtKind::SubDecl;
+    stmt->loc = loc;
+    stmt->ownerType = nameTok.text;
+    stmt->isDtor = true;
+    stmt->params = parseParamList();
+    if (!stmt->params.empty()) {
+        diags_.error(loc, "a destructor cannot take parameters");
+    }
+    expectStmtEnd();
+
+    stmt->body = parseBlockUntil({TokenKind::KwEnd});
+    expect(TokenKind::KwEnd, "expected END DESTRUCTOR");
+    expect(TokenKind::KwDestructor, "expected END DESTRUCTOR");
+    expectStmtEnd();
+    return stmt;
+}
+
 StmtPtr Parser::parseCallStmt() {
     SourceLoc loc = peek().loc;
     advance(); // CALL
-    const Token& nameTok = expect(TokenKind::Identifier, "expected a procedure name after CALL");
 
     auto stmt = std::make_unique<Stmt>();
     stmt->kind = StmtKind::CallStmt;
     stmt->loc = loc;
-    stmt->name = nameTok.text;
 
-    if (match(TokenKind::Dot)) {
-        // CALL Namespace.Name(args) - `target` holds the qualifier (reused
-        // from Assign's lvalue-chain field; CallStmt has no assignment
-        // target of its own to conflict with), `name` is the final segment.
+    if (check(TokenKind::KwThis)) {
+        // CALL This.Method(args) - one method calling another on itself.
+        advance();
         auto qualifier = std::make_unique<Expr>();
-        qualifier->kind = ExprKind::Ident;
-        qualifier->loc = nameTok.loc;
-        qualifier->stringValue = nameTok.text;
+        qualifier->kind = ExprKind::This;
+        qualifier->loc = loc;
         stmt->target = std::move(qualifier);
-        const Token& finalTok = expect(TokenKind::Identifier, "expected a name after '.'");
-        stmt->name = finalTok.text;
+        expect(TokenKind::Dot, "expected '.' after THIS");
+        stmt->name = expect(TokenKind::Identifier, "expected a method name after 'This.'").text;
+    } else {
+        const Token& nameTok = expect(TokenKind::Identifier, "expected a procedure name after CALL");
+        stmt->name = nameTok.text;
+
+        if (match(TokenKind::Dot)) {
+            // CALL Namespace.Name(args) or CALL obj.Method(args) - `target`
+            // holds the qualifier (reused from Assign's lvalue-chain field;
+            // CallStmt has no assignment target of its own to conflict
+            // with), `name` is the final segment.
+            auto qualifier = std::make_unique<Expr>();
+            qualifier->kind = ExprKind::Ident;
+            qualifier->loc = nameTok.loc;
+            qualifier->stringValue = nameTok.text;
+            stmt->target = std::move(qualifier);
+            const Token& finalTok = expect(TokenKind::Identifier, "expected a name after '.'");
+            stmt->name = finalTok.text;
+        }
     }
 
     if (match(TokenKind::LParen)) {
@@ -1048,6 +1200,13 @@ ExprPtr Parser::parsePrimary() {
         }
 
         return parseMemberOrCallChain(std::move(base));
+    }
+    if (tok.kind == TokenKind::KwThis) {
+        advance();
+        auto expr = std::make_unique<Expr>();
+        expr->kind = ExprKind::This;
+        expr->loc = tok.loc;
+        return parseMemberOrCallChain(std::move(expr));
     }
     if (match(TokenKind::LParen)) {
         ExprPtr inner = parseExpr();

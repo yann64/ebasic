@@ -47,6 +47,9 @@ private:
     StmtPtr parseCallStmt();
     StmtPtr parseReturn();
     StmtPtr parseRecordDecl();
+    StmtPtr parseMethodPrototype();
+    StmtPtr parseConstructor();
+    StmtPtr parseDestructor();
     StmtPtr parseNamespaceDecl();
     std::vector<Param> parseParamList();
 

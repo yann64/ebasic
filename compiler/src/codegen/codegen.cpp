@@ -86,19 +86,36 @@ std::string Codegen::genExpr(const Expr& expr) {
         case ExprKind::Ident:
             return mangleName(expr.stringValue);
         case ExprKind::Call: {
-            std::string prefix;
             if (expr.lhs) {
-                // Namespace.Name(args) -> C++ eb_ns::eb_name(args).
-                prefix = mangleName(expr.lhs->stringValue) + "::";
-            } else {
-                std::string key = canonicalName(expr.stringValue);
-                auto arrIt = arrayLowerBoundVar_.find(key);
-                if (arrIt != arrayLowerBoundVar_.end()) {
-                    return mangleName(expr.stringValue) + "[static_cast<std::size_t>((" +
-                           genExpr(*expr.args[0]) + ") - " + arrIt->second + ")]";
+                // Namespace.Name(args) -> C++ eb_ns::eb_name(args); anything
+                // else (This, a variable, a field, ...) is a method call on
+                // that receiver -> eb_recv.eb_name(args), or this->eb_name(args)
+                // for This specifically (this is a pointer in C++).
+                std::string prefix;
+                bool lhsIsNamespaceIdent = expr.lhs->kind == ExprKind::Ident &&
+                                           namespaces_.count(canonicalName(expr.lhs->stringValue));
+                if (lhsIsNamespaceIdent) {
+                    prefix = mangleName(expr.lhs->stringValue) + "::";
+                } else if (expr.lhs->kind == ExprKind::This) {
+                    prefix = "this->";
+                } else {
+                    prefix = genExpr(*expr.lhs) + ".";
                 }
+                std::string result = prefix + mangleName(expr.stringValue) + "(";
+                for (size_t i = 0; i < expr.args.size(); ++i) {
+                    if (i > 0) result += ", ";
+                    result += genExpr(*expr.args[i]);
+                }
+                result += ")";
+                return result;
             }
-            std::string result = prefix + mangleName(expr.stringValue) + "(";
+            std::string key = canonicalName(expr.stringValue);
+            auto arrIt = arrayLowerBoundVar_.find(key);
+            if (arrIt != arrayLowerBoundVar_.end()) {
+                return mangleName(expr.stringValue) + "[static_cast<std::size_t>((" +
+                       genExpr(*expr.args[0]) + ") - " + arrIt->second + ")]";
+            }
+            std::string result = mangleName(expr.stringValue) + "(";
             for (size_t i = 0; i < expr.args.size(); ++i) {
                 if (i > 0) result += ", ";
                 result += genExpr(*expr.args[i]);
@@ -110,11 +127,16 @@ std::string Codegen::genExpr(const Expr& expr) {
             if (expr.lhs->kind == ExprKind::Ident && namespaces_.count(canonicalName(expr.lhs->stringValue))) {
                 return mangleName(expr.lhs->stringValue) + "::" + mangleName(expr.stringValue);
             }
+            if (expr.lhs->kind == ExprKind::This) {
+                return "this->" + mangleName(expr.stringValue);
+            }
             return genExpr(*expr.lhs) + "." + mangleName(expr.stringValue);
         case ExprKind::AddressOf:
             return "(&(" + genExpr(*expr.lhs) + "))";
         case ExprKind::Deref:
             return "(*(" + genExpr(*expr.lhs) + "))";
+        case ExprKind::This:
+            return "this";
         case ExprKind::UnaryNeg:
             return "(-" + genExpr(*expr.lhs) + ")";
         case ExprKind::UnaryNot:
@@ -406,7 +428,22 @@ void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out, int indent) {
             throw std::runtime_error("codegen: NAMESPACE must be top-level (sema should have caught "
                                       "this)");
         case StmtKind::CallStmt: {
-            std::string prefix = stmt.target ? mangleName(stmt.target->stringValue) + "::" : "";
+            // Same three shapes as the expression-position Call: a
+            // Namespace.Name(args) qualifier (`::`), a This.Method(args) or
+            // obj.Method(args) receiver (`->`/`.`), or a plain free-function
+            // call (no prefix).
+            std::string prefix;
+            if (stmt.target) {
+                bool targetIsNamespaceIdent = stmt.target->kind == ExprKind::Ident &&
+                                               namespaces_.count(canonicalName(stmt.target->stringValue));
+                if (targetIsNamespaceIdent) {
+                    prefix = mangleName(stmt.target->stringValue) + "::";
+                } else if (stmt.target->kind == ExprKind::This) {
+                    prefix = "this->";
+                } else {
+                    prefix = genExpr(*stmt.target) + ".";
+                }
+            }
             out << ind(indent) << prefix << mangleName(stmt.name) << "(";
             for (size_t i = 0; i < stmt.args.size(); ++i) {
                 if (i > 0) out << ", ";
@@ -459,25 +496,47 @@ void Codegen::genTypeDecl(const Stmt& stmt) {
         if (!isUnion) typesOut_ << "{}";
         typesOut_ << ";\n";
     }
+    // Method/constructor/destructor *declarations* only (real C++ member
+    // declarations, matching FreeBASIC's own "declared within" half) - the
+    // body lives in a separate out-of-line definition, emitted by
+    // genMethodDefinition. UNION never reaches here with any (Sema-rejected).
+    for (const StmtPtr& method : stmt.methods) {
+        if (method->isCtor) {
+            typesOut_ << ind(1) << mangleName(stmt.name) << "();\n";
+            continue;
+        }
+        if (method->isDtor) {
+            typesOut_ << ind(1) << "~" << mangleName(stmt.name) << "();\n";
+            continue;
+        }
+        bool isFunction = method->kind == StmtKind::FunctionDecl;
+        std::string retType = isFunction ? cppType(method->declaredType) : "void";
+        typesOut_ << ind(1) << retType << " " << mangleName(method->name) << "("
+                   << buildParamList(method->params) << ");\n";
+    }
     typesOut_ << "};\n\n";
 
     typesBeingEmitted_.erase(key);
     typesEmitted_.insert(key);
 }
 
-void Codegen::genProcedure(const Stmt& stmt) {
-    bool isFunction = stmt.kind == StmtKind::FunctionDecl;
-    std::string retType = isFunction ? cppType(stmt.declaredType) : "void";
-    std::string name = mangleName(stmt.name);
-
+std::string Codegen::buildParamList(const std::vector<Param>& params) {
     std::string paramList;
-    for (size_t i = 0; i < stmt.params.size(); ++i) {
+    for (size_t i = 0; i < params.size(); ++i) {
         if (i > 0) paramList += ", ";
-        const Param& p = stmt.params[i];
+        const Param& p = params[i];
         paramList += cppType(p.type);
         paramList += p.byRef ? "& " : " ";
         paramList += mangleName(p.name);
     }
+    return paramList;
+}
+
+void Codegen::genProcedure(const Stmt& stmt) {
+    bool isFunction = stmt.kind == StmtKind::FunctionDecl;
+    std::string retType = isFunction ? cppType(stmt.declaredType) : "void";
+    std::string name = mangleName(stmt.name);
+    std::string paramList = buildParamList(stmt.params);
 
     protoOut_ << retType << " " << name << "(" << paramList << ");\n";
 
@@ -487,6 +546,41 @@ void Codegen::genProcedure(const Stmt& stmt) {
     }
     // A local array can shadow a global of the same name; save/restore so
     // that mapping doesn't leak into code generated after this procedure.
+    auto savedArrayLowerBounds = arrayLowerBoundVar_;
+    genBlock(stmt.body, procOut_, 1);
+    arrayLowerBoundVar_ = savedArrayLowerBounds;
+    if (isFunction) {
+        procOut_ << ind(1) << "return eb__ret;\n";
+    }
+    procOut_ << "}\n\n";
+}
+
+void Codegen::genMethodDefinition(const Stmt& stmt) {
+    bool isFunction = stmt.kind == StmtKind::FunctionDecl;
+    std::string owner = mangleName(stmt.ownerType);
+    std::string paramList = buildParamList(stmt.params);
+
+    // A constructor/destructor has no return type at all in C++ (not even
+    // `void`) and is named after the owning TYPE itself; a real method
+    // gets `Owner::eb_name`, same as any other out-of-line C++ member
+    // definition.
+    std::string retType;
+    std::string qualifiedName;
+    if (stmt.isCtor) {
+        qualifiedName = owner + "::" + owner;
+    } else if (stmt.isDtor) {
+        qualifiedName = owner + "::~" + owner;
+    } else {
+        retType = (isFunction ? cppType(stmt.declaredType) : "void") + " ";
+        qualifiedName = owner + "::" + mangleName(stmt.name);
+    }
+
+    procOut_ << retType << qualifiedName << "(" << paramList << ") {\n";
+    if (isFunction) {
+        procOut_ << ind(1) << cppType(stmt.declaredType) << " eb__ret{};\n";
+    }
+    // A local array can shadow a global of the same name; save/restore so
+    // that mapping doesn't leak into code generated after this method.
     auto savedArrayLowerBounds = arrayLowerBoundVar_;
     genBlock(stmt.body, procOut_, 1);
     arrayLowerBoundVar_ = savedArrayLowerBounds;
@@ -601,7 +695,11 @@ std::string Codegen::generate(const Module& module) {
                 genStmt(stmt, mainOut, 1);
             }
         } else if (stmt.kind == StmtKind::SubDecl || stmt.kind == StmtKind::FunctionDecl) {
-            genProcedure(stmt);
+            if (stmt.ownerType.empty()) {
+                genProcedure(stmt);
+            } else {
+                genMethodDefinition(stmt);
+            }
         } else if (stmt.kind == StmtKind::TypeDecl || stmt.kind == StmtKind::UnionDecl) {
             genTypeDecl(stmt);
         } else if (stmt.kind == StmtKind::NamespaceDecl) {

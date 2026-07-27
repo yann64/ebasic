@@ -30,6 +30,15 @@ private:
     // invalid C++ regardless - left for the backend to reject, not a crash
     // here).
     void genTypeDecl(const Stmt& stmt);
+    // Emits a TYPE method/constructor/destructor's out-of-line C++
+    // definition (`RetType eb_owner::eb_method(params) { ... }`, or the
+    // constructor/destructor-specific `eb_owner::eb_owner()`/
+    // `eb_owner::~eb_owner()` form - neither has a return type). The
+    // *declaration* (matching real FreeBASIC's "declared within, defined
+    // outside" split) is emitted separately, inside the struct body, by
+    // genTypeDecl. Only ever called for top-level SubDecl/FunctionDecl
+    // stmts with a non-empty `ownerType`.
+    void genMethodDefinition(const Stmt& stmt);
     // Wraps a NAMESPACE's declarative members (CONST/ENUM/DIM/SUB/FUNCTION -
     // Sema already rejects anything else directly inside one) in a literal
     // C++ `namespace eb_x { ... }` block, reopened independently across
@@ -47,6 +56,10 @@ private:
     static std::string ind(int indent);
     static std::string cppType(const Type& type);
     static std::string mangleName(const std::string& name);
+    // Renders a C++ parameter list ("T1 a, T2& b, ...") from BASIC params -
+    // shared by a free SUB/FUNCTION's prototype+definition and a TYPE
+    // method's declaration+out-of-line definition.
+    static std::string buildParamList(const std::vector<Param>& params);
     static std::string escapeStringLiteral(const std::string& s);
     // Name of the synthesized parameterless void function a GOSUB-target
     // label's code is hoisted into. Distinct prefix from mangleName's "eb_"

@@ -46,10 +46,12 @@ enum class ExprKind {
     // stringValue = name, args = arguments. Ambiguous at parse time between
     // an array-element read (exactly 1 arg) and a function call - resolved
     // by Sema/Codegen by looking up what `stringValue` actually names.
-    // Optionally qualified (`lhs` set): `Namespace.Name(args)` - lhs is the
-    // qualifier expression (currently only ever a plain Ident naming a
-    // NAMESPACE; a receiver-expression interpretation for method calls is
-    // for a later milestone).
+    // Optionally qualified (`lhs` set): `Namespace.Name(args)` or
+    // `obj.Method(args)` - lhs is the qualifier/receiver expression,
+    // resolved by Sema based on what it actually names (a namespace, or a
+    // UserDefined-typed value with a matching method) - the same
+    // "disambiguate by what it names" pattern used for the array-vs-
+    // function case above.
     Call,
     // Field access `base.field`: lhs = base expression, stringValue = field
     // name. `p->field` is desugared by the parser into
@@ -61,6 +63,12 @@ enum class ExprKind {
     UnaryNot,
     AddressOf, // `@x`: lhs = operand (must be an lvalue - see Sema::isLvalue)
     Deref,     // `*p`: lhs = pointer operand
+    /// `This` - the implicit reference to the current instance inside a
+    /// TYPE method. No fields used; its type is the enclosing TYPE,
+    /// resolved from Sema::currentClassName_. Codegen emits the literal
+    /// C++ `this` (a pointer) - `This.field` therefore needs the same
+    /// arrow-vs-dot special case as a `Deref`-based Member.
+    This,
 };
 
 enum class BinOp {
@@ -329,6 +337,14 @@ struct Stmt {
 
     std::vector<EnumMember> enumMembers; // Enum
     std::vector<FieldDecl> fields;       // TypeDecl
+    // TypeDecl only: `Declare Sub/Function/Constructor/Destructor` method
+    // prototypes found inside the TYPE body - SubDecl/FunctionDecl-kind
+    // Stmts with `params`/`declaredType` set but an empty `body` (the real
+    // body lives in a separate top-level out-of-line definition, matching
+    // real FreeBASIC's "declared within, defined outside" member procedure
+    // rule). UNION cannot have any (Sema-rejected - FB unions may not
+    // contain members with constructors/destructors).
+    std::vector<StmtPtr> methods;
 
     // If: one condition per IF/ELSEIF branch, and one body per branch in
     // `blocks`. If hasElse, `blocks` has one extra trailing entry for ELSE.
@@ -355,6 +371,19 @@ struct Stmt {
     // (`FuncName = value` inside FUNCTION FuncName ... END FUNCTION).
     // Set by the parser, which already tracks the enclosing function.
     bool isReturnAssign = false;
+
+    // SubDecl/FunctionDecl only, for TYPE member procedures (both the
+    // Declare-prototype form stored in TypeDecl::methods, and the
+    // out-of-line definition form at top level): `ownerType` is the
+    // canonical-cased owning TYPE's name, empty for an ordinary free
+    // SUB/FUNCTION. `isCtor`/`isDtor` mark a Constructor/Destructor -
+    // always SubDecl-kind (no return value), named after the TYPE itself
+    // rather than a separate method name. Only a no-argument
+    // constructor/destructor is supported so far (deliberately deferred:
+    // parameterized construction, and constructor/method overloading).
+    std::string ownerType;
+    bool isCtor = false;
+    bool isDtor = false;
 };
 
 struct Module {
