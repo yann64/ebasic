@@ -234,6 +234,13 @@ enum class StmtKind {
     GoSub, // reuses `name` for the target label
     TypeDecl, // reuses `name` for the type's own name; see Stmt::fields
     NamespaceDecl, // reuses `name` and `body`; only CONST/ENUM/DIM/SUB/FUNCTION allowed directly inside
+    /// A `UNION Name ... END UNION` declaration. Structurally identical to
+    /// TypeDecl (reuses `name` + `fields`) - the only differences are
+    /// Sema's extra "no STRING, directly or nested" restriction and
+    /// Codegen emitting a C++ `union` instead of `struct`. Kept as a
+    /// separate StmtKind (rather than a bool flag on TypeDecl) so that
+    /// distinction reads directly off `stmt.kind` at every use site.
+    UnionDecl,
 };
 
 // Which loop- or procedure-introducing keyword a scope was opened with.

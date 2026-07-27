@@ -91,6 +91,7 @@ enum class TokenKind {
     KwNamespace,
     KwPtr,
     KwAny,
+    KwUnion,
 };
 
 struct Token {

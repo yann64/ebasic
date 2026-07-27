@@ -62,6 +62,29 @@ bool isAssignCompatible(const Type& targetType, const Type& valueType) {
     }
     return true;
 }
+
+/// Recursively checks whether `type` is, or (for a `UserDefined` field)
+/// transitively contains, a `STRING`. Used to enforce FreeBASIC's UNION
+/// restriction ("cannot contain variable-length strings ... or fields with
+/// constructors or destructors") - `STRING` is the only non-trivial type in
+/// this language slice, so this check alone covers that whole rule. A
+/// pointer's pointee doesn't matter here: a pointer is itself always a
+/// trivial value regardless of what it points to. `visited` guards against
+/// infinite recursion through a cyclic embedding (already invalid C++
+/// regardless, per genTypeDecl's own cycle guard - just don't hang here).
+bool typeContainsString(const Type& type, const std::unordered_map<std::string, RecordInfo>& structs,
+                         std::unordered_set<std::string>& visited) {
+    if (type.kind == TypeKind::StringT) return true;
+    if (type.kind != TypeKind::UserDefined) return false;
+    std::string key = canonicalName(type.typeName);
+    if (!visited.insert(key).second) return false;
+    auto it = structs.find(key);
+    if (it == structs.end()) return false; // unknown type; already reported elsewhere
+    for (const FieldDecl& field : it->second.fields) {
+        if (typeContainsString(field.type, structs, visited)) return true;
+    }
+    return false;
+}
 } // namespace
 
 void Sema::check(Module& module) {
@@ -73,10 +96,13 @@ void Sema::check(Module& module) {
 }
 
 void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
-    // Pass 1: register every TYPE's name first, so a field can reference a
-    // TYPE declared later in the file (mirrors collectProcedures/labels).
+    auto isRecordDecl = [](StmtKind k) { return k == StmtKind::TypeDecl || k == StmtKind::UnionDecl; };
+
+    // Pass 1: register every TYPE/UNION's name first, so a field can
+    // reference one declared later in the file (mirrors
+    // collectProcedures/labels).
     for (auto& stmt : stmts) {
-        if (stmt->kind != StmtKind::TypeDecl) continue;
+        if (!isRecordDecl(stmt->kind)) continue;
         std::string key = canonicalName(stmt->name);
         if (procedures_.count(key) || structs_.count(key)) {
             diags_.error(stmt->loc, "'" + stmt->name + "' is already declared");
@@ -84,9 +110,9 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
         }
         structs_[key] = RecordInfo{};
     }
-    // Pass 2: now that every TYPE name is known, resolve each one's fields.
+    // Pass 2: now that every name is known, resolve each one's fields.
     for (auto& stmt : stmts) {
-        if (stmt->kind != StmtKind::TypeDecl) continue;
+        if (!isRecordDecl(stmt->kind)) continue;
         std::string key = canonicalName(stmt->name);
         auto it = structs_.find(key);
         if (it == structs_.end()) continue; // duplicate; already reported above
@@ -113,6 +139,22 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
             info.fields.push_back(field);
         }
         it->second = std::move(info);
+    }
+    // Pass 3: UNION-only "no STRING, directly or nested" restriction. Run
+    // only after every TYPE/UNION's fields are fully resolved above (pass
+    // 2), since a UNION declared earlier in the file may embed a TYPE
+    // declared later - checking against a not-yet-populated RecordInfo
+    // would miss a nested STRING.
+    for (auto& stmt : stmts) {
+        if (stmt->kind != StmtKind::UnionDecl) continue;
+        for (const FieldDecl& field : stmt->fields) {
+            std::unordered_set<std::string> visited;
+            if (typeContainsString(field.type, structs_, visited)) {
+                diags_.error(field.loc, "UNION member '" + field.name + "' cannot be or contain a "
+                                         "STRING (FreeBASIC unions may not contain variable-length "
+                                         "strings)");
+            }
+        }
     }
 }
 
@@ -633,15 +675,17 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
             }
             return;
         }
-        case StmtKind::TypeDecl: {
-            // Name registration and field-type resolution already happened
-            // in the collectTypes pre-pass (fields have no expressions or
-            // control flow to check) - just enforce the top-level rule,
-            // matching SUB/FUNCTION, so a nested TYPE isn't silently
-            // accepted as a no-op while being unusable (never registered).
+        case StmtKind::TypeDecl:
+        case StmtKind::UnionDecl: {
+            // Name registration, field-type resolution, and (for UNION) the
+            // no-STRING restriction already happened in the collectTypes
+            // pre-pass (fields have no expressions or control flow to
+            // check) - just enforce the top-level rule, matching
+            // SUB/FUNCTION, so a nested TYPE/UNION isn't silently accepted
+            // as a no-op while being unusable (never registered).
             if (!atTopLevel) {
-                diags_.error(stmt.loc, "TYPE declarations are only supported at the top level of a "
-                                        "program");
+                diags_.error(stmt.loc, "TYPE/UNION declarations are only supported at the top level "
+                                        "of a program");
             }
             return;
         }

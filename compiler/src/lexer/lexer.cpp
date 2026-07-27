@@ -153,6 +153,7 @@ Token Lexer::lexIdentifierOrKeyword() {
         {"PRESERVE", TokenKind::KwPreserve}, {"GOSUB", TokenKind::KwGosub},
         {"TYPE", TokenKind::KwType},       {"NAMESPACE", TokenKind::KwNamespace},
         {"PTR", TokenKind::KwPtr},         {"ANY", TokenKind::KwAny},
+        {"UNION", TokenKind::KwUnion},
     };
 
     auto it = keywords.find(upper);

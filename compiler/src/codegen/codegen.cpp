@@ -399,7 +399,9 @@ void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out, int indent) {
             throw std::runtime_error("codegen: SUB/FUNCTION must be top-level (sema should have "
                                       "caught this)");
         case StmtKind::TypeDecl:
-            throw std::runtime_error("codegen: TYPE must be top-level (sema should have caught this)");
+        case StmtKind::UnionDecl:
+            throw std::runtime_error("codegen: TYPE/UNION must be top-level (sema should have caught "
+                                      "this)");
         case StmtKind::NamespaceDecl:
             throw std::runtime_error("codegen: NAMESPACE must be top-level (sema should have caught "
                                       "this)");
@@ -443,9 +445,19 @@ void Codegen::genTypeDecl(const Stmt& stmt) {
         if (it != typeDeclsByName_.end()) genTypeDecl(*it->second);
     }
 
-    typesOut_ << "struct " << mangleName(stmt.name) << " {\n";
+    // A C++ union may have at most one member with a default (in-class)
+    // initializer - so unlike a struct's per-field `{}`, a union's members
+    // are declared bare and the whole object is zero-initialized instead
+    // wherever it's DIM'd (`Type var{};`, already emitted unconditionally
+    // by the Dim codegen below), matching FreeBASIC's own "otherwise
+    // initializes to zero" default (STRING*N fields, the one exception,
+    // are Sema-rejected from UNIONs entirely - see collectTypes).
+    bool isUnion = stmt.kind == StmtKind::UnionDecl;
+    typesOut_ << (isUnion ? "union " : "struct ") << mangleName(stmt.name) << " {\n";
     for (const FieldDecl& field : stmt.fields) {
-        typesOut_ << ind(1) << cppType(field.type) << " " << mangleName(field.name) << "{};\n";
+        typesOut_ << ind(1) << cppType(field.type) << " " << mangleName(field.name);
+        if (!isUnion) typesOut_ << "{}";
+        typesOut_ << ";\n";
     }
     typesOut_ << "};\n\n";
 
@@ -543,22 +555,26 @@ std::string Codegen::generate(const Module& module) {
     // same regardless of whether a GOSUB span is currently open.
     for (const auto& stmtPtr : module.stmts) {
         if (stmtPtr->kind == StmtKind::GoSub) gosubTargets_.insert(canonicalName(stmtPtr->name));
-        else if (stmtPtr->kind == StmtKind::TypeDecl) {
+        else if (stmtPtr->kind == StmtKind::TypeDecl || stmtPtr->kind == StmtKind::UnionDecl) {
             typeDeclsByName_[canonicalName(stmtPtr->name)] = stmtPtr.get();
         } else if (stmtPtr->kind == StmtKind::NamespaceDecl) {
             namespaces_.insert(canonicalName(stmtPtr->name));
         }
     }
 
-    // Forward-declare every TYPE before any full definition. A pointer field
-    // (self-referential, e.g. a linked-list Node, or pointing at another TYPE
-    // declared later in the file) only needs the pointee's name in scope, not
-    // its full definition - genTypeDecl's dependency ordering below only
-    // pulls in embedded-by-value fields, so a bare pointer target might
-    // otherwise reach the backend as an undeclared type.
+    // Forward-declare every TYPE/UNION before any full definition. A pointer
+    // field (self-referential, e.g. a linked-list Node, or pointing at
+    // another TYPE/UNION declared later in the file) only needs the
+    // pointee's name in scope, not its full definition - genTypeDecl's
+    // dependency ordering below only pulls in embedded-by-value fields, so a
+    // bare pointer target might otherwise reach the backend as an
+    // undeclared type. The forward declaration's class-key (`struct` vs
+    // `union`) must match the eventual definition's - a mismatch is
+    // ill-formed C++, unlike C's more permissive elaborated-type-specifier
+    // rules.
     for (const auto& [name, declStmt] : typeDeclsByName_) {
-        (void)declStmt;
-        typesOut_ << "struct " << mangleName(name) << ";\n";
+        bool isUnion = declStmt->kind == StmtKind::UnionDecl;
+        typesOut_ << (isUnion ? "union " : "struct ") << mangleName(name) << ";\n";
     }
     if (!typeDeclsByName_.empty()) typesOut_ << "\n";
 
@@ -586,7 +602,7 @@ std::string Codegen::generate(const Module& module) {
             }
         } else if (stmt.kind == StmtKind::SubDecl || stmt.kind == StmtKind::FunctionDecl) {
             genProcedure(stmt);
-        } else if (stmt.kind == StmtKind::TypeDecl) {
+        } else if (stmt.kind == StmtKind::TypeDecl || stmt.kind == StmtKind::UnionDecl) {
             genTypeDecl(stmt);
         } else if (stmt.kind == StmtKind::NamespaceDecl) {
             genNamespaceDecl(stmt);

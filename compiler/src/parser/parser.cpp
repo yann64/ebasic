@@ -233,13 +233,24 @@ StmtPtr Parser::parseEnum() {
     return stmt;
 }
 
-StmtPtr Parser::parseTypeDecl() {
+/// Parses a `TYPE`/`UNION` record declaration - the two are structurally
+/// identical at this level (a name plus a list of `field AS type` lines);
+/// only Sema (the UNION-only "no STRING, directly or nested" restriction)
+/// and Codegen (`struct` vs `union`) treat them differently, both by
+/// switching on `stmt->kind`. Dispatches on which opening keyword is
+/// current rather than duplicating this whole body for each.
+StmtPtr Parser::parseRecordDecl() {
+    bool isUnion = check(TokenKind::KwUnion);
+    TokenKind closingKw = isUnion ? TokenKind::KwUnion : TokenKind::KwType;
+    const char* closingWhat = isUnion ? "END UNION" : "END TYPE";
+
     SourceLoc loc = peek().loc;
-    advance(); // TYPE
-    const Token& nameTok = expect(TokenKind::Identifier, "expected a name after TYPE");
+    advance(); // TYPE or UNION
+    const Token& nameTok = expect(TokenKind::Identifier,
+                                   isUnion ? "expected a name after UNION" : "expected a name after TYPE");
 
     auto stmt = std::make_unique<Stmt>();
-    stmt->kind = StmtKind::TypeDecl;
+    stmt->kind = isUnion ? StmtKind::UnionDecl : StmtKind::TypeDecl;
     stmt->loc = loc;
     stmt->name = nameTok.text;
     expectStmtEnd();
@@ -257,8 +268,8 @@ StmtPtr Parser::parseTypeDecl() {
         skipNewlines();
     }
 
-    expect(TokenKind::KwEnd, "expected END TYPE");
-    expect(TokenKind::KwType, "expected END TYPE");
+    expect(TokenKind::KwEnd, closingWhat);
+    expect(closingKw, closingWhat);
     expectStmtEnd();
     return stmt;
 }
@@ -417,7 +428,7 @@ StmtPtr Parser::parseStatement() {
     if (check(TokenKind::KwRedim)) return parseRedim();
     if (check(TokenKind::KwConst)) return parseConst();
     if (check(TokenKind::KwEnum)) return parseEnum();
-    if (check(TokenKind::KwType)) return parseTypeDecl();
+    if (check(TokenKind::KwType) || check(TokenKind::KwUnion)) return parseRecordDecl();
     if (check(TokenKind::KwNamespace)) return parseNamespaceDecl();
     if (check(TokenKind::KwPrint)) return parsePrint();
     if (check(TokenKind::KwIf)) return parseIf();
