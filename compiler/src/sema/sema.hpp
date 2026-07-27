@@ -82,6 +82,12 @@ private:
     // per-argument type/BYREF-lvalue compatibility against `proc`.
     void checkCallArgs(const ProcedureInfo& proc, std::vector<ExprPtr>& args, SourceLoc loc);
 
+    // Structurally: is `expr` addressable (a variable, a field, or an array
+    // element - not a function-call result or a computed value)? Used for
+    // BYREF-argument validation and for '@' (AddressOf)'s operand. Does not
+    // itself check constness; callers that care (BYREF) check separately.
+    bool isLvalue(const Expr& expr) const;
+
     // Structural constant-expression check for CONST initializers: literals,
     // and Idents that refer to an already-declared CONST/ENUM member,
     // combined with unary/binary operators. Does not compute a value -

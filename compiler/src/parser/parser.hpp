@@ -74,6 +74,7 @@ private:
     ExprPtr parseMulDiv();
     ExprPtr parseNegate();
     ExprPtr parsePow();
+    ExprPtr parseUnaryPtrOps();
     ExprPtr parsePrimary();
 
     static ExprPtr makeBinary(BinOp op, SourceLoc loc, ExprPtr lhs, ExprPtr rhs);

@@ -10,11 +10,46 @@ bool isCaseCompatible(TypeKind a, TypeKind b) {
     return (isNumericType(a) && isNumericType(b)) || (a == TypeKind::StringT && b == TypeKind::StringT);
 }
 
+// Strict pointee-type identity (NOT the looser numeric-widening rule that
+// isAssignCompatible allows between plain variables - C++ pointers have no
+// implicit float*<->int* conversion, so `Integer PTR = Single PTR` must be
+// rejected, not silently accepted the way `DIM x AS INTEGER: x = 3.5` is).
+// Either side being ANY PTR (null pointee) is universally compatible.
+// Recurses for PTR PTR.
+bool pointeesIdentical(const Type& a, const Type& b) {
+    if (a.kind != b.kind) return false;
+    if (a.kind == TypeKind::UserDefined) return canonicalName(a.typeName) == canonicalName(b.typeName);
+    if (a.kind == TypeKind::Pointer) {
+        if (!a.pointee || !b.pointee) return true;
+        return pointeesIdentical(*a.pointee, *b.pointee);
+    }
+    return true;
+}
+
 // Checks a value's type against a target variable/const/param type. Two
 // different user-defined types both report kind==UserDefined, so identity
 // there needs comparing typeName too - just comparing the enum tag would
 // incorrectly accept assigning a Foo to a Bar-typed target.
 bool isAssignCompatible(const Type& targetType, const Type& valueType) {
+    // Pointer target/value: ANY PTR (null pointee) is universally compatible
+    // with any other pointer on either side (verified against FB docs -
+    // "implicitly converted to and from other pointer types"); two typed
+    // pointers require identical pointees. Assigning an integer-family value
+    // (the null-literal `0` convention) to a pointer target is allowed
+    // structurally here - the backend (g++) rejects any non-zero
+    // non-pointer-constant case, the same "defer to the backend" pattern
+    // used elsewhere in this codebase. Assigning a pointer to a non-pointer
+    // target is never allowed.
+    bool targetIsPtr = targetType.kind == TypeKind::Pointer;
+    bool valueIsPtr = valueType.kind == TypeKind::Pointer;
+    if (targetIsPtr || valueIsPtr) {
+        if (targetIsPtr && valueIsPtr) {
+            if (!targetType.pointee || !valueType.pointee) return true;
+            return pointeesIdentical(*targetType.pointee, *valueType.pointee);
+        }
+        return targetIsPtr && isIntegerFamily(valueType.kind);
+    }
+
     bool targetIsString = targetType.kind == TypeKind::StringT;
     bool valueIsString = valueType.kind == TypeKind::StringT;
     if (targetIsString != valueIsString) return false;
@@ -167,6 +202,25 @@ const ProcedureInfo* Sema::findProcedure(const std::string& key) const {
     return it != procedures_.end() ? &it->second : nullptr;
 }
 
+bool Sema::isLvalue(const Expr& expr) const {
+    switch (expr.kind) {
+        case ExprKind::Ident:
+            return true; // undeclared names are reported separately by checkExpr
+        case ExprKind::Member:
+            return true; // fields are always assignable (no const fields yet)
+        case ExprKind::Deref:
+            return true; // *p is always addressable when p is a pointer
+        case ExprKind::Call: {
+            // An array-element read is an lvalue; a function-call result is not.
+            if (expr.lhs) return false; // qualified calls are always procedure calls
+            SymbolInfo info;
+            return lookupSymbol(canonicalName(expr.stringValue), info) && info.isArray;
+        }
+        default:
+            return false;
+    }
+}
+
 void Sema::checkCallArgs(const ProcedureInfo& proc, std::vector<ExprPtr>& args, SourceLoc loc) {
     if (args.size() != proc.params.size()) {
         diags_.error(loc, "expected " + std::to_string(proc.params.size()) + " argument(s), got " +
@@ -182,13 +236,15 @@ void Sema::checkCallArgs(const ProcedureInfo& proc, std::vector<ExprPtr>& args, 
                                        " type does not match parameter '" + param.name + "'");
         }
         if (param.byRef) {
-            bool isPlainVar = arg.kind == ExprKind::Ident;
-            SymbolInfo info;
-            bool isConstVar = isPlainVar && lookupSymbol(canonicalName(arg.stringValue), info) &&
-                               info.isConst;
-            if (!isPlainVar || isConstVar) {
+            bool isConstVar = false;
+            if (arg.kind == ExprKind::Ident) {
+                SymbolInfo info;
+                isConstVar = lookupSymbol(canonicalName(arg.stringValue), info) && info.isConst;
+            }
+            if (!isLvalue(arg) || isConstVar) {
                 diags_.error(arg.loc, "argument " + std::to_string(i + 1) + " passed to BYREF "
-                                       "parameter '" + param.name + "' must be a plain variable");
+                                       "parameter '" + param.name + "' must be an addressable "
+                                       "value (a variable, field, or array element)");
             }
         }
     }
@@ -752,6 +808,35 @@ Type Sema::checkExpr(Expr& expr) {
             expr.type = TypeKind::Unknown;
             return expr.type;
         }
+        case ExprKind::AddressOf: {
+            if (!isLvalue(*expr.lhs)) {
+                diags_.error(expr.loc,
+                             "'@' requires an addressable value (a variable, field, or array element)");
+            }
+            Type operandType = checkExpr(*expr.lhs);
+            Type result;
+            result.kind = TypeKind::Pointer;
+            result.pointee = std::make_shared<Type>(operandType);
+            expr.type = result;
+            return expr.type;
+        }
+        case ExprKind::Deref: {
+            Type operandType = checkExpr(*expr.lhs);
+            if (operandType.kind != TypeKind::Pointer) {
+                if (operandType.kind != TypeKind::Unknown) {
+                    diags_.error(expr.loc, "'*' requires a pointer operand");
+                }
+                expr.type = TypeKind::Unknown;
+                return expr.type;
+            }
+            if (!operandType.pointee) {
+                diags_.error(expr.loc, "cannot dereference an ANY PTR (its type is unknown)");
+                expr.type = TypeKind::Unknown;
+                return expr.type;
+            }
+            expr.type = *operandType.pointee;
+            return expr.type;
+        }
         case ExprKind::UnaryNeg: {
             TypeKind t = checkExpr(*expr.lhs);
             if (!isNumericType(t)) {
@@ -773,8 +858,8 @@ Type Sema::checkExpr(Expr& expr) {
             return expr.type;
         }
         case ExprKind::Binary: {
-            TypeKind lt = checkExpr(*expr.lhs);
-            TypeKind rt = checkExpr(*expr.rhs);
+            Type lt = checkExpr(*expr.lhs);
+            Type rt = checkExpr(*expr.rhs);
 
             switch (expr.binOp) {
                 case BinOp::Concat:
@@ -785,7 +870,51 @@ Type Sema::checkExpr(Expr& expr) {
                     return expr.type;
 
                 case BinOp::Add:
+                    // Pointer arithmetic (verified against FB docs): p + n
+                    // scales by the pointee's size, matching C++'s own
+                    // pointer arithmetic natively - codegen just reuses the
+                    // plain '+' emission and lets C++ do the scaling.
+                    if (lt.kind == TypeKind::Pointer && isIntegerFamily(rt.kind)) {
+                        expr.type = lt;
+                        return expr.type;
+                    }
+                    if (rt.kind == TypeKind::Pointer && isIntegerFamily(lt.kind)) {
+                        expr.type = rt;
+                        return expr.type;
+                    }
+                    if (!isNumericType(lt) || !isNumericType(rt)) {
+                        diags_.error(expr.loc, "arithmetic operators require numeric operands");
+                        expr.type = TypeKind::Integer;
+                        return expr.type;
+                    }
+                    expr.type = promoteNumeric(lt, rt);
+                    return expr.type;
+
                 case BinOp::Sub:
+                    if (lt.kind == TypeKind::Pointer && rt.kind == TypeKind::Pointer) {
+                        // Pointer difference (verified: legal, result is in
+                        // elements, like C++'s own ptrdiff_t subtraction).
+                        bool compatible = !lt.pointee || !rt.pointee ||
+                                          pointeesIdentical(*lt.pointee, *rt.pointee);
+                        if (!compatible) {
+                            diags_.error(expr.loc,
+                                         "pointer subtraction requires two pointers of the same type");
+                        }
+                        expr.type = TypeKind::LongInt;
+                        return expr.type;
+                    }
+                    if (lt.kind == TypeKind::Pointer && isIntegerFamily(rt.kind)) {
+                        expr.type = lt;
+                        return expr.type;
+                    }
+                    if (!isNumericType(lt) || !isNumericType(rt)) {
+                        diags_.error(expr.loc, "arithmetic operators require numeric operands");
+                        expr.type = TypeKind::Integer;
+                        return expr.type;
+                    }
+                    expr.type = promoteNumeric(lt, rt);
+                    return expr.type;
+
                 case BinOp::Mul:
                     if (!isNumericType(lt) || !isNumericType(rt)) {
                         diags_.error(expr.loc, "arithmetic operators require numeric operands");
@@ -844,7 +973,16 @@ Type Sema::checkExpr(Expr& expr) {
                 case BinOp::Lt:
                 case BinOp::Le:
                 case BinOp::Gt:
-                case BinOp::Ge:
+                case BinOp::Ge: {
+                    bool bothPointers = lt.kind == TypeKind::Pointer && rt.kind == TypeKind::Pointer;
+                    // A pointer compared against a plain integer covers the
+                    // common `p = 0` / `p <> 0` null check.
+                    bool pointerVsInt = (lt.kind == TypeKind::Pointer && isIntegerFamily(rt.kind)) ||
+                                        (rt.kind == TypeKind::Pointer && isIntegerFamily(lt.kind));
+                    if (bothPointers || pointerVsInt) {
+                        expr.type = TypeKind::Boolean;
+                        return expr.type;
+                    }
                     if (!((isNumericType(lt) && isNumericType(rt)) ||
                           (lt == TypeKind::StringT && rt == TypeKind::StringT))) {
                         diags_.error(expr.loc,
@@ -853,6 +991,7 @@ Type Sema::checkExpr(Expr& expr) {
                     }
                     expr.type = TypeKind::Boolean;
                     return expr.type;
+                }
 
                 case BinOp::And:
                 case BinOp::Or:
@@ -889,6 +1028,9 @@ bool Sema::isConstantExpr(const Expr& expr) const {
             return false; // array elements and function calls are never compile-time constants here
         case ExprKind::Member:
             return false; // field access is never a compile-time constant here
+        case ExprKind::AddressOf:
+        case ExprKind::Deref:
+            return false; // pointer ops are never compile-time constants here
         case ExprKind::UnaryNeg:
         case ExprKind::UnaryNot:
             return isConstantExpr(*expr.lhs);

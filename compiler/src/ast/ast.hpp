@@ -52,11 +52,15 @@ enum class ExprKind {
     // for a later milestone).
     Call,
     // Field access `base.field`: lhs = base expression, stringValue = field
-    // name.
+    // name. `p->field` is desugared by the parser into
+    // Member{lhs=Deref{lhs=p}, stringValue=field} - Sema/Codegen need no
+    // special-casing for the arrow form.
     Member,
     Binary,
     UnaryNeg,
     UnaryNot,
+    AddressOf, // `@x`: lhs = operand (must be an lvalue - see Sema::isLvalue)
+    Deref,     // `*p`: lhs = pointer operand
 };
 
 enum class BinOp {

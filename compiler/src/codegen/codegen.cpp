@@ -35,6 +35,8 @@ std::string Codegen::cppType(const Type& type) {
         // name can't collide with any variable's mangled name.
         case TypeKind::UserDefined: return mangleName(type.typeName);
         case TypeKind::Pointer:
+            // ANY PTR (null pointee) is FB's void*-equivalent.
+            return type.pointee ? (cppType(*type.pointee) + "*") : "void*";
         case TypeKind::Unknown: break;
     }
     throw std::runtime_error("codegen: unresolved type reached codegen");
@@ -109,6 +111,10 @@ std::string Codegen::genExpr(const Expr& expr) {
                 return mangleName(expr.lhs->stringValue) + "::" + mangleName(expr.stringValue);
             }
             return genExpr(*expr.lhs) + "." + mangleName(expr.stringValue);
+        case ExprKind::AddressOf:
+            return "(&(" + genExpr(*expr.lhs) + "))";
+        case ExprKind::Deref:
+            return "(*(" + genExpr(*expr.lhs) + "))";
         case ExprKind::UnaryNeg:
             return "(-" + genExpr(*expr.lhs) + ")";
         case ExprKind::UnaryNot:
@@ -543,6 +549,18 @@ std::string Codegen::generate(const Module& module) {
             namespaces_.insert(canonicalName(stmtPtr->name));
         }
     }
+
+    // Forward-declare every TYPE before any full definition. A pointer field
+    // (self-referential, e.g. a linked-list Node, or pointing at another TYPE
+    // declared later in the file) only needs the pointee's name in scope, not
+    // its full definition - genTypeDecl's dependency ordering below only
+    // pulls in embedded-by-value fields, so a bare pointer target might
+    // otherwise reach the backend as an undeclared type.
+    for (const auto& [name, declStmt] : typeDeclsByName_) {
+        (void)declStmt;
+        typesOut_ << "struct " << mangleName(name) << ";\n";
+    }
+    if (!typeDeclsByName_.empty()) typesOut_ << "\n";
 
     std::ostringstream mainOut;
     bool insideGosub = false;

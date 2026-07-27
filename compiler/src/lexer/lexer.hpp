@@ -31,6 +31,8 @@ enum class TokenKind {
     GreaterEq,
     Comma,
     Dot,
+    At,     // '@' address-of prefix operator
+    Arrow,  // '->' member-through-pointer, desugared by the parser
     KwDim,
     KwAs,
     KwPrint,
@@ -87,6 +89,8 @@ enum class TokenKind {
     KwGosub,
     KwType,
     KwNamespace,
+    KwPtr,
+    KwAny,
 };
 
 struct Token {

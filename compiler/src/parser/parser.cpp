@@ -71,33 +71,51 @@ Module Parser::parseModule() {
 }
 
 Type Parser::parseTypeKeyword() {
-    if (match(TokenKind::KwByte)) return TypeKind::Byte;
-    if (match(TokenKind::KwUByte)) return TypeKind::UByte;
-    if (match(TokenKind::KwShort)) return TypeKind::Short;
-    if (match(TokenKind::KwUShort)) return TypeKind::UShort;
-    if (match(TokenKind::KwInteger)) return TypeKind::Integer;
-    if (match(TokenKind::KwLong)) return TypeKind::Long;
-    if (match(TokenKind::KwUInteger)) return TypeKind::UInteger;
-    if (match(TokenKind::KwLongInt)) return TypeKind::LongInt;
-    if (match(TokenKind::KwULongInt)) return TypeKind::ULongInt;
-    if (match(TokenKind::KwSingle)) return TypeKind::Single;
-    if (match(TokenKind::KwDouble)) return TypeKind::Double;
-    if (match(TokenKind::KwBoolean)) return TypeKind::Boolean;
-    if (match(TokenKind::KwString)) return TypeKind::StringT;
-    if (check(TokenKind::Identifier)) {
+    Type base;
+    if (match(TokenKind::KwByte)) base = TypeKind::Byte;
+    else if (match(TokenKind::KwUByte)) base = TypeKind::UByte;
+    else if (match(TokenKind::KwShort)) base = TypeKind::Short;
+    else if (match(TokenKind::KwUShort)) base = TypeKind::UShort;
+    else if (match(TokenKind::KwInteger)) base = TypeKind::Integer;
+    else if (match(TokenKind::KwLong)) base = TypeKind::Long;
+    else if (match(TokenKind::KwUInteger)) base = TypeKind::UInteger;
+    else if (match(TokenKind::KwLongInt)) base = TypeKind::LongInt;
+    else if (match(TokenKind::KwULongInt)) base = TypeKind::ULongInt;
+    else if (match(TokenKind::KwSingle)) base = TypeKind::Single;
+    else if (match(TokenKind::KwDouble)) base = TypeKind::Double;
+    else if (match(TokenKind::KwBoolean)) base = TypeKind::Boolean;
+    else if (match(TokenKind::KwString)) base = TypeKind::StringT;
+    else if (match(TokenKind::KwAny)) {
+        // ANY PTR is FB's untyped/void*-equivalent pointer; ANY alone is not
+        // a usable type. Represented as Pointer with a null pointee.
+        expect(TokenKind::KwPtr, "expected PTR after ANY");
+        base.kind = TypeKind::Pointer;
+        base.pointee = nullptr;
+        // Fall through to the trailing-PTR loop below (ANY PTR PTR is legal
+        // per FB docs: an Any Ptr Ptr may be dereferenced to yield an Any Ptr).
+    } else if (check(TokenKind::Identifier)) {
         // A user-defined TYPE name. Whether this identifier actually names a
         // declared TYPE is a Sema question, not a parser one - same
         // deferred-disambiguation philosophy as the Call expression (array
         // read vs. function call), resolved by looking up what it names.
-        Type t;
-        t.kind = TypeKind::UserDefined;
-        t.typeName = advance().text;
-        return t;
+        base.kind = TypeKind::UserDefined;
+        base.typeName = advance().text;
+    } else {
+        diags_.error(peek().loc,
+                     "expected a type name (BYTE, UBYTE, SHORT, USHORT, INTEGER, LONG, UINTEGER, "
+                     "LONGINT, ULONGINT, SINGLE, DOUBLE, BOOLEAN, STRING, ANY PTR, or a declared "
+                     "TYPE name)");
+        return TypeKind::Unknown;
     }
-    diags_.error(peek().loc,
-                 "expected a type name (BYTE, UBYTE, SHORT, USHORT, INTEGER, LONG, UINTEGER, "
-                 "LONGINT, ULONGINT, SINGLE, DOUBLE, BOOLEAN, STRING, or a declared TYPE name)");
-    return TypeKind::Unknown;
+
+    // Postfix PTR suffix(es): `Type PTR` and multi-level `Type PTR PTR`.
+    while (match(TokenKind::KwPtr)) {
+        Type wrapped;
+        wrapped.kind = TypeKind::Pointer;
+        wrapped.pointee = std::make_shared<Type>(base);
+        base = wrapped;
+    }
+    return base;
 }
 
 StmtPtr Parser::parseDim() {
@@ -283,8 +301,19 @@ StmtPtr Parser::parsePrint() {
 }
 
 ExprPtr Parser::parseMemberOrCallChain(ExprPtr base) {
-    while (base && match(TokenKind::Dot)) {
-        const Token& fieldTok = expect(TokenKind::Identifier, "expected a name after '.'");
+    while (base && (check(TokenKind::Dot) || check(TokenKind::Arrow))) {
+        bool isArrow = check(TokenKind::Arrow);
+        advance();
+        if (isArrow) {
+            // `p->field` is pure sugar for `(*p).field` - desugar here so
+            // Sema/Codegen need no special-casing for the arrow form.
+            auto deref = std::make_unique<Expr>();
+            deref->kind = ExprKind::Deref;
+            deref->loc = base->loc;
+            deref->lhs = std::move(base);
+            base = std::move(deref);
+        }
+        const Token& fieldTok = expect(TokenKind::Identifier, "expected a name after '.' or '->'");
         if (match(TokenKind::LParen)) {
             // A possibly-qualified call: base.Name(args) - base becomes the
             // qualifier (currently only meaningful as a namespace name).
@@ -315,11 +344,23 @@ ExprPtr Parser::parseMemberOrCallChain(ExprPtr base) {
 
 StmtPtr Parser::parseAssign() {
     SourceLoc loc = peek().loc;
-    std::string name = advance().text; // identifier
 
     auto stmt = std::make_unique<Stmt>();
     stmt->kind = StmtKind::Assign;
     stmt->loc = loc;
+
+    if (check(TokenKind::Star)) {
+        // `*p = expr` - assignment through a pointer dereference. Reuses
+        // the same unary-op parser as read position, so `*p->next = expr`
+        // etc. resolve identically on both sides of '='.
+        stmt->target = parseUnaryPtrOps();
+        expect(TokenKind::Equals, "expected '=' in assignment");
+        stmt->expr = parseExpr();
+        expectStmtEnd();
+        return stmt;
+    }
+
+    std::string name = advance().text; // identifier
     stmt->name = name;
 
     bool isReturnAssign =
@@ -330,7 +371,7 @@ StmtPtr Parser::parseAssign() {
         if (match(TokenKind::LParen)) {
             ExprPtr idx = parseExpr();
             expect(TokenKind::RParen, "expected ')' after array index");
-            if (check(TokenKind::Dot)) {
+            if (check(TokenKind::Dot) || check(TokenKind::Arrow)) {
                 // name(idx).field... - becomes a general lvalue chain.
                 auto call = std::make_unique<Expr>();
                 call->kind = ExprKind::Call;
@@ -341,7 +382,7 @@ StmtPtr Parser::parseAssign() {
             } else {
                 stmt->index = std::move(idx); // fast path: name(idx) = expr
             }
-        } else if (check(TokenKind::Dot)) {
+        } else if (check(TokenKind::Dot) || check(TokenKind::Arrow)) {
             auto ident = std::make_unique<Expr>();
             ident->kind = ExprKind::Ident;
             ident->loc = loc;
@@ -396,6 +437,7 @@ StmtPtr Parser::parseStatement() {
         return parseLabel();
     }
     if (check(TokenKind::Identifier)) return parseAssign();
+    if (check(TokenKind::Star)) return parseAssign(); // `*p = expr`
 
     diags_.error(peek().loc, "expected a statement");
     synchronize();
@@ -899,7 +941,7 @@ ExprPtr Parser::parseNegate() {
 }
 
 ExprPtr Parser::parsePow() {
-    ExprPtr left = parsePrimary();
+    ExprPtr left = parseUnaryPtrOps();
     while (check(TokenKind::Caret)) {
         SourceLoc loc = peek().loc;
         advance();
@@ -908,6 +950,31 @@ ExprPtr Parser::parsePow() {
         left = makeBinary(BinOp::Pow, loc, std::move(left), parseNegate());
     }
     return left;
+}
+
+// '@' (address-of) and unary '*' (dereference) bind tighter than '^',
+// matching FB's documented precedence table. Right-associative (rare but
+// harmless: `@@x`/`**p`).
+ExprPtr Parser::parseUnaryPtrOps() {
+    if (check(TokenKind::At)) {
+        SourceLoc loc = peek().loc;
+        advance();
+        auto expr = std::make_unique<Expr>();
+        expr->kind = ExprKind::AddressOf;
+        expr->loc = loc;
+        expr->lhs = parseUnaryPtrOps();
+        return expr;
+    }
+    if (check(TokenKind::Star)) {
+        SourceLoc loc = peek().loc;
+        advance();
+        auto expr = std::make_unique<Expr>();
+        expr->kind = ExprKind::Deref;
+        expr->loc = loc;
+        expr->lhs = parseUnaryPtrOps();
+        return expr;
+    }
+    return parsePrimary();
 }
 
 ExprPtr Parser::parsePrimary() {
@@ -974,7 +1041,7 @@ ExprPtr Parser::parsePrimary() {
     if (match(TokenKind::LParen)) {
         ExprPtr inner = parseExpr();
         expect(TokenKind::RParen, "expected ')'");
-        return inner;
+        return parseMemberOrCallChain(std::move(inner));
     }
 
     diags_.error(tok.loc, "expected an expression");

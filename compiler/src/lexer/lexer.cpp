@@ -152,6 +152,7 @@ Token Lexer::lexIdentifierOrKeyword() {
         {"CALL", TokenKind::KwCall},       {"REDIM", TokenKind::KwRedim},
         {"PRESERVE", TokenKind::KwPreserve}, {"GOSUB", TokenKind::KwGosub},
         {"TYPE", TokenKind::KwType},       {"NAMESPACE", TokenKind::KwNamespace},
+        {"PTR", TokenKind::KwPtr},         {"ANY", TokenKind::KwAny},
     };
 
     auto it = keywords.find(upper);
@@ -199,7 +200,12 @@ std::vector<Token> Lexer::tokenize() {
 
         switch (c) {
             case '+': advance(); tokens.push_back(makeToken(TokenKind::Plus, "+", loc)); continue;
-            case '-': advance(); tokens.push_back(makeToken(TokenKind::Minus, "-", loc)); continue;
+            case '-':
+                advance();
+                if (peek() == '>') { advance(); tokens.push_back(makeToken(TokenKind::Arrow, "->", loc)); }
+                else { tokens.push_back(makeToken(TokenKind::Minus, "-", loc)); }
+                continue;
+            case '@': advance(); tokens.push_back(makeToken(TokenKind::At, "@", loc)); continue;
             case '*': advance(); tokens.push_back(makeToken(TokenKind::Star, "*", loc)); continue;
             case '/': advance(); tokens.push_back(makeToken(TokenKind::Slash, "/", loc)); continue;
             case '\\': advance(); tokens.push_back(makeToken(TokenKind::Backslash, "\\", loc)); continue;
