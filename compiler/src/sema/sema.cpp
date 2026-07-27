@@ -10,13 +10,41 @@ std::string Sema::canonicalName(const std::string& name) {
     return r;
 }
 
+namespace {
+bool isCaseCompatible(TypeKind a, TypeKind b) {
+    return (isNumericType(a) && isNumericType(b)) || (a == TypeKind::StringT && b == TypeKind::StringT);
+}
+} // namespace
+
 void Sema::check(Module& module) {
-    for (auto& stmt : module.stmts) {
-        checkStmt(*stmt);
+    collectLabels(module.stmts);
+    checkBlock(module.stmts, /*atTopLevel=*/true);
+}
+
+void Sema::collectLabels(std::vector<StmtPtr>& stmts) {
+    for (auto& stmt : stmts) {
+        if (stmt->kind != StmtKind::Label) continue;
+        std::string key = canonicalName(stmt->name);
+        if (!labels_.insert(key).second) {
+            diags_.error(stmt->loc, "label '" + stmt->name + "' is already declared");
+        }
     }
 }
 
-void Sema::checkStmt(Stmt& stmt) {
+void Sema::checkBlock(std::vector<StmtPtr>& stmts, bool atTopLevel) {
+    for (auto& stmt : stmts) {
+        checkStmt(*stmt, atTopLevel);
+    }
+}
+
+void Sema::checkCondition(Expr& expr, const char* what) {
+    TypeKind t = checkExpr(expr);
+    if (!isNumericType(t)) {
+        diags_.error(expr.loc, std::string(what) + " must be a numeric expression");
+    }
+}
+
+void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
     switch (stmt.kind) {
         case StmtKind::Dim: {
             std::string key = canonicalName(stmt.name);
@@ -48,6 +76,100 @@ void Sema::checkStmt(Stmt& stmt) {
         case StmtKind::Print: {
             for (auto& arg : stmt.args) {
                 checkExpr(*arg);
+            }
+            return;
+        }
+        case StmtKind::If: {
+            for (auto& cond : stmt.conditions) {
+                checkCondition(*cond, "IF/ELSEIF condition");
+            }
+            for (auto& block : stmt.blocks) {
+                checkBlock(block, /*atTopLevel=*/false);
+            }
+            return;
+        }
+        case StmtKind::SelectCase: {
+            TypeKind selectorType = checkExpr(*stmt.expr);
+            for (size_t i = 0; i < stmt.cases.size(); ++i) {
+                CaseArm& arm = stmt.cases[i];
+                if (arm.isElse && i + 1 != stmt.cases.size()) {
+                    diags_.error(stmt.loc, "CASE ELSE must be the last CASE in a SELECT CASE");
+                }
+                for (auto& match : arm.matches) {
+                    TypeKind matchType = checkExpr(*match);
+                    if (!isCaseCompatible(selectorType, matchType)) {
+                        diags_.error(match->loc,
+                                     "CASE value is not comparable to the SELECT CASE expression");
+                    }
+                }
+                checkBlock(arm.body, /*atTopLevel=*/false);
+            }
+            return;
+        }
+        case StmtKind::ForNext: {
+            std::string key = canonicalName(stmt.name);
+            auto it = symbols_.find(key);
+            if (it == symbols_.end()) {
+                diags_.error(stmt.loc, "variable '" + stmt.name + "' is not declared");
+            } else if (!isNumericType(it->second)) {
+                diags_.error(stmt.loc, "FOR loop variable '" + stmt.name + "' must be numeric");
+            }
+            checkCondition(*stmt.expr, "FOR start value");
+            checkCondition(*stmt.forEnd, "FOR end value (TO)");
+            if (stmt.forStep) checkCondition(*stmt.forStep, "FOR step value");
+            loopStack_.push_back(LoopKind::For);
+            checkBlock(stmt.body, /*atTopLevel=*/false);
+            loopStack_.pop_back();
+            return;
+        }
+        case StmtKind::DoLoop: {
+            if (stmt.preTest != LoopTest::None) checkCondition(*stmt.preCond, "DO condition");
+            loopStack_.push_back(LoopKind::Do);
+            checkBlock(stmt.body, /*atTopLevel=*/false);
+            loopStack_.pop_back();
+            if (stmt.postTest != LoopTest::None) checkCondition(*stmt.postCond, "LOOP condition");
+            return;
+        }
+        case StmtKind::WhileWend: {
+            checkCondition(*stmt.expr, "WHILE condition");
+            loopStack_.push_back(LoopKind::While);
+            checkBlock(stmt.body, /*atTopLevel=*/false);
+            loopStack_.pop_back();
+            return;
+        }
+        case StmtKind::Goto: {
+            if (!atTopLevel) {
+                diags_.error(stmt.loc,
+                             "GOTO is only supported at the top level of a program in this "
+                             "version of ebc");
+            }
+            if (!labels_.count(canonicalName(stmt.name))) {
+                diags_.error(stmt.loc, "label '" + stmt.name + "' is not defined");
+            }
+            return;
+        }
+        case StmtKind::Label: {
+            if (!atTopLevel) {
+                diags_.error(stmt.loc,
+                             "labels are only supported at the top level of a program in this "
+                             "version of ebc");
+            }
+            return;
+        }
+        case StmtKind::ExitLoop: {
+            bool found = false;
+            for (auto it = loopStack_.rbegin(); it != loopStack_.rend(); ++it) {
+                if (*it == stmt.exitKind) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                const char* kind = stmt.exitKind == LoopKind::For   ? "FOR"
+                                   : stmt.exitKind == LoopKind::Do  ? "DO"
+                                                                    : "WHILE";
+                diags_.error(stmt.loc,
+                             std::string("EXIT ") + kind + " used outside of a matching loop");
             }
             return;
         }

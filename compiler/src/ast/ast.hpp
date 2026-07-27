@@ -169,19 +169,73 @@ enum class StmtKind {
     Dim,
     Assign,
     Print,
+    If,
+    SelectCase,
+    ForNext,
+    DoLoop,
+    WhileWend,
+    Goto,
+    Label,
+    ExitLoop,
+};
+
+// Which loop-introducing keyword a loop was opened with. EXIT FOR/DO/WHILE
+// each target the nearest enclosing loop of the matching kind specifically
+// (which may not be the innermost loop, e.g. EXIT FOR from inside a nested
+// DO loop exits the enclosing FOR, not just the DO).
+enum class LoopKind {
+    For,
+    Do,
+    While,
+};
+
+// DO ... LOOP's optional pre-test (after DO) and post-test (after LOOP).
+enum class LoopTest {
+    None,
+    While,
+    Until,
+};
+
+struct Stmt;
+using StmtPtr = std::unique_ptr<Stmt>;
+
+// One CASE arm of a SELECT CASE: a list of values to match (empty + isElse
+// for CASE ELSE) and the statements to run when matched. CASE val1 TO val2
+// and CASE IS <op> val ranges are not supported yet.
+struct CaseArm {
+    std::vector<ExprPtr> matches;
+    bool isElse = false;
+    std::vector<StmtPtr> body;
 };
 
 struct Stmt {
     StmtKind kind;
     SourceLoc loc;
 
-    std::string name;                        // Dim, Assign
-    TypeKind declaredType = TypeKind::Unknown; // Dim
-    ExprPtr expr;                             // Assign
-    std::vector<ExprPtr> args;                // Print
-};
+    std::string name;                          // Dim, Assign, ForNext (loop var), Goto/Label
+    TypeKind declaredType = TypeKind::Unknown;  // Dim
+    ExprPtr expr;                               // Assign value; If/SelectCase/WhileWend condition/selector; ForNext start
+    std::vector<ExprPtr> args;                  // Print
 
-using StmtPtr = std::unique_ptr<Stmt>;
+    // If: one condition per IF/ELSEIF branch, and one body per branch in
+    // `blocks`. If hasElse, `blocks` has one extra trailing entry for ELSE.
+    std::vector<ExprPtr> conditions;
+    std::vector<std::vector<StmtPtr>> blocks;
+    bool hasElse = false;
+
+    std::vector<CaseArm> cases; // SelectCase
+
+    ExprPtr forEnd;               // ForNext: TO bound
+    ExprPtr forStep;              // ForNext: STEP value (nullptr => 1)
+    std::vector<StmtPtr> body;    // ForNext / WhileWend / DoLoop body
+
+    LoopTest preTest = LoopTest::None;  // DoLoop: DO [WHILE|UNTIL cond]
+    ExprPtr preCond;
+    LoopTest postTest = LoopTest::None; // DoLoop: LOOP [WHILE|UNTIL cond]
+    ExprPtr postCond;
+
+    LoopKind exitKind = LoopKind::For; // ExitLoop: which loop kind to exit
+};
 
 struct Module {
     std::vector<StmtPtr> stmts;

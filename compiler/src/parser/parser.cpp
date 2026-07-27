@@ -19,6 +19,13 @@ const Token& Parser::advance() {
 
 bool Parser::check(TokenKind kind) const { return peek().kind == kind; }
 
+bool Parser::checkAny(std::initializer_list<TokenKind> kinds) const {
+    for (TokenKind k : kinds) {
+        if (check(k)) return true;
+    }
+    return false;
+}
+
 bool Parser::match(TokenKind kind) {
     if (check(kind)) {
         advance();
@@ -136,14 +143,229 @@ StmtPtr Parser::parseAssign() {
     return stmt;
 }
 
+std::vector<StmtPtr> Parser::parseBlockUntil(std::initializer_list<TokenKind> terminators) {
+    std::vector<StmtPtr> stmts;
+    skipNewlines();
+    while (!checkAny(terminators) && !check(TokenKind::End)) {
+        StmtPtr stmt = parseStatement();
+        if (stmt) stmts.push_back(std::move(stmt));
+        skipNewlines();
+    }
+    return stmts;
+}
+
 StmtPtr Parser::parseStatement() {
     if (check(TokenKind::KwDim)) return parseDim();
     if (check(TokenKind::KwPrint)) return parsePrint();
+    if (check(TokenKind::KwIf)) return parseIf();
+    if (check(TokenKind::KwSelect)) return parseSelectCase();
+    if (check(TokenKind::KwFor)) return parseFor();
+    if (check(TokenKind::KwDo)) return parseDo();
+    if (check(TokenKind::KwWhile)) return parseWhile();
+    if (check(TokenKind::KwGoto)) return parseGoto();
+    if (check(TokenKind::KwExit)) return parseExit();
+    if (check(TokenKind::Identifier) && peek(1).kind == TokenKind::Newline &&
+        peek(1).text == ":") {
+        return parseLabel();
+    }
     if (check(TokenKind::Identifier)) return parseAssign();
 
     diags_.error(peek().loc, "expected a statement");
     synchronize();
     return nullptr;
+}
+
+StmtPtr Parser::parseIf() {
+    SourceLoc loc = peek().loc;
+    advance(); // IF
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->kind = StmtKind::If;
+    stmt->loc = loc;
+
+    stmt->conditions.push_back(parseExpr());
+    expect(TokenKind::KwThen, "expected THEN after IF condition");
+    expectStmtEnd(); // block-form IF only; single-line IF...THEN is not supported yet
+
+    stmt->blocks.push_back(parseBlockUntil({TokenKind::KwElseIf, TokenKind::KwElse, TokenKind::KwEnd}));
+
+    while (check(TokenKind::KwElseIf)) {
+        advance();
+        stmt->conditions.push_back(parseExpr());
+        expect(TokenKind::KwThen, "expected THEN after ELSEIF condition");
+        expectStmtEnd();
+        stmt->blocks.push_back(
+            parseBlockUntil({TokenKind::KwElseIf, TokenKind::KwElse, TokenKind::KwEnd}));
+    }
+
+    if (check(TokenKind::KwElse)) {
+        advance();
+        expectStmtEnd();
+        stmt->blocks.push_back(parseBlockUntil({TokenKind::KwEnd}));
+        stmt->hasElse = true;
+    }
+
+    expect(TokenKind::KwEnd, "expected END IF");
+    expect(TokenKind::KwIf, "expected END IF");
+    expectStmtEnd();
+    return stmt;
+}
+
+StmtPtr Parser::parseSelectCase() {
+    SourceLoc loc = peek().loc;
+    advance(); // SELECT
+    expect(TokenKind::KwCase, "expected CASE after SELECT");
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->kind = StmtKind::SelectCase;
+    stmt->loc = loc;
+    stmt->expr = parseExpr();
+    expectStmtEnd();
+    skipNewlines();
+
+    while (check(TokenKind::KwCase)) {
+        advance();
+        CaseArm arm;
+        if (check(TokenKind::KwElse)) {
+            advance();
+            arm.isElse = true;
+        } else {
+            arm.matches.push_back(parseExpr());
+            while (match(TokenKind::Comma)) {
+                arm.matches.push_back(parseExpr());
+            }
+        }
+        expectStmtEnd();
+        arm.body = parseBlockUntil({TokenKind::KwCase, TokenKind::KwEnd});
+        stmt->cases.push_back(std::move(arm));
+    }
+
+    expect(TokenKind::KwEnd, "expected END SELECT");
+    expect(TokenKind::KwSelect, "expected END SELECT");
+    expectStmtEnd();
+    return stmt;
+}
+
+StmtPtr Parser::parseFor() {
+    SourceLoc loc = peek().loc;
+    advance(); // FOR
+    const Token& nameTok = expect(TokenKind::Identifier, "expected loop variable name after FOR");
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->kind = StmtKind::ForNext;
+    stmt->loc = loc;
+    stmt->name = nameTok.text;
+
+    expect(TokenKind::Equals, "expected '=' after FOR loop variable");
+    stmt->expr = parseExpr();
+    expect(TokenKind::KwTo, "expected TO in FOR statement");
+    stmt->forEnd = parseExpr();
+    if (match(TokenKind::KwStep)) {
+        stmt->forStep = parseExpr();
+    }
+    expectStmtEnd();
+
+    stmt->body = parseBlockUntil({TokenKind::KwNext});
+    expect(TokenKind::KwNext, "expected NEXT to close FOR");
+    if (check(TokenKind::Identifier)) {
+        if (peek().text != stmt->name) {
+            diags_.error(peek().loc,
+                         "NEXT variable '" + peek().text + "' does not match FOR variable '" +
+                             stmt->name + "'");
+        }
+        advance();
+    }
+    expectStmtEnd();
+    return stmt;
+}
+
+StmtPtr Parser::parseDo() {
+    SourceLoc loc = peek().loc;
+    advance(); // DO
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->kind = StmtKind::DoLoop;
+    stmt->loc = loc;
+
+    if (match(TokenKind::KwWhile)) {
+        stmt->preTest = LoopTest::While;
+        stmt->preCond = parseExpr();
+    } else if (match(TokenKind::KwUntil)) {
+        stmt->preTest = LoopTest::Until;
+        stmt->preCond = parseExpr();
+    }
+    expectStmtEnd();
+
+    stmt->body = parseBlockUntil({TokenKind::KwLoop});
+    expect(TokenKind::KwLoop, "expected LOOP to close DO");
+
+    if (match(TokenKind::KwWhile)) {
+        stmt->postTest = LoopTest::While;
+        stmt->postCond = parseExpr();
+    } else if (match(TokenKind::KwUntil)) {
+        stmt->postTest = LoopTest::Until;
+        stmt->postCond = parseExpr();
+    }
+    expectStmtEnd();
+    return stmt;
+}
+
+StmtPtr Parser::parseWhile() {
+    SourceLoc loc = peek().loc;
+    advance(); // WHILE
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->kind = StmtKind::WhileWend;
+    stmt->loc = loc;
+    stmt->expr = parseExpr();
+    expectStmtEnd();
+
+    stmt->body = parseBlockUntil({TokenKind::KwWend});
+    expect(TokenKind::KwWend, "expected WEND to close WHILE");
+    expectStmtEnd();
+    return stmt;
+}
+
+StmtPtr Parser::parseGoto() {
+    SourceLoc loc = peek().loc;
+    advance(); // GOTO
+    const Token& nameTok = expect(TokenKind::Identifier, "expected a label name after GOTO");
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->kind = StmtKind::Goto;
+    stmt->loc = loc;
+    stmt->name = nameTok.text;
+    expectStmtEnd();
+    return stmt;
+}
+
+StmtPtr Parser::parseLabel() {
+    SourceLoc loc = peek().loc;
+    std::string name = advance().text; // identifier
+    advance(); // the ':' (lexed as a Newline-kind separator token)
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->kind = StmtKind::Label;
+    stmt->loc = loc;
+    stmt->name = name;
+    return stmt;
+}
+
+StmtPtr Parser::parseExit() {
+    SourceLoc loc = peek().loc;
+    advance(); // EXIT
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->kind = StmtKind::ExitLoop;
+    stmt->loc = loc;
+
+    if (match(TokenKind::KwFor)) stmt->exitKind = LoopKind::For;
+    else if (match(TokenKind::KwDo)) stmt->exitKind = LoopKind::Do;
+    else if (match(TokenKind::KwWhile)) stmt->exitKind = LoopKind::While;
+    else diags_.error(peek().loc, "expected FOR, DO, or WHILE after EXIT");
+
+    expectStmtEnd();
+    return stmt;
 }
 
 // Expression grammar, loosest-binding to tightest-binding, matching

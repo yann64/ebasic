@@ -78,6 +78,13 @@ M1–M3 are the bulk of "FreeBASIC-compatible" work and will likely split furthe
 - Operators implemented with FreeBASIC's documented precedence: `^` > unary `-` > `*`/`/` > `\` > `MOD` > `SHL`/`SHR` > `+`/`-` > `&` > relational (`=`/`<>`/`<`/`<=`/`>=`/`>`) > `NOT` > `AND` > `OR` > `XOR`. Not yet implemented (deferred, no user-facing need yet): `EQV`/`IMP`/`ANDALSO`/`ORELSE`, and the `CAST`/pointer/array-index/`Is` tiers (need pointers/arrays/OOP first).
 - `/` is always real division (promotes to `DOUBLE` even for two integer operands); `\` and `MOD` require integer-family operands (no implicit float truncation yet — pass already-integer values). `^` always yields a `DOUBLE` result; FB's integer-result special case for non-negative integer exponents is deferred.
 
+## M1b Implementation Notes (control flow, done)
+
+- Implemented: block-form `IF`/`ELSEIF`/`ELSE`/`END IF`; `SELECT CASE` with comma-separated value lists and `CASE ELSE` (must be last); `FOR`/`NEXT` with optional `STEP` (direction picked at runtime from the step's sign; `TO` bound and `STEP` are each evaluated once at loop entry, matching BASIC semantics, not re-evaluated per iteration); `DO`/`LOOP` with any combination of pre-test (`WHILE`/`UNTIL` after `DO`) and post-test (after `LOOP`); `WHILE`/`WEND`; `EXIT FOR`/`EXIT DO`/`EXIT WHILE`; `GOTO`/labels.
+- Not yet implemented (deferred): single-line `IF cond THEN stmt` shorthand (block `IF`/`END IF` only); `CASE val1 TO val2` and `CASE IS <op> val` range forms; the loop variable in `FOR` must already be `DIM`'d (no implicit declaration).
+- `EXIT FOR`/`DO`/`WHILE` target the nearest enclosing loop of that *specific* kind, which may not be the innermost loop (e.g. `EXIT FOR` from inside a nested `DO`). Codegen implements this with a per-loop-kind label placed after each loop and a `goto` to the nearest matching one — plain C++ `break` can't reach past an inner loop of a different kind.
+- `GOTO`/labels are restricted to the top level of a program (rejected inside `IF`/`SELECT CASE`/loop bodies) rather than attempting the general case, since jumping into/across nested C++ scopes that contain non-trivially-constructed locals (e.g. a `DIM ... AS STRING`) is exactly the open hazard already flagged above ("`GOTO` into scopes with non-trivial destructors"). Even at the top level, a forward `GOTO` that jumps over a `STRING` `DIM` is still possible to write and will surface as a backend `g++` error rather than being caught by `ebc` itself — a real gap, not yet closed.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

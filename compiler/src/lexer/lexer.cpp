@@ -128,7 +128,16 @@ Token Lexer::lexIdentifierOrKeyword() {
         {"MOD", TokenKind::KwMod},         {"AND", TokenKind::KwAnd},
         {"OR", TokenKind::KwOr},           {"XOR", TokenKind::KwXor},
         {"NOT", TokenKind::KwNot},         {"SHL", TokenKind::KwShl},
-        {"SHR", TokenKind::KwShr},
+        {"SHR", TokenKind::KwShr},         {"IF", TokenKind::KwIf},
+        {"THEN", TokenKind::KwThen},       {"ELSEIF", TokenKind::KwElseIf},
+        {"ELSE", TokenKind::KwElse},       {"END", TokenKind::KwEnd},
+        {"SELECT", TokenKind::KwSelect},   {"CASE", TokenKind::KwCase},
+        {"FOR", TokenKind::KwFor},         {"TO", TokenKind::KwTo},
+        {"STEP", TokenKind::KwStep},       {"NEXT", TokenKind::KwNext},
+        {"DO", TokenKind::KwDo},           {"LOOP", TokenKind::KwLoop},
+        {"WHILE", TokenKind::KwWhile},     {"WEND", TokenKind::KwWend},
+        {"UNTIL", TokenKind::KwUntil},     {"GOTO", TokenKind::KwGoto},
+        {"EXIT", TokenKind::KwExit},
     };
 
     auto it = keywords.find(upper);

@@ -1,0 +1,19 @@
+medium
+seven
+25
+5
+4
+3
+2
+1
+dowhile 0
+dowhile 1
+dowhile 2
+postuntil
+postuntil
+wend 0
+wend 1
+wend 2
+inner 1
+inner 2
+after goto

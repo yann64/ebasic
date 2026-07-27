@@ -4,6 +4,7 @@
 #include "diagnostics/diagnostics.hpp"
 #include "lexer/lexer.hpp"
 
+#include <initializer_list>
 #include <vector>
 
 namespace ebasic {
@@ -18,6 +19,7 @@ private:
     const Token& peek(int offset = 0) const;
     const Token& advance();
     bool check(TokenKind kind) const;
+    bool checkAny(std::initializer_list<TokenKind> kinds) const;
     bool match(TokenKind kind);
     const Token& expect(TokenKind kind, const std::string& message);
     void skipNewlines();
@@ -28,6 +30,18 @@ private:
     StmtPtr parseDim();
     StmtPtr parsePrint();
     StmtPtr parseAssign();
+    StmtPtr parseIf();
+    StmtPtr parseSelectCase();
+    StmtPtr parseFor();
+    StmtPtr parseDo();
+    StmtPtr parseWhile();
+    StmtPtr parseGoto();
+    StmtPtr parseLabel();
+    StmtPtr parseExit();
+
+    // Parses statements (skipping blank lines) until the next token is one
+    // of `terminators` or end-of-input.
+    std::vector<StmtPtr> parseBlockUntil(std::initializer_list<TokenKind> terminators);
 
     ExprPtr parseExpr();
     ExprPtr parseXor();

@@ -129,22 +129,158 @@ std::string Codegen::genExpr(const Expr& expr) {
     throw std::runtime_error("codegen: unknown expression kind");
 }
 
-void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out) {
+std::string Codegen::ind(int indent) { return std::string(static_cast<size_t>(indent) * 4, ' '); }
+
+std::string Codegen::nextName(const std::string& prefix) {
+    return prefix + std::to_string(tempCounter_++);
+}
+
+std::string Codegen::genCondition(const Expr& expr) {
+    return "(" + genExpr(expr) + " != 0)";
+}
+
+void Codegen::genBlock(const std::vector<StmtPtr>& stmts, std::ostringstream& out, int indent) {
+    for (const auto& stmt : stmts) {
+        genStmt(*stmt, out, indent);
+    }
+}
+
+void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out, int indent) {
     switch (stmt.kind) {
         case StmtKind::Dim:
-            out << "    " << cppType(stmt.declaredType) << " " << mangleName(stmt.name) << "{};\n";
+            out << ind(indent) << cppType(stmt.declaredType) << " " << mangleName(stmt.name)
+                << "{};\n";
             return;
         case StmtKind::Assign:
-            out << "    " << mangleName(stmt.name) << " = " << genExpr(*stmt.expr) << ";\n";
+            out << ind(indent) << mangleName(stmt.name) << " = " << genExpr(*stmt.expr) << ";\n";
             return;
         case StmtKind::Print: {
-            out << "    ::ebasic::rt::printLine(";
+            out << ind(indent) << "::ebasic::rt::printLine(";
             for (size_t i = 0; i < stmt.args.size(); ++i) {
                 if (i > 0) out << ", ";
                 out << genExpr(*stmt.args[i]);
             }
             out << ");\n";
             return;
+        }
+        case StmtKind::If: {
+            out << ind(indent) << "if (" << genCondition(*stmt.conditions[0]) << ") {\n";
+            genBlock(stmt.blocks[0], out, indent + 1);
+            out << ind(indent) << "}\n";
+            for (size_t i = 1; i < stmt.conditions.size(); ++i) {
+                out << ind(indent) << "else if (" << genCondition(*stmt.conditions[i]) << ") {\n";
+                genBlock(stmt.blocks[i], out, indent + 1);
+                out << ind(indent) << "}\n";
+            }
+            if (stmt.hasElse) {
+                out << ind(indent) << "else {\n";
+                genBlock(stmt.blocks.back(), out, indent + 1);
+                out << ind(indent) << "}\n";
+            }
+            return;
+        }
+        case StmtKind::SelectCase: {
+            std::string sel = nextName("eb__sel");
+            out << ind(indent) << "{\n";
+            out << ind(indent + 1) << "auto " << sel << " = " << genExpr(*stmt.expr) << ";\n";
+            bool first = true;
+            for (const CaseArm& arm : stmt.cases) {
+                if (arm.isElse) {
+                    out << ind(indent + 1) << (first ? "{\n" : "else {\n");
+                    genBlock(arm.body, out, indent + 2);
+                    out << ind(indent + 1) << "}\n";
+                    continue;
+                }
+                out << ind(indent + 1) << (first ? "if (" : "else if (");
+                first = false;
+                for (size_t j = 0; j < arm.matches.size(); ++j) {
+                    if (j > 0) out << " || ";
+                    out << sel << " == " << genExpr(*arm.matches[j]);
+                }
+                out << ") {\n";
+                genBlock(arm.body, out, indent + 2);
+                out << ind(indent + 1) << "}\n";
+            }
+            out << ind(indent) << "}\n";
+            return;
+        }
+        case StmtKind::ForNext: {
+            std::string endTmp = nextName("eb__forend");
+            std::string stepTmp = nextName("eb__forstep");
+            std::string label = nextName("eb__forexit");
+            std::string var = mangleName(stmt.name);
+
+            loopStack_.emplace_back(LoopKind::For, label);
+            out << ind(indent) << "{\n";
+            out << ind(indent + 1) << "auto " << endTmp << " = " << genExpr(*stmt.forEnd) << ";\n";
+            out << ind(indent + 1) << "auto " << stepTmp << " = "
+                << (stmt.forStep ? genExpr(*stmt.forStep) : "1") << ";\n";
+            out << ind(indent + 1) << var << " = " << genExpr(*stmt.expr) << ";\n";
+            out << ind(indent + 1) << "if (" << stepTmp << " >= 0) {\n";
+            out << ind(indent + 2) << "for (; " << var << " <= " << endTmp << "; " << var
+                << " += " << stepTmp << ") {\n";
+            genBlock(stmt.body, out, indent + 3);
+            out << ind(indent + 2) << "}\n";
+            out << ind(indent + 1) << "} else {\n";
+            out << ind(indent + 2) << "for (; " << var << " >= " << endTmp << "; " << var
+                << " += " << stepTmp << ") {\n";
+            genBlock(stmt.body, out, indent + 3);
+            out << ind(indent + 2) << "}\n";
+            out << ind(indent + 1) << "}\n";
+            out << ind(indent) << "}\n";
+            out << label << ": ;\n";
+            loopStack_.pop_back();
+            return;
+        }
+        case StmtKind::DoLoop: {
+            std::string label = nextName("eb__doexit");
+            loopStack_.emplace_back(LoopKind::Do, label);
+            out << ind(indent) << "{\n";
+            out << ind(indent + 1) << "for (;;) {\n";
+            if (stmt.preTest == LoopTest::While) {
+                out << ind(indent + 2) << "if (!" << genCondition(*stmt.preCond) << ") break;\n";
+            } else if (stmt.preTest == LoopTest::Until) {
+                out << ind(indent + 2) << "if (" << genCondition(*stmt.preCond) << ") break;\n";
+            }
+            genBlock(stmt.body, out, indent + 2);
+            if (stmt.postTest == LoopTest::While) {
+                out << ind(indent + 2) << "if (!" << genCondition(*stmt.postCond) << ") break;\n";
+            } else if (stmt.postTest == LoopTest::Until) {
+                out << ind(indent + 2) << "if (" << genCondition(*stmt.postCond) << ") break;\n";
+            }
+            out << ind(indent + 1) << "}\n";
+            out << ind(indent) << "}\n";
+            out << label << ": ;\n";
+            loopStack_.pop_back();
+            return;
+        }
+        case StmtKind::WhileWend: {
+            std::string label = nextName("eb__whileexit");
+            loopStack_.emplace_back(LoopKind::While, label);
+            out << ind(indent) << "{\n";
+            out << ind(indent + 1) << "while (" << genCondition(*stmt.expr) << ") {\n";
+            genBlock(stmt.body, out, indent + 2);
+            out << ind(indent + 1) << "}\n";
+            out << ind(indent) << "}\n";
+            out << label << ": ;\n";
+            loopStack_.pop_back();
+            return;
+        }
+        case StmtKind::Goto:
+            out << ind(indent) << "goto " << mangleName(stmt.name) << ";\n";
+            return;
+        case StmtKind::Label:
+            out << mangleName(stmt.name) << ": ;\n";
+            return;
+        case StmtKind::ExitLoop: {
+            for (auto it = loopStack_.rbegin(); it != loopStack_.rend(); ++it) {
+                if (it->first == stmt.exitKind) {
+                    out << ind(indent) << "goto " << it->second << ";\n";
+                    return;
+                }
+            }
+            throw std::runtime_error("codegen: EXIT with no matching enclosing loop (sema should "
+                                      "have caught this)");
         }
     }
 }
@@ -156,9 +292,7 @@ std::string Codegen::generate(const Module& module) {
     out << "#include <cmath>\n";
     out << "#include <cstdint>\n\n";
     out << "int main() {\n";
-    for (const auto& stmt : module.stmts) {
-        genStmt(*stmt, out);
-    }
+    genBlock(module.stmts, out, 1);
     out << "    return 0;\n";
     out << "}\n";
     return out.str();
