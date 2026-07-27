@@ -182,6 +182,7 @@ using ExprPtr = std::unique_ptr<Expr>;
 
 enum class StmtKind {
     Dim,
+    Redim,
     Const,
     Enum,
     Assign,
@@ -259,14 +260,19 @@ struct Stmt {
     SourceLoc loc;
 
     std::string name;                          // Dim, Const, Assign, ForNext (loop var), Goto/Label
-    TypeKind declaredType = TypeKind::Unknown;  // Dim (required); Const (optional - inferred if Unknown)
+    TypeKind declaredType = TypeKind::Unknown;  // Dim (required); Const (optional - inferred if Unknown); Redim (optional restated AS type)
     ExprPtr expr;                               // Assign/Const value; If/SelectCase/WhileWend condition/selector; ForNext start
     std::vector<ExprPtr> args;                  // Print
 
     bool isArray = false;         // Dim
-    ExprPtr arrayLower;           // Dim: array lower bound (nullptr => 0)
-    ExprPtr arrayUpper;           // Dim: array upper bound (inclusive, FB-style)
+    // Dim: array bounds. Both null => not an array. arrayUpper null but
+    // isArray true => DIM name() - an empty-parens dynamic array (size 0
+    // until REDIM'd; not a fixed-size array, so REDIM-able).
+    // Redim: the new bounds (arrayUpper is always given; arrayLower null => 0).
+    ExprPtr arrayLower;
+    ExprPtr arrayUpper;
     ExprPtr index;                // Assign: non-null => array-element assignment to name(index)
+    bool preserve = false;        // Redim: REDIM PRESERVE keeps existing elements
 
     std::vector<EnumMember> enumMembers; // Enum
 

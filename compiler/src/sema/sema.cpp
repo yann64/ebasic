@@ -123,11 +123,43 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                 if (stmt.arrayLower && !isIntegerFamily(checkExpr(*stmt.arrayLower))) {
                     diags_.error(stmt.arrayLower->loc, "array lower bound must be an integer expression");
                 }
-                if (!isIntegerFamily(checkExpr(*stmt.arrayUpper))) {
+                if (stmt.arrayUpper && !isIntegerFamily(checkExpr(*stmt.arrayUpper))) {
                     diags_.error(stmt.arrayUpper->loc, "array upper bound must be an integer expression");
                 }
             }
-            scope[key] = SymbolInfo{stmt.declaredType, /*isConst=*/false, stmt.isArray};
+            SymbolInfo info;
+            info.type = stmt.declaredType;
+            info.isConst = false;
+            info.isArray = stmt.isArray;
+            info.isDynamicArray = stmt.isArray && !stmt.arrayUpper;
+            scope[key] = info;
+            return;
+        }
+        case StmtKind::Redim: {
+            std::string key = canonicalName(stmt.name);
+            SymbolInfo info;
+            if (!lookupSymbol(key, info)) {
+                diags_.error(stmt.loc, "variable '" + stmt.name + "' is not declared");
+                return;
+            }
+            if (!info.isArray) {
+                diags_.error(stmt.loc, "'" + stmt.name + "' is not an array");
+                return;
+            }
+            if (!info.isDynamicArray) {
+                diags_.error(stmt.loc,
+                             "'" + stmt.name + "' is a fixed-size array and cannot be REDIM'd "
+                             "(declare it with DIM " + stmt.name + "() to make it dynamic)");
+            }
+            if (stmt.declaredType != TypeKind::Unknown && stmt.declaredType != info.type) {
+                diags_.error(stmt.loc, "REDIM type does not match the array's declared type");
+            }
+            if (stmt.arrayLower && !isIntegerFamily(checkExpr(*stmt.arrayLower))) {
+                diags_.error(stmt.arrayLower->loc, "array lower bound must be an integer expression");
+            }
+            if (!isIntegerFamily(checkExpr(*stmt.arrayUpper))) {
+                diags_.error(stmt.arrayUpper->loc, "array upper bound must be an integer expression");
+            }
             return;
         }
         case StmtKind::Const: {

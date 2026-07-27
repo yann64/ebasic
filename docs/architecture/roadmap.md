@@ -103,6 +103,13 @@ M1–M3 are the bulk of "FreeBASIC-compatible" work and will likely split furthe
 - `ExprKind::Index` (array read) was generalized into `ExprKind::Call` (name + argument list), since array reads and function calls are grammatically identical (`name(args)`) and can only be disambiguated once the name's symbol/procedure-table entry is known - Sema and Codegen each resolve it by looking up `name` (array vs. procedure), not the parser.
 - Not yet supported (deferred): array parameters, default/optional parameter values, variadic parameters, and (per the phased roadmap) `REDIM`/`REDIM PRESERVE`, `GOSUB`/`RETURN`-for-GOSUB, and multi-file `#include` - these remain open for the rest of M2.
 
+## REDIM / REDIM PRESERVE Implementation Notes (done; rest of M2 still open)
+
+- `DIM arr() AS Type` (empty parens) declares a *dynamic* array (starts at size 0); `DIM arr(n) AS Type` / `DIM arr(lo TO hi) AS Type` declares a *fixed-size* one. Only a dynamic array can be `REDIM`'d - matches real FB ("REDIM cannot be used on fixed-size arrays"), verified against the docs rather than assumed. Attempting `REDIM` on a fixed array is a Sema error.
+- `REDIM [PRESERVE] name(bound [TO bound]) [AS type]`: since M1c already backs every array with a runtime-sized `std::vector<T>` (a deliberate simplification over real FB's fixed/dynamic distinction), `REDIM` is just a resize of that same vector, which came for nearly free. Plain `REDIM` discards old contents (`.assign(n, {})`); `REDIM PRESERVE` keeps them (`.resize(n)`, which is `std::vector`'s native grow/shrink-preserving behavior).
+- `REDIM`'s bounds are re-evaluated and re-cached into the array's existing lower-bound temporary (the same one `DIM` created), so later reads/writes keep using the up-to-date bound. Known limitation, not implemented: if `PRESERVE` is combined with *also* changing the lower bound in the same `REDIM`, existing elements are preserved by their internal (relative) position, not re-indexed to line up with the new bound - matches `std::vector::resize()`'s natural semantics but not necessarily FB's, and is an unusual enough combination (most real code preserves with the same base) that it's left as-is rather than adding manual re-indexing.
+- Remaining in M2: `GOSUB`/`RETURN`, multi-file `#include`.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

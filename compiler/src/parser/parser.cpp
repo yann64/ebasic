@@ -103,18 +103,52 @@ StmtPtr Parser::parseDim() {
 
     if (match(TokenKind::LParen)) {
         stmt->isArray = true;
-        ExprPtr first = parseExpr();
-        if (match(TokenKind::KwTo)) {
-            stmt->arrayLower = std::move(first);
-            stmt->arrayUpper = parseExpr();
-        } else {
-            stmt->arrayUpper = std::move(first); // lower bound defaults to 0
+        // Empty parens - DIM arr() AS Type - declares a dynamic array (size
+        // 0 until REDIM'd) rather than a fixed-size one.
+        if (!check(TokenKind::RParen)) {
+            ExprPtr first = parseExpr();
+            if (match(TokenKind::KwTo)) {
+                stmt->arrayLower = std::move(first);
+                stmt->arrayUpper = parseExpr();
+            } else {
+                stmt->arrayUpper = std::move(first); // lower bound defaults to 0
+            }
         }
         expect(TokenKind::RParen, "expected ')' after array bounds");
     }
 
     expect(TokenKind::KwAs, "expected AS after variable name");
     stmt->declaredType = parseTypeKeyword();
+
+    expectStmtEnd();
+    return stmt;
+}
+
+StmtPtr Parser::parseRedim() {
+    SourceLoc loc = peek().loc;
+    advance(); // REDIM
+    bool preserve = match(TokenKind::KwPreserve);
+    const Token& nameTok = expect(TokenKind::Identifier, "expected array name after REDIM");
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->kind = StmtKind::Redim;
+    stmt->loc = loc;
+    stmt->name = nameTok.text;
+    stmt->preserve = preserve;
+
+    expect(TokenKind::LParen, "expected '(' after array name in REDIM");
+    ExprPtr first = parseExpr();
+    if (match(TokenKind::KwTo)) {
+        stmt->arrayLower = std::move(first);
+        stmt->arrayUpper = parseExpr();
+    } else {
+        stmt->arrayUpper = std::move(first); // lower bound defaults to 0
+    }
+    expect(TokenKind::RParen, "expected ')' after array bounds");
+
+    if (match(TokenKind::KwAs)) {
+        stmt->declaredType = parseTypeKeyword();
+    }
 
     expectStmtEnd();
     return stmt;
@@ -227,6 +261,7 @@ std::vector<StmtPtr> Parser::parseBlockUntil(std::initializer_list<TokenKind> te
 
 StmtPtr Parser::parseStatement() {
     if (check(TokenKind::KwDim)) return parseDim();
+    if (check(TokenKind::KwRedim)) return parseRedim();
     if (check(TokenKind::KwConst)) return parseConst();
     if (check(TokenKind::KwEnum)) return parseEnum();
     if (check(TokenKind::KwPrint)) return parsePrint();

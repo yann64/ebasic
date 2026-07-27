@@ -141,7 +141,8 @@ Token Lexer::lexIdentifierOrKeyword() {
         {"ENUM", TokenKind::KwEnum},       {"SUB", TokenKind::KwSub},
         {"FUNCTION", TokenKind::KwFunction}, {"BYVAL", TokenKind::KwByVal},
         {"BYREF", TokenKind::KwByRef},     {"RETURN", TokenKind::KwReturn},
-        {"CALL", TokenKind::KwCall},
+        {"CALL", TokenKind::KwCall},       {"REDIM", TokenKind::KwRedim},
+        {"PRESERVE", TokenKind::KwPreserve},
     };
 
     auto it = keywords.find(upper);

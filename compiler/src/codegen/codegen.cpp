@@ -169,12 +169,32 @@ void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out, int indent) {
                 return;
             }
             std::string lowerVar = mangleName(stmt.name) + "__lo";
-            out << ind(indent) << "auto " << lowerVar << " = "
-                << (stmt.arrayLower ? genExpr(*stmt.arrayLower) : "0") << ";\n";
-            out << ind(indent) << "std::vector<" << cppType(stmt.declaredType) << "> "
-                << mangleName(stmt.name) << "(static_cast<std::size_t>((" << genExpr(*stmt.arrayUpper)
-                << ") - " << lowerVar << " + 1));\n";
+            if (!stmt.arrayUpper) {
+                // DIM arr() AS Type: a dynamic array, empty until REDIM'd.
+                out << ind(indent) << "auto " << lowerVar << " = 0;\n";
+                out << ind(indent) << "std::vector<" << cppType(stmt.declaredType) << "> "
+                    << mangleName(stmt.name) << ";\n";
+            } else {
+                out << ind(indent) << "auto " << lowerVar << " = "
+                    << (stmt.arrayLower ? genExpr(*stmt.arrayLower) : "0") << ";\n";
+                out << ind(indent) << "std::vector<" << cppType(stmt.declaredType) << "> "
+                    << mangleName(stmt.name) << "(static_cast<std::size_t>((" << genExpr(*stmt.arrayUpper)
+                    << ") - " << lowerVar << " + 1));\n";
+            }
             arrayLowerBoundVar_[canonicalName(stmt.name)] = lowerVar;
+            return;
+        }
+        case StmtKind::Redim: {
+            const std::string& lowerVar = arrayLowerBoundVar_.at(canonicalName(stmt.name));
+            out << ind(indent) << lowerVar << " = "
+                << (stmt.arrayLower ? genExpr(*stmt.arrayLower) : "0") << ";\n";
+            std::string sizeExpr = "static_cast<std::size_t>((" + genExpr(*stmt.arrayUpper) + ") - " +
+                                    lowerVar + " + 1)";
+            if (stmt.preserve) {
+                out << ind(indent) << mangleName(stmt.name) << ".resize(" << sizeExpr << ");\n";
+            } else {
+                out << ind(indent) << mangleName(stmt.name) << ".assign(" << sizeExpr << ", {});\n";
+            }
             return;
         }
         case StmtKind::Const:

@@ -11,11 +11,15 @@
 namespace ebasic {
 
 // A declared name: its element type (for arrays, the element's type), and
-// whether it's an array and/or immutable (CONST/ENUM member).
+// whether it's an array and/or immutable (CONST/ENUM member). isDynamicArray
+// only matters when isArray is true: only an array declared with empty
+// parens (DIM arr() AS Type) can later be REDIM'd, matching real FB
+// ("REDIM cannot be used on fixed-size arrays").
 struct SymbolInfo {
     TypeKind type = TypeKind::Unknown;
     bool isConst = false;
     bool isArray = false;
+    bool isDynamicArray = false;
 };
 
 // A SUB/FUNCTION's signature, registered up front (before any body is
