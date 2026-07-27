@@ -46,6 +46,10 @@ enum class ExprKind {
     // stringValue = name, args = arguments. Ambiguous at parse time between
     // an array-element read (exactly 1 arg) and a function call - resolved
     // by Sema/Codegen by looking up what `stringValue` actually names.
+    // Optionally qualified (`lhs` set): `Namespace.Name(args)` - lhs is the
+    // qualifier expression (currently only ever a plain Ident naming a
+    // NAMESPACE; a receiver-expression interpretation for method calls is
+    // for a later milestone).
     Call,
     // Field access `base.field`: lhs = base expression, stringValue = field
     // name.
@@ -225,6 +229,7 @@ enum class StmtKind {
     Return,
     GoSub, // reuses `name` for the target label
     TypeDecl, // reuses `name` for the type's own name; see Stmt::fields
+    NamespaceDecl, // reuses `name` and `body`; only CONST/ENUM/DIM/SUB/FUNCTION allowed directly inside
 };
 
 // Which loop- or procedure-introducing keyword a scope was opened with.

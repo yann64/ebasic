@@ -109,10 +109,17 @@ void Sema::collectGosubUsage(std::vector<StmtPtr>& stmts) {
     }
 }
 
-void Sema::collectProcedures(std::vector<StmtPtr>& stmts) {
+void Sema::collectProcedures(std::vector<StmtPtr>& stmts, const std::string& prefix) {
     for (auto& stmt : stmts) {
+        if (stmt->kind == StmtKind::NamespaceDecl) {
+            std::string nsName = canonicalName(stmt->name);
+            namespaces_.insert(nsName); // namespaces can be reopened; no collision check
+            std::string nsPrefix = prefix.empty() ? nsName : prefix + "::" + nsName;
+            collectProcedures(stmt->body, nsPrefix);
+            continue;
+        }
         if (stmt->kind != StmtKind::SubDecl && stmt->kind != StmtKind::FunctionDecl) continue;
-        std::string key = canonicalName(stmt->name);
+        std::string key = prefix.empty() ? canonicalName(stmt->name) : prefix + "::" + canonicalName(stmt->name);
         if (symbols_.count(key) || procedures_.count(key)) {
             diags_.error(stmt->loc, "'" + stmt->name + "' is already declared");
             continue;
@@ -125,11 +132,23 @@ void Sema::collectProcedures(std::vector<StmtPtr>& stmts) {
     }
 }
 
+std::string Sema::qualifiedKey(const std::string& name) const {
+    std::string key = canonicalName(name);
+    return currentNamespacePrefix_.empty() ? key : currentNamespacePrefix_ + "::" + key;
+}
+
 bool Sema::lookupSymbol(const std::string& key, SymbolInfo& out) const {
     auto lit = locals_.find(key);
     if (lit != locals_.end()) {
         out = lit->second;
         return true;
+    }
+    if (!currentNamespacePrefix_.empty()) {
+        auto qit = symbols_.find(currentNamespacePrefix_ + "::" + key);
+        if (qit != symbols_.end()) {
+            out = qit->second;
+            return true;
+        }
     }
     auto git = symbols_.find(key);
     if (git != symbols_.end()) {
@@ -137,6 +156,15 @@ bool Sema::lookupSymbol(const std::string& key, SymbolInfo& out) const {
         return true;
     }
     return false;
+}
+
+const ProcedureInfo* Sema::findProcedure(const std::string& key) const {
+    if (!currentNamespacePrefix_.empty()) {
+        auto qit = procedures_.find(currentNamespacePrefix_ + "::" + key);
+        if (qit != procedures_.end()) return &qit->second;
+    }
+    auto it = procedures_.find(key);
+    return it != procedures_.end() ? &it->second : nullptr;
 }
 
 void Sema::checkCallArgs(const ProcedureInfo& proc, std::vector<ExprPtr>& args, SourceLoc loc) {
@@ -187,7 +215,7 @@ void Sema::checkCondition(Expr& expr, const char* what) {
 void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
     switch (stmt.kind) {
         case StmtKind::Dim: {
-            std::string key = canonicalName(stmt.name);
+            std::string key = insideProcedure_ ? canonicalName(stmt.name) : qualifiedKey(stmt.name);
             auto& scope = insideProcedure_ ? locals_ : symbols_;
             if (scope.count(key) || procedures_.count(key) || structs_.count(key)) {
                 diags_.error(stmt.loc, "'" + stmt.name + "' is already declared");
@@ -242,7 +270,7 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
             return;
         }
         case StmtKind::Const: {
-            std::string key = canonicalName(stmt.name);
+            std::string key = insideProcedure_ ? canonicalName(stmt.name) : qualifiedKey(stmt.name);
             auto& scope = insideProcedure_ ? locals_ : symbols_;
             if (scope.count(key) || procedures_.count(key) || structs_.count(key)) {
                 diags_.error(stmt.loc, "'" + stmt.name + "' is already declared");
@@ -273,7 +301,7 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                     if (evalConstInt(*member.value, v)) value = v;
                 }
                 member.resolvedValue = value;
-                std::string key = canonicalName(member.name);
+                std::string key = insideProcedure_ ? canonicalName(member.name) : qualifiedKey(member.name);
                 if (scope.count(key) || procedures_.count(key) || structs_.count(key)) {
                     diags_.error(member.loc, "'" + member.name + "' is already declared");
                 } else {
@@ -498,14 +526,26 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
             return;
         }
         case StmtKind::CallStmt: {
-            std::string key = canonicalName(stmt.name);
-            auto procIt = procedures_.find(key);
-            if (procIt == procedures_.end()) {
+            const ProcedureInfo* proc = nullptr;
+            if (stmt.target) {
+                // CALL Namespace.Name(args) - target is the qualifier.
+                std::string nsKey = canonicalName(stmt.target->stringValue);
+                if (!namespaces_.count(nsKey)) {
+                    diags_.error(stmt.target->loc, "'" + stmt.target->stringValue + "' is not a namespace");
+                    for (auto& arg : stmt.args) checkExpr(*arg);
+                    return;
+                }
+                auto it = procedures_.find(nsKey + "::" + canonicalName(stmt.name));
+                if (it != procedures_.end()) proc = &it->second;
+            } else {
+                proc = findProcedure(canonicalName(stmt.name));
+            }
+            if (!proc) {
                 diags_.error(stmt.loc, "'" + stmt.name + "' is not a declared SUB or FUNCTION");
                 for (auto& arg : stmt.args) checkExpr(*arg);
                 return;
             }
-            checkCallArgs(procIt->second, stmt.args, stmt.loc);
+            checkCallArgs(*proc, stmt.args, stmt.loc);
             return;
         }
         case StmtKind::Return: {
@@ -549,6 +589,36 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
             }
             return;
         }
+        case StmtKind::NamespaceDecl: {
+            if (!atTopLevel) {
+                diags_.error(stmt.loc, "NAMESPACE declarations are only supported at the top level "
+                                        "of a program");
+                return;
+            }
+            std::string savedPrefix = currentNamespacePrefix_;
+            currentNamespacePrefix_ =
+                savedPrefix.empty() ? canonicalName(stmt.name) : savedPrefix + "::" + canonicalName(stmt.name);
+
+            for (auto& member : stmt.body) {
+                switch (member->kind) {
+                    case StmtKind::Const:
+                    case StmtKind::Enum:
+                    case StmtKind::Dim:
+                    case StmtKind::SubDecl:
+                    case StmtKind::FunctionDecl:
+                        checkStmt(*member, /*atTopLevel=*/true);
+                        break;
+                    default:
+                        diags_.error(member->loc,
+                                     "only CONST, ENUM, DIM, SUB, and FUNCTION are allowed directly "
+                                     "inside a NAMESPACE in this version of ebc");
+                        break;
+                }
+            }
+
+            currentNamespacePrefix_ = savedPrefix;
+            return;
+        }
     }
 }
 
@@ -582,6 +652,32 @@ Type Sema::checkExpr(Expr& expr) {
             return expr.type;
         }
         case ExprKind::Call: {
+            if (expr.lhs) {
+                // Namespace.Name(args) - lhs is the qualifier.
+                std::string nsKey = canonicalName(expr.lhs->stringValue);
+                if (expr.lhs->kind != ExprKind::Ident || !namespaces_.count(nsKey)) {
+                    diags_.error(expr.lhs->loc, "'" + expr.lhs->stringValue + "' is not a namespace");
+                    for (auto& arg : expr.args) checkExpr(*arg);
+                    expr.type = TypeKind::Unknown;
+                    return expr.type;
+                }
+                auto procIt = procedures_.find(nsKey + "::" + canonicalName(expr.stringValue));
+                if (procIt == procedures_.end()) {
+                    diags_.error(expr.loc, "namespace '" + expr.lhs->stringValue + "' has no member '" +
+                                               expr.stringValue + "'");
+                    for (auto& arg : expr.args) checkExpr(*arg);
+                    expr.type = TypeKind::Unknown;
+                    return expr.type;
+                }
+                const ProcedureInfo& proc = procIt->second;
+                if (!proc.isFunction) {
+                    diags_.error(expr.loc, "'" + expr.stringValue +
+                                                "' is a SUB and cannot be used in an expression");
+                }
+                checkCallArgs(proc, expr.args, expr.loc);
+                expr.type = proc.returnType;
+                return expr.type;
+            }
             std::string key = canonicalName(expr.stringValue);
             SymbolInfo info;
             bool isVar = lookupSymbol(key, info);
@@ -598,15 +694,14 @@ Type Sema::checkExpr(Expr& expr) {
                 expr.type = info.type;
                 return expr.type;
             }
-            auto procIt = procedures_.find(key);
-            if (procIt != procedures_.end()) {
-                const ProcedureInfo& proc = procIt->second;
-                if (!proc.isFunction) {
+            const ProcedureInfo* proc = findProcedure(key);
+            if (proc) {
+                if (!proc->isFunction) {
                     diags_.error(expr.loc, "'" + expr.stringValue +
                                                 "' is a SUB and cannot be used in an expression");
                 }
-                checkCallArgs(proc, expr.args, expr.loc);
-                expr.type = proc.returnType;
+                checkCallArgs(*proc, expr.args, expr.loc);
+                expr.type = proc->returnType;
                 return expr.type;
             }
             if (isVar) {
@@ -619,6 +714,18 @@ Type Sema::checkExpr(Expr& expr) {
             return expr.type;
         }
         case ExprKind::Member: {
+            if (expr.lhs->kind == ExprKind::Ident && namespaces_.count(canonicalName(expr.lhs->stringValue))) {
+                std::string nsKey = canonicalName(expr.lhs->stringValue);
+                auto it = symbols_.find(nsKey + "::" + canonicalName(expr.stringValue));
+                if (it == symbols_.end()) {
+                    diags_.error(expr.loc, "namespace '" + expr.lhs->stringValue + "' has no member '" +
+                                               expr.stringValue + "'");
+                    expr.type = TypeKind::Unknown;
+                    return expr.type;
+                }
+                expr.type = it->second.type;
+                return expr.type;
+            }
             Type baseType = checkExpr(*expr.lhs);
             if (baseType.kind != TypeKind::UserDefined) {
                 if (baseType.kind != TypeKind::Unknown) {

@@ -47,7 +47,14 @@ private:
     StmtPtr parseCallStmt();
     StmtPtr parseReturn();
     StmtPtr parseTypeDecl();
+    StmtPtr parseNamespaceDecl();
     std::vector<Param> parseParamList();
+
+    // Parses an Identifier's trailing chain of `.field` (Member) and, for
+    // the last segment only, an optional `(args)` (a possibly-qualified
+    // Call - `base` becomes the qualifier). Shared by parsePrimary (read
+    // position) and parseAssign (lvalue position).
+    ExprPtr parseMemberOrCallChain(ExprPtr base);
 
     // Parses statements (skipping blank lines) until the next token is one
     // of `terminators` or end-of-input.

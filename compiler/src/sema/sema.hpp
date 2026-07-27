@@ -45,7 +45,11 @@ public:
 
 private:
     void collectLabels(std::vector<StmtPtr>& stmts);
-    void collectProcedures(std::vector<StmtPtr>& stmts);
+    // Registers SUB/FUNCTION signatures and NAMESPACE names up front (so
+    // forward/qualified references resolve regardless of order). Recurses
+    // one level into a NamespaceDecl's body with its qualified prefix -
+    // nested NAMESPACEs are not supported yet.
+    void collectProcedures(std::vector<StmtPtr>& stmts, const std::string& prefix = "");
     void collectGosubUsage(std::vector<StmtPtr>& stmts);
     // Registers every top-level TYPE's name first (so fields can reference
     // a TYPE declared later in the file), then resolves each one's field
@@ -57,10 +61,21 @@ private:
     void checkCondition(Expr& expr, const char* what);
     Type checkExpr(Expr& expr);
 
-    // Looks up `key` in locals_ first, then symbols_, copying the result out
-    // (SymbolInfo is small; this sidesteps any pointer-into-map lifetime
+    // Looks up `key` (unqualified canonical name) in locals_ first, then
+    // symbols_ - trying the current namespace's qualified form before the
+    // bare global one, so code inside a NAMESPACE sees its own members
+    // without qualification, falling back to the global scope. Copies the
+    // result out (SymbolInfo is small; sidesteps pointer-into-map lifetime
     // concerns across subsequent inserts). Returns false if not found.
     bool lookupSymbol(const std::string& key, SymbolInfo& out) const;
+
+    // Same qualified-then-bare lookup as lookupSymbol, for procedures_.
+    const ProcedureInfo* findProcedure(const std::string& key) const;
+
+    // Builds the key to register/look up a global-scope declaration
+    // (Dim/Const/Enum at non-procedure scope) under: qualified by the
+    // current namespace if inside one, else the bare canonical name.
+    std::string qualifiedKey(const std::string& name) const;
 
     // Shared by both the Call expression (array read / function call) and
     // CallStmt (procedure call as a statement): validates argument count and
@@ -83,7 +98,11 @@ private:
     bool insideProcedure_ = false;
     Type currentFunctionReturnType_; // valid while insideProcedure_ and it's a FUNCTION
     std::unordered_map<std::string, ProcedureInfo> procedures_;
-    std::unordered_map<std::string, RecordInfo> structs_; // canonical TYPE name -> its fields
+    std::unordered_map<std::string, RecordInfo> structs_; // canonical TYPE name -> its fields (never namespace-qualified; TYPE stays global-only for now)
+    std::unordered_set<std::string> namespaces_; // canonical NAMESPACE names, for qualified-access resolution
+    // Canonical name of the NAMESPACE currently being checked, or empty.
+    // Only one level deep - nested NAMESPACEs aren't supported yet.
+    std::string currentNamespacePrefix_;
     std::unordered_map<std::string, long long> constIntValues_; // CONST/ENUM int value, for evalConstInt
     std::unordered_set<std::string> labels_;
     std::unordered_set<std::string> gosubTargets_; // labels referenced by at least one GOSUB

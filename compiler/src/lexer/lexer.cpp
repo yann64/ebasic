@@ -151,7 +151,7 @@ Token Lexer::lexIdentifierOrKeyword() {
         {"BYREF", TokenKind::KwByRef},     {"RETURN", TokenKind::KwReturn},
         {"CALL", TokenKind::KwCall},       {"REDIM", TokenKind::KwRedim},
         {"PRESERVE", TokenKind::KwPreserve}, {"GOSUB", TokenKind::KwGosub},
-        {"TYPE", TokenKind::KwType},
+        {"TYPE", TokenKind::KwType},       {"NAMESPACE", TokenKind::KwNamespace},
     };
 
     auto it = keywords.find(upper);

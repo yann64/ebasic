@@ -30,6 +30,13 @@ private:
     // invalid C++ regardless - left for the backend to reject, not a crash
     // here).
     void genTypeDecl(const Stmt& stmt);
+    // Wraps a NAMESPACE's declarative members (CONST/ENUM/DIM/SUB/FUNCTION -
+    // Sema already rejects anything else directly inside one) in a literal
+    // C++ `namespace eb_x { ... }` block, reopened independently across
+    // typesOut_/protoOut_/procOut_/globalsOut_ - matches FB's own namespaces
+    // being reopenable, and needs no qualified-name bookkeeping in Codegen
+    // beyond the namespaces_ set (real C++ namespaces do the rest).
+    void genNamespaceDecl(const Stmt& stmt);
     std::string genExpr(const Expr& expr);
     std::string genCondition(const Expr& expr);
 
@@ -74,6 +81,14 @@ private:
     std::unordered_map<std::string, const Stmt*> typeDeclsByName_;
     std::unordered_set<std::string> typesEmitted_;
     std::unordered_set<std::string> typesBeingEmitted_; // cycle guard
+    // Top-level global DIM/CONST/ENUM declarations, emitted before main().
+    // A class member (not a generate()-local) so genNamespaceDecl can wrap
+    // the portion it contributes in a namespace block too.
+    std::ostringstream globalsOut_;
+    // Canonical NAMESPACE names, computed once up front in generate() (a
+    // Member/Call whose base name matches this set is namespace-qualified
+    // access, rendered as C++ `::`, rather than `.` field/method access).
+    std::unordered_set<std::string> namespaces_;
 };
 
 } // namespace ebasic

@@ -245,6 +245,24 @@ StmtPtr Parser::parseTypeDecl() {
     return stmt;
 }
 
+StmtPtr Parser::parseNamespaceDecl() {
+    SourceLoc loc = peek().loc;
+    advance(); // NAMESPACE
+    const Token& nameTok = expect(TokenKind::Identifier, "expected a name after NAMESPACE");
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->kind = StmtKind::NamespaceDecl;
+    stmt->loc = loc;
+    stmt->name = nameTok.text;
+    expectStmtEnd();
+
+    stmt->body = parseBlockUntil({TokenKind::KwEnd});
+    expect(TokenKind::KwEnd, "expected END NAMESPACE");
+    expect(TokenKind::KwNamespace, "expected END NAMESPACE");
+    expectStmtEnd();
+    return stmt;
+}
+
 StmtPtr Parser::parsePrint() {
     SourceLoc loc = peek().loc;
     advance(); // PRINT
@@ -262,6 +280,37 @@ StmtPtr Parser::parsePrint() {
 
     expectStmtEnd();
     return stmt;
+}
+
+ExprPtr Parser::parseMemberOrCallChain(ExprPtr base) {
+    while (base && match(TokenKind::Dot)) {
+        const Token& fieldTok = expect(TokenKind::Identifier, "expected a name after '.'");
+        if (match(TokenKind::LParen)) {
+            // A possibly-qualified call: base.Name(args) - base becomes the
+            // qualifier (currently only meaningful as a namespace name).
+            auto call = std::make_unique<Expr>();
+            call->kind = ExprKind::Call;
+            call->loc = fieldTok.loc;
+            call->stringValue = fieldTok.text;
+            call->lhs = std::move(base);
+            if (!check(TokenKind::RParen)) {
+                call->args.push_back(parseExpr());
+                while (match(TokenKind::Comma)) {
+                    call->args.push_back(parseExpr());
+                }
+            }
+            expect(TokenKind::RParen, "expected ')'");
+            base = std::move(call);
+        } else {
+            auto member = std::make_unique<Expr>();
+            member->kind = ExprKind::Member;
+            member->loc = fieldTok.loc;
+            member->stringValue = fieldTok.text;
+            member->lhs = std::move(base);
+            base = std::move(member);
+        }
+    }
+    return base;
 }
 
 StmtPtr Parser::parseAssign() {
@@ -300,17 +349,7 @@ StmtPtr Parser::parseAssign() {
             base = std::move(ident);
         }
 
-        while (base && match(TokenKind::Dot)) {
-            const Token& fieldTok = expect(TokenKind::Identifier, "expected a field name after '.'");
-            auto member = std::make_unique<Expr>();
-            member->kind = ExprKind::Member;
-            member->loc = fieldTok.loc;
-            member->stringValue = fieldTok.text;
-            member->lhs = std::move(base);
-            base = std::move(member);
-        }
-
-        stmt->target = std::move(base);
+        stmt->target = parseMemberOrCallChain(std::move(base));
     }
 
     expect(TokenKind::Equals, "expected '=' in assignment");
@@ -338,6 +377,7 @@ StmtPtr Parser::parseStatement() {
     if (check(TokenKind::KwConst)) return parseConst();
     if (check(TokenKind::KwEnum)) return parseEnum();
     if (check(TokenKind::KwType)) return parseTypeDecl();
+    if (check(TokenKind::KwNamespace)) return parseNamespaceDecl();
     if (check(TokenKind::KwPrint)) return parsePrint();
     if (check(TokenKind::KwIf)) return parseIf();
     if (check(TokenKind::KwSelect)) return parseSelectCase();
@@ -659,6 +699,19 @@ StmtPtr Parser::parseCallStmt() {
     stmt->loc = loc;
     stmt->name = nameTok.text;
 
+    if (match(TokenKind::Dot)) {
+        // CALL Namespace.Name(args) - `target` holds the qualifier (reused
+        // from Assign's lvalue-chain field; CallStmt has no assignment
+        // target of its own to conflict with), `name` is the final segment.
+        auto qualifier = std::make_unique<Expr>();
+        qualifier->kind = ExprKind::Ident;
+        qualifier->loc = nameTok.loc;
+        qualifier->stringValue = nameTok.text;
+        stmt->target = std::move(qualifier);
+        const Token& finalTok = expect(TokenKind::Identifier, "expected a name after '.'");
+        stmt->name = finalTok.text;
+    }
+
     if (match(TokenKind::LParen)) {
         if (!check(TokenKind::RParen)) {
             stmt->args.push_back(parseExpr());
@@ -916,16 +969,7 @@ ExprPtr Parser::parsePrimary() {
             base = std::move(ident);
         }
 
-        while (match(TokenKind::Dot)) {
-            const Token& fieldTok = expect(TokenKind::Identifier, "expected a field name after '.'");
-            auto member = std::make_unique<Expr>();
-            member->kind = ExprKind::Member;
-            member->loc = fieldTok.loc;
-            member->stringValue = fieldTok.text;
-            member->lhs = std::move(base);
-            base = std::move(member);
-        }
-        return base;
+        return parseMemberOrCallChain(std::move(base));
     }
     if (match(TokenKind::LParen)) {
         ExprPtr inner = parseExpr();

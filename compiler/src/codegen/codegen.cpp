@@ -84,13 +84,19 @@ std::string Codegen::genExpr(const Expr& expr) {
         case ExprKind::Ident:
             return mangleName(expr.stringValue);
         case ExprKind::Call: {
-            std::string key = canonicalName(expr.stringValue);
-            auto arrIt = arrayLowerBoundVar_.find(key);
-            if (arrIt != arrayLowerBoundVar_.end()) {
-                return mangleName(expr.stringValue) + "[static_cast<std::size_t>((" +
-                       genExpr(*expr.args[0]) + ") - " + arrIt->second + ")]";
+            std::string prefix;
+            if (expr.lhs) {
+                // Namespace.Name(args) -> C++ eb_ns::eb_name(args).
+                prefix = mangleName(expr.lhs->stringValue) + "::";
+            } else {
+                std::string key = canonicalName(expr.stringValue);
+                auto arrIt = arrayLowerBoundVar_.find(key);
+                if (arrIt != arrayLowerBoundVar_.end()) {
+                    return mangleName(expr.stringValue) + "[static_cast<std::size_t>((" +
+                           genExpr(*expr.args[0]) + ") - " + arrIt->second + ")]";
+                }
             }
-            std::string result = mangleName(expr.stringValue) + "(";
+            std::string result = prefix + mangleName(expr.stringValue) + "(";
             for (size_t i = 0; i < expr.args.size(); ++i) {
                 if (i > 0) result += ", ";
                 result += genExpr(*expr.args[i]);
@@ -99,6 +105,9 @@ std::string Codegen::genExpr(const Expr& expr) {
             return result;
         }
         case ExprKind::Member:
+            if (expr.lhs->kind == ExprKind::Ident && namespaces_.count(canonicalName(expr.lhs->stringValue))) {
+                return mangleName(expr.lhs->stringValue) + "::" + mangleName(expr.stringValue);
+            }
             return genExpr(*expr.lhs) + "." + mangleName(expr.stringValue);
         case ExprKind::UnaryNeg:
             return "(-" + genExpr(*expr.lhs) + ")";
@@ -385,8 +394,12 @@ void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out, int indent) {
                                       "caught this)");
         case StmtKind::TypeDecl:
             throw std::runtime_error("codegen: TYPE must be top-level (sema should have caught this)");
+        case StmtKind::NamespaceDecl:
+            throw std::runtime_error("codegen: NAMESPACE must be top-level (sema should have caught "
+                                      "this)");
         case StmtKind::CallStmt: {
-            out << ind(indent) << mangleName(stmt.name) << "(";
+            std::string prefix = stmt.target ? mangleName(stmt.target->stringValue) + "::" : "";
+            out << ind(indent) << prefix << mangleName(stmt.name) << "(";
             for (size_t i = 0; i < stmt.args.size(); ++i) {
                 if (i > 0) out << ", ";
                 out << genExpr(*stmt.args[i]);
@@ -465,6 +478,48 @@ void Codegen::genProcedure(const Stmt& stmt) {
     procOut_ << "}\n\n";
 }
 
+void Codegen::genNamespaceDecl(const Stmt& stmt) {
+    std::string ns = mangleName(stmt.name);
+    // TYPE can't be nested inside a NAMESPACE (Sema-enforced), so typesOut_
+    // never gets content here - skip wrapping it at all. Only wrap
+    // proto/proc/globals if this namespace actually contributes to them, to
+    // avoid emitting empty `namespace eb_x { }` noise.
+    bool hasProcs = false;
+    bool hasGlobals = false;
+    for (const auto& memberPtr : stmt.body) {
+        if (memberPtr->kind == StmtKind::SubDecl || memberPtr->kind == StmtKind::FunctionDecl) {
+            hasProcs = true;
+        } else if (memberPtr->kind == StmtKind::Dim || memberPtr->kind == StmtKind::Const ||
+                   memberPtr->kind == StmtKind::Enum) {
+            hasGlobals = true;
+        }
+    }
+
+    if (hasProcs) {
+        protoOut_ << "namespace " << ns << " {\n";
+        procOut_ << "namespace " << ns << " {\n";
+    }
+    if (hasGlobals) globalsOut_ << "namespace " << ns << " {\n";
+
+    for (const auto& memberPtr : stmt.body) {
+        const Stmt& member = *memberPtr;
+        if (member.kind == StmtKind::SubDecl || member.kind == StmtKind::FunctionDecl) {
+            genProcedure(member);
+        } else if (member.kind == StmtKind::Dim || member.kind == StmtKind::Const ||
+                   member.kind == StmtKind::Enum) {
+            genStmt(member, globalsOut_, 1);
+        }
+        // Sema already rejects anything else (incl. nested TYPE/NAMESPACE)
+        // directly inside a NAMESPACE.
+    }
+
+    if (hasProcs) {
+        protoOut_ << "} // namespace " << ns << "\n";
+        procOut_ << "} // namespace " << ns << "\n";
+    }
+    if (hasGlobals) globalsOut_ << "} // namespace " << ns << "\n";
+}
+
 std::string Codegen::generate(const Module& module) {
     // Top-level DIM/CONST/ENUM become real C++ globals (declared before any
     // function bodies) so SUB/FUNCTION can see them; SUB/FUNCTION become
@@ -484,10 +539,11 @@ std::string Codegen::generate(const Module& module) {
         if (stmtPtr->kind == StmtKind::GoSub) gosubTargets_.insert(canonicalName(stmtPtr->name));
         else if (stmtPtr->kind == StmtKind::TypeDecl) {
             typeDeclsByName_[canonicalName(stmtPtr->name)] = stmtPtr.get();
+        } else if (stmtPtr->kind == StmtKind::NamespaceDecl) {
+            namespaces_.insert(canonicalName(stmtPtr->name));
         }
     }
 
-    std::ostringstream globalsOut;
     std::ostringstream mainOut;
     bool insideGosub = false;
 
@@ -514,9 +570,11 @@ std::string Codegen::generate(const Module& module) {
             genProcedure(stmt);
         } else if (stmt.kind == StmtKind::TypeDecl) {
             genTypeDecl(stmt);
+        } else if (stmt.kind == StmtKind::NamespaceDecl) {
+            genNamespaceDecl(stmt);
         } else if (stmt.kind == StmtKind::Dim || stmt.kind == StmtKind::Const ||
                    stmt.kind == StmtKind::Enum) {
-            genStmt(stmt, globalsOut, 0);
+            genStmt(stmt, globalsOut_, 0);
         } else if (insideGosub) {
             genStmt(stmt, procOut_, 1);
         } else {
@@ -532,7 +590,7 @@ std::string Codegen::generate(const Module& module) {
     out << "#include <cstdint>\n";
     out << "#include <vector>\n\n";
     if (!typesOut_.str().empty()) out << typesOut_.str();
-    if (!globalsOut.str().empty()) out << globalsOut.str() << "\n";
+    if (!globalsOut_.str().empty()) out << globalsOut_.str() << "\n";
     if (!protoOut_.str().empty()) out << protoOut_.str() << "\n";
     out << procOut_.str();
     out << "int main() {\n";
