@@ -15,8 +15,8 @@ std::string Codegen::gosubFunctionName(const std::string& label) {
     return "eb_gosub_" + canonicalName(label);
 }
 
-std::string Codegen::cppType(TypeKind type) {
-    switch (type) {
+std::string Codegen::cppType(const Type& type) {
+    switch (type.kind) {
         case TypeKind::Byte: return "std::int8_t";
         case TypeKind::UByte: return "std::uint8_t";
         case TypeKind::Short: return "std::int16_t";
@@ -30,6 +30,11 @@ std::string Codegen::cppType(TypeKind type) {
         case TypeKind::Double: return "double";
         case TypeKind::Boolean: return "std::int8_t";
         case TypeKind::StringT: return "::ebasic::rt::BString";
+        // A TYPE and a variable can never share a name (Sema shares one
+        // namespace for both), so reusing mangleName for the struct's own
+        // name can't collide with any variable's mangled name.
+        case TypeKind::UserDefined: return mangleName(type.typeName);
+        case TypeKind::Pointer:
         case TypeKind::Unknown: break;
     }
     throw std::runtime_error("codegen: unresolved type reached codegen");
@@ -93,6 +98,8 @@ std::string Codegen::genExpr(const Expr& expr) {
             result += ")";
             return result;
         }
+        case ExprKind::Member:
+            return genExpr(*expr.lhs) + "." + mangleName(expr.stringValue);
         case ExprKind::UnaryNeg:
             return "(-" + genExpr(*expr.lhs) + ")";
         case ExprKind::UnaryNot:
@@ -215,6 +222,12 @@ void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out, int indent) {
         case StmtKind::Assign: {
             if (stmt.isReturnAssign) {
                 out << ind(indent) << "eb__ret = " << genExpr(*stmt.expr) << ";\n";
+                return;
+            }
+            if (stmt.target) {
+                // A general Member/Call-chain lvalue (obj.field, arr(i).field,
+                // ...) - genExpr already produces a valid C++ lvalue for it.
+                out << ind(indent) << genExpr(*stmt.target) << " = " << genExpr(*stmt.expr) << ";\n";
                 return;
             }
             if (stmt.index) {
@@ -370,6 +383,8 @@ void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out, int indent) {
         case StmtKind::FunctionDecl:
             throw std::runtime_error("codegen: SUB/FUNCTION must be top-level (sema should have "
                                       "caught this)");
+        case StmtKind::TypeDecl:
+            throw std::runtime_error("codegen: TYPE must be top-level (sema should have caught this)");
         case StmtKind::CallStmt: {
             out << ind(indent) << mangleName(stmt.name) << "(";
             for (size_t i = 0; i < stmt.args.size(); ++i) {
@@ -390,6 +405,33 @@ void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out, int indent) {
             out << ind(indent) << gosubFunctionName(stmt.name) << "();\n";
             return;
     }
+}
+
+void Codegen::genTypeDecl(const Stmt& stmt) {
+    std::string key = canonicalName(stmt.name);
+    if (typesEmitted_.count(key)) return;
+    if (!typesBeingEmitted_.insert(key).second) {
+        // Circular embedding (TypeA contains a TypeB field, TypeB contains a
+        // TypeA field, ...) - impossible as a real, finite-size C++
+        // aggregate. Break the recursion here rather than looping forever;
+        // the backend will reject whichever struct ends up incomplete.
+        return;
+    }
+
+    for (const FieldDecl& field : stmt.fields) {
+        if (field.type.kind != TypeKind::UserDefined) continue;
+        auto it = typeDeclsByName_.find(canonicalName(field.type.typeName));
+        if (it != typeDeclsByName_.end()) genTypeDecl(*it->second);
+    }
+
+    typesOut_ << "struct " << mangleName(stmt.name) << " {\n";
+    for (const FieldDecl& field : stmt.fields) {
+        typesOut_ << ind(1) << cppType(field.type) << " " << mangleName(field.name) << "{};\n";
+    }
+    typesOut_ << "};\n\n";
+
+    typesBeingEmitted_.erase(key);
+    typesEmitted_.insert(key);
 }
 
 void Codegen::genProcedure(const Stmt& stmt) {
@@ -440,6 +482,9 @@ std::string Codegen::generate(const Module& module) {
     // same regardless of whether a GOSUB span is currently open.
     for (const auto& stmtPtr : module.stmts) {
         if (stmtPtr->kind == StmtKind::GoSub) gosubTargets_.insert(canonicalName(stmtPtr->name));
+        else if (stmtPtr->kind == StmtKind::TypeDecl) {
+            typeDeclsByName_[canonicalName(stmtPtr->name)] = stmtPtr.get();
+        }
     }
 
     std::ostringstream globalsOut;
@@ -467,6 +512,8 @@ std::string Codegen::generate(const Module& module) {
             }
         } else if (stmt.kind == StmtKind::SubDecl || stmt.kind == StmtKind::FunctionDecl) {
             genProcedure(stmt);
+        } else if (stmt.kind == StmtKind::TypeDecl) {
+            genTypeDecl(stmt);
         } else if (stmt.kind == StmtKind::Dim || stmt.kind == StmtKind::Const ||
                    stmt.kind == StmtKind::Enum) {
             genStmt(stmt, globalsOut, 0);
@@ -484,6 +531,7 @@ std::string Codegen::generate(const Module& module) {
     out << "#include <cmath>\n";
     out << "#include <cstdint>\n";
     out << "#include <vector>\n\n";
+    if (!typesOut_.str().empty()) out << typesOut_.str();
     if (!globalsOut.str().empty()) out << globalsOut.str() << "\n";
     if (!protoOut_.str().empty()) out << protoOut_.str() << "\n";
     out << procOut_.str();

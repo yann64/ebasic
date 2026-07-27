@@ -46,6 +46,7 @@ private:
     StmtPtr parseFunction();
     StmtPtr parseCallStmt();
     StmtPtr parseReturn();
+    StmtPtr parseTypeDecl();
     std::vector<Param> parseParamList();
 
     // Parses statements (skipping blank lines) until the next token is one
@@ -70,7 +71,7 @@ private:
 
     static ExprPtr makeBinary(BinOp op, SourceLoc loc, ExprPtr lhs, ExprPtr rhs);
 
-    TypeKind parseTypeKeyword();
+    Type parseTypeKeyword();
 
     std::vector<Token> tokens_;
     size_t pos_ = 0;

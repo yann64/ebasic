@@ -30,6 +30,7 @@ enum class TokenKind {
     LessEq,
     GreaterEq,
     Comma,
+    Dot,
     KwDim,
     KwAs,
     KwPrint,
@@ -84,6 +85,7 @@ enum class TokenKind {
     KwRedim,
     KwPreserve,
     KwGosub,
+    KwType,
 };
 
 struct Token {

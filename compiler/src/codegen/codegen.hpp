@@ -21,6 +21,15 @@ private:
     // Emits a SUB/FUNCTION's prototype (into protoOut_) and body (into
     // procOut_). Only ever called for top-level SubDecl/FunctionDecl stmts.
     void genProcedure(const Stmt& stmt);
+    // Emits a TYPE's C++ struct into typesOut_, recursively emitting any
+    // other TYPE it embeds as a field first - struct-valued fields need the
+    // embedded type's *definition* (not just a forward declaration) above
+    // their own, regardless of the TYPEs' declaration order in the source.
+    // Idempotent (a dependency may pull a type in before its own turn in the
+    // top-level walk reaches it) and cycle-safe (a self-referential TYPE is
+    // invalid C++ regardless - left for the backend to reject, not a crash
+    // here).
+    void genTypeDecl(const Stmt& stmt);
     std::string genExpr(const Expr& expr);
     std::string genCondition(const Expr& expr);
 
@@ -29,7 +38,7 @@ private:
     std::string nextName(const std::string& prefix);
 
     static std::string ind(int indent);
-    static std::string cppType(TypeKind type);
+    static std::string cppType(const Type& type);
     static std::string mangleName(const std::string& name);
     static std::string escapeStringLiteral(const std::string& s);
     // Name of the synthesized parameterless void function a GOSUB-target
@@ -59,6 +68,12 @@ private:
     // once up front in generate(). A Label matching this set is hoisted into
     // its own function instead of emitted inline.
     std::unordered_set<std::string> gosubTargets_;
+    // TYPE struct definitions, emitted before globals/prototypes. See
+    // genTypeDecl.
+    std::ostringstream typesOut_;
+    std::unordered_map<std::string, const Stmt*> typeDeclsByName_;
+    std::unordered_set<std::string> typesEmitted_;
+    std::unordered_set<std::string> typesBeingEmitted_; // cycle guard
 };
 
 } // namespace ebasic

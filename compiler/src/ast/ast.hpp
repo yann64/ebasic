@@ -32,6 +32,8 @@ enum class TypeKind {
     Double,
     Boolean,
     StringT,
+    UserDefined, // a TYPE/CLASS instance; see Type::typeName
+    Pointer,     // a PTR type; see Type::pointee (not used until M3c)
 };
 
 enum class ExprKind {
@@ -45,6 +47,9 @@ enum class ExprKind {
     // an array-element read (exactly 1 arg) and a function call - resolved
     // by Sema/Codegen by looking up what `stringValue` actually names.
     Call,
+    // Field access `base.field`: lhs = base expression, stringValue = field
+    // name.
+    Member,
     Binary,
     UnaryNeg,
     UnaryNot,
@@ -164,14 +169,33 @@ inline TypeKind promoteNumeric(TypeKind a, TypeKind b) {
     return promoteInteger(a, b);
 }
 
+// A type: a bare TypeKind for primitives, plus a name (kind==UserDefined) or
+// a pointee (kind==Pointer, not used until M3c). The implicit constructor
+// and conversion mean every existing `TypeKind::X` literal and every
+// primitive-only helper above (isNumericType, promoteNumeric, ...) keeps
+// working unchanged - they only ever compare/switch on `.kind`, which
+// correctly falls through to "not applicable" for UserDefined/Pointer.
+// Comparing two Types by `==` is NOT the same as comparing two TypeKinds:
+// two different user-defined types both report kind==UserDefined, so
+// identity requires comparing `typeName` too - see isAssignCompatible.
+struct Type {
+    TypeKind kind = TypeKind::Unknown;
+    std::string typeName;              // set when kind == UserDefined
+    std::shared_ptr<Type> pointee;     // set when kind == Pointer
+
+    Type() = default;
+    Type(TypeKind k) : kind(k) {}
+    operator TypeKind() const { return kind; }
+};
+
 struct Expr {
     ExprKind kind;
     SourceLoc loc;
-    TypeKind type = TypeKind::Unknown;
+    Type type;
 
     long long intValue = 0;
     double doubleValue = 0.0;
-    std::string stringValue; // StringLiteral text, or Ident/Call name
+    std::string stringValue; // StringLiteral text, or Ident/Call/Member name
     BinOp binOp = BinOp::Add;
     std::unique_ptr<Expr> lhs;
     std::unique_ptr<Expr> rhs;
@@ -200,6 +224,7 @@ enum class StmtKind {
     CallStmt,
     Return,
     GoSub, // reuses `name` for the target label
+    TypeDecl, // reuses `name` for the type's own name; see Stmt::fields
 };
 
 // Which loop- or procedure-introducing keyword a scope was opened with.
@@ -218,11 +243,18 @@ enum class LoopKind {
 
 // One SUB/FUNCTION parameter. `byRef` is resolved by the parser from an
 // explicit BYVAL/BYREF keyword, or FreeBASIC's default otherwise: BYREF for
-// STRING, BYVAL for every other built-in type.
+// STRING and user-defined TYPE, BYVAL for every other built-in type.
 struct Param {
     std::string name;
-    TypeKind type;
+    Type type;
     bool byRef;
+    SourceLoc loc;
+};
+
+// One field of a TYPE. Deliberately not reusing Param - fields need no byRef.
+struct FieldDecl {
+    std::string name;
+    Type type;
     SourceLoc loc;
 };
 
@@ -260,8 +292,8 @@ struct Stmt {
     StmtKind kind;
     SourceLoc loc;
 
-    std::string name;                          // Dim, Const, Assign, ForNext (loop var), Goto/Label
-    TypeKind declaredType = TypeKind::Unknown;  // Dim (required); Const (optional - inferred if Unknown); Redim (optional restated AS type)
+    std::string name;              // Dim, Const, Assign, ForNext (loop var), Goto/Label, TypeDecl
+    Type declaredType;             // Dim (required); Const (optional - inferred if Unknown); Redim (optional restated AS type)
     ExprPtr expr;                               // Assign/Const value; If/SelectCase/WhileWend condition/selector; ForNext start
     std::vector<ExprPtr> args;                  // Print
 
@@ -272,10 +304,15 @@ struct Stmt {
     // Redim: the new bounds (arrayUpper is always given; arrayLower null => 0).
     ExprPtr arrayLower;
     ExprPtr arrayUpper;
-    ExprPtr index;                // Assign: non-null => array-element assignment to name(index)
+    ExprPtr index;                // Assign: non-null => array-element assignment to name(index) (fast path)
+    // Assign: non-null => a general Member/Call-chain lvalue (e.g. obj.field
+    // or arr(i).field), used instead of name/index when the target involves
+    // a '.'. Takes priority over name/index when present.
+    ExprPtr target;
     bool preserve = false;        // Redim: REDIM PRESERVE keeps existing elements
 
     std::vector<EnumMember> enumMembers; // Enum
+    std::vector<FieldDecl> fields;       // TypeDecl
 
     // If: one condition per IF/ELSEIF branch, and one body per branch in
     // `blocks`. If hasElse, `blocks` has one extra trailing entry for ELSE.

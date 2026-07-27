@@ -10,20 +10,75 @@ bool isCaseCompatible(TypeKind a, TypeKind b) {
     return (isNumericType(a) && isNumericType(b)) || (a == TypeKind::StringT && b == TypeKind::StringT);
 }
 
-// Checks a value's type against a target variable/const type using the same
-// string-vs-numeric compatibility rule used throughout (no narrower checks).
-bool isAssignCompatible(TypeKind targetType, TypeKind valueType) {
-    bool targetIsString = targetType == TypeKind::StringT;
-    bool valueIsString = valueType == TypeKind::StringT;
-    return targetIsString == valueIsString;
+// Checks a value's type against a target variable/const/param type. Two
+// different user-defined types both report kind==UserDefined, so identity
+// there needs comparing typeName too - just comparing the enum tag would
+// incorrectly accept assigning a Foo to a Bar-typed target.
+bool isAssignCompatible(const Type& targetType, const Type& valueType) {
+    bool targetIsString = targetType.kind == TypeKind::StringT;
+    bool valueIsString = valueType.kind == TypeKind::StringT;
+    if (targetIsString != valueIsString) return false;
+
+    bool targetIsUser = targetType.kind == TypeKind::UserDefined;
+    bool valueIsUser = valueType.kind == TypeKind::UserDefined;
+    if (targetIsUser != valueIsUser) return false;
+    if (targetIsUser) {
+        return canonicalName(targetType.typeName) == canonicalName(valueType.typeName);
+    }
+    return true;
 }
 } // namespace
 
 void Sema::check(Module& module) {
     collectLabels(module.stmts);
     collectProcedures(module.stmts);
+    collectTypes(module.stmts);
     collectGosubUsage(module.stmts);
     checkBlock(module.stmts, /*atTopLevel=*/true);
+}
+
+void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
+    // Pass 1: register every TYPE's name first, so a field can reference a
+    // TYPE declared later in the file (mirrors collectProcedures/labels).
+    for (auto& stmt : stmts) {
+        if (stmt->kind != StmtKind::TypeDecl) continue;
+        std::string key = canonicalName(stmt->name);
+        if (procedures_.count(key) || structs_.count(key)) {
+            diags_.error(stmt->loc, "'" + stmt->name + "' is already declared");
+            continue;
+        }
+        structs_[key] = RecordInfo{};
+    }
+    // Pass 2: now that every TYPE name is known, resolve each one's fields.
+    for (auto& stmt : stmts) {
+        if (stmt->kind != StmtKind::TypeDecl) continue;
+        std::string key = canonicalName(stmt->name);
+        auto it = structs_.find(key);
+        if (it == structs_.end()) continue; // duplicate; already reported above
+
+        RecordInfo info;
+        for (const FieldDecl& field : stmt->fields) {
+            std::string fieldKey = canonicalName(field.name);
+            bool duplicate = false;
+            for (const FieldDecl& existing : info.fields) {
+                if (canonicalName(existing.name) == fieldKey) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) {
+                diags_.error(field.loc, "duplicate field name '" + field.name + "'");
+                continue;
+            }
+            if (field.type.kind == TypeKind::UserDefined &&
+                !structs_.count(canonicalName(field.type.typeName))) {
+                diags_.error(field.loc,
+                             "unknown TYPE '" + field.type.typeName + "' for field '" + field.name + "'");
+            }
+            info.fields.push_back(field);
+        }
+        it->second = std::move(info);
+    }
 }
 
 void Sema::collectLabels(std::vector<StmtPtr>& stmts) {
@@ -93,7 +148,7 @@ void Sema::checkCallArgs(const ProcedureInfo& proc, std::vector<ExprPtr>& args, 
     for (size_t i = 0; i < n; ++i) {
         const Param& param = proc.params[i];
         Expr& arg = *args[i];
-        TypeKind argType = checkExpr(arg);
+        Type argType = checkExpr(arg);
         if (!isAssignCompatible(param.type, argType)) {
             diags_.error(arg.loc, "argument " + std::to_string(i + 1) +
                                        " type does not match parameter '" + param.name + "'");
@@ -134,9 +189,13 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
         case StmtKind::Dim: {
             std::string key = canonicalName(stmt.name);
             auto& scope = insideProcedure_ ? locals_ : symbols_;
-            if (scope.count(key) || procedures_.count(key)) {
+            if (scope.count(key) || procedures_.count(key) || structs_.count(key)) {
                 diags_.error(stmt.loc, "'" + stmt.name + "' is already declared");
                 return;
+            }
+            if (stmt.declaredType.kind == TypeKind::UserDefined &&
+                !structs_.count(canonicalName(stmt.declaredType.typeName))) {
+                diags_.error(stmt.loc, "unknown TYPE '" + stmt.declaredType.typeName + "'");
             }
             if (stmt.isArray) {
                 if (stmt.arrayLower && !isIntegerFamily(checkExpr(*stmt.arrayLower))) {
@@ -170,7 +229,8 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                              "'" + stmt.name + "' is a fixed-size array and cannot be REDIM'd "
                              "(declare it with DIM " + stmt.name + "() to make it dynamic)");
             }
-            if (stmt.declaredType != TypeKind::Unknown && stmt.declaredType != info.type) {
+            if (stmt.declaredType.kind != TypeKind::Unknown &&
+                !isAssignCompatible(stmt.declaredType, info.type)) {
                 diags_.error(stmt.loc, "REDIM type does not match the array's declared type");
             }
             if (stmt.arrayLower && !isIntegerFamily(checkExpr(*stmt.arrayLower))) {
@@ -184,12 +244,12 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
         case StmtKind::Const: {
             std::string key = canonicalName(stmt.name);
             auto& scope = insideProcedure_ ? locals_ : symbols_;
-            if (scope.count(key) || procedures_.count(key)) {
+            if (scope.count(key) || procedures_.count(key) || structs_.count(key)) {
                 diags_.error(stmt.loc, "'" + stmt.name + "' is already declared");
                 return;
             }
-            TypeKind exprType = checkExpr(*stmt.expr);
-            TypeKind constType = (stmt.declaredType != TypeKind::Unknown) ? stmt.declaredType : exprType;
+            Type exprType = checkExpr(*stmt.expr);
+            Type constType = (stmt.declaredType.kind != TypeKind::Unknown) ? stmt.declaredType : exprType;
             stmt.declaredType = constType; // resolve for codegen, even when inferred
             if (!isAssignCompatible(constType, exprType)) {
                 diags_.error(stmt.loc, "CONST '" + stmt.name + "' initializer type does not match its "
@@ -214,7 +274,7 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                 }
                 member.resolvedValue = value;
                 std::string key = canonicalName(member.name);
-                if (scope.count(key) || procedures_.count(key)) {
+                if (scope.count(key) || procedures_.count(key) || structs_.count(key)) {
                     diags_.error(member.loc, "'" + member.name + "' is already declared");
                 } else {
                     scope[key] = SymbolInfo{TypeKind::Integer, /*isConst=*/true, false};
@@ -226,10 +286,22 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
         }
         case StmtKind::Assign: {
             if (stmt.isReturnAssign) {
-                TypeKind exprType = checkExpr(*stmt.expr);
+                Type exprType = checkExpr(*stmt.expr);
                 if (!isAssignCompatible(currentFunctionReturnType_, exprType)) {
                     diags_.error(stmt.loc, "return value type does not match FUNCTION '" + stmt.name +
                                                "'s declared return type");
+                }
+                return;
+            }
+            if (stmt.target) {
+                // A general Member/Call-chain lvalue (obj.field, arr(i).field,
+                // ...) - checkExpr's own resolution (Ident/Call/Member) already
+                // validates the chain structurally; just check the assigned
+                // value's type against it.
+                Type targetType = checkExpr(*stmt.target);
+                Type exprType = checkExpr(*stmt.expr);
+                if (!isAssignCompatible(targetType, exprType)) {
+                    diags_.error(stmt.loc, "assigned value's type does not match the target's type");
                 }
                 return;
             }
@@ -254,14 +326,18 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                 diags_.error(stmt.loc, "array '" + stmt.name + "' must be indexed, e.g. " + stmt.name +
                                            "(i) = ...");
             }
-            TypeKind exprType = checkExpr(*stmt.expr);
-            TypeKind varType = info.type;
-            if (varType == TypeKind::StringT && exprType != TypeKind::StringT) {
-                diags_.error(stmt.loc,
-                             "cannot assign a non-string value to string variable '" + stmt.name + "'");
-            } else if (varType != TypeKind::StringT && exprType == TypeKind::StringT) {
-                diags_.error(stmt.loc,
-                             "cannot assign a string value to numeric variable '" + stmt.name + "'");
+            Type exprType = checkExpr(*stmt.expr);
+            if (!isAssignCompatible(info.type, exprType)) {
+                if (info.type.kind == TypeKind::StringT) {
+                    diags_.error(stmt.loc, "cannot assign a non-string value to string variable '" +
+                                               stmt.name + "'");
+                } else if (exprType.kind == TypeKind::StringT) {
+                    diags_.error(stmt.loc, "cannot assign a string value to numeric variable '" +
+                                               stmt.name + "'");
+                } else {
+                    diags_.error(stmt.loc, "assigned value's type does not match variable '" +
+                                               stmt.name + "'");
+                }
             }
             return;
         }
@@ -397,11 +473,11 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
 
             std::unordered_map<std::string, SymbolInfo> savedLocals = std::move(locals_);
             bool savedInsideProcedure = insideProcedure_;
-            TypeKind savedReturnType = currentFunctionReturnType_;
+            Type savedReturnType = currentFunctionReturnType_;
 
             locals_.clear();
             insideProcedure_ = true;
-            currentFunctionReturnType_ = isFunction ? stmt.declaredType : TypeKind::Unknown;
+            currentFunctionReturnType_ = isFunction ? stmt.declaredType : Type(TypeKind::Unknown);
 
             for (const Param& param : stmt.params) {
                 std::string key = canonicalName(param.name);
@@ -449,7 +525,7 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                     diags_.error(stmt.loc, "RETURN inside a FUNCTION requires a value");
                     return;
                 }
-                TypeKind exprType = checkExpr(*stmt.expr);
+                Type exprType = checkExpr(*stmt.expr);
                 if (!isAssignCompatible(currentFunctionReturnType_, exprType)) {
                     diags_.error(stmt.expr->loc,
                                  "RETURN value type does not match the FUNCTION's declared return "
@@ -461,10 +537,22 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
             }
             return;
         }
+        case StmtKind::TypeDecl: {
+            // Name registration and field-type resolution already happened
+            // in the collectTypes pre-pass (fields have no expressions or
+            // control flow to check) - just enforce the top-level rule,
+            // matching SUB/FUNCTION, so a nested TYPE isn't silently
+            // accepted as a no-op while being unusable (never registered).
+            if (!atTopLevel) {
+                diags_.error(stmt.loc, "TYPE declarations are only supported at the top level of a "
+                                        "program");
+            }
+            return;
+        }
     }
 }
 
-TypeKind Sema::checkExpr(Expr& expr) {
+Type Sema::checkExpr(Expr& expr) {
     switch (expr.kind) {
         case ExprKind::IntLiteral:
             expr.type = TypeKind::Integer;
@@ -527,6 +615,33 @@ TypeKind Sema::checkExpr(Expr& expr) {
                 diags_.error(expr.loc, "'" + expr.stringValue + "' is not declared");
             }
             for (auto& arg : expr.args) checkExpr(*arg);
+            expr.type = TypeKind::Unknown;
+            return expr.type;
+        }
+        case ExprKind::Member: {
+            Type baseType = checkExpr(*expr.lhs);
+            if (baseType.kind != TypeKind::UserDefined) {
+                if (baseType.kind != TypeKind::Unknown) {
+                    diags_.error(expr.loc, "'.' requires a value of a user-defined TYPE");
+                }
+                expr.type = TypeKind::Unknown;
+                return expr.type;
+            }
+            auto typeIt = structs_.find(canonicalName(baseType.typeName));
+            if (typeIt == structs_.end()) {
+                diags_.error(expr.loc, "unknown TYPE '" + baseType.typeName + "'");
+                expr.type = TypeKind::Unknown;
+                return expr.type;
+            }
+            std::string fieldKey = canonicalName(expr.stringValue);
+            for (const FieldDecl& field : typeIt->second.fields) {
+                if (canonicalName(field.name) == fieldKey) {
+                    expr.type = field.type;
+                    return expr.type;
+                }
+            }
+            diags_.error(expr.loc,
+                         "TYPE '" + baseType.typeName + "' has no field '" + expr.stringValue + "'");
             expr.type = TypeKind::Unknown;
             return expr.type;
         }
@@ -665,6 +780,8 @@ bool Sema::isConstantExpr(const Expr& expr) const {
         }
         case ExprKind::Call:
             return false; // array elements and function calls are never compile-time constants here
+        case ExprKind::Member:
+            return false; // field access is never a compile-time constant here
         case ExprKind::UnaryNeg:
         case ExprKind::UnaryNot:
             return isConstantExpr(*expr.lhs);

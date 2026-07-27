@@ -16,7 +16,7 @@ namespace ebasic {
 // parens (DIM arr() AS Type) can later be REDIM'd, matching real FB
 // ("REDIM cannot be used on fixed-size arrays").
 struct SymbolInfo {
-    TypeKind type = TypeKind::Unknown;
+    Type type;
     bool isConst = false;
     bool isArray = false;
     bool isDynamicArray = false;
@@ -27,8 +27,14 @@ struct SymbolInfo {
 // resolve regardless of source order.
 struct ProcedureInfo {
     bool isFunction = false;
-    TypeKind returnType = TypeKind::Unknown; // unused for SUB
+    Type returnType; // unused for SUB
     std::vector<Param> params;
+};
+
+// A declared TYPE's fields, registered up front (collectTypes) so a field
+// can reference another TYPE regardless of declaration order.
+struct RecordInfo {
+    std::vector<FieldDecl> fields;
 };
 
 class Sema {
@@ -41,10 +47,15 @@ private:
     void collectLabels(std::vector<StmtPtr>& stmts);
     void collectProcedures(std::vector<StmtPtr>& stmts);
     void collectGosubUsage(std::vector<StmtPtr>& stmts);
+    // Registers every top-level TYPE's name first (so fields can reference
+    // a TYPE declared later in the file), then resolves each one's field
+    // types (built-in trivially valid; UserDefined must name an already-
+    // registered TYPE) now that every name is known.
+    void collectTypes(std::vector<StmtPtr>& stmts);
     void checkBlock(std::vector<StmtPtr>& stmts, bool atTopLevel);
     void checkStmt(Stmt& stmt, bool atTopLevel);
     void checkCondition(Expr& expr, const char* what);
-    TypeKind checkExpr(Expr& expr);
+    Type checkExpr(Expr& expr);
 
     // Looks up `key` in locals_ first, then symbols_, copying the result out
     // (SymbolInfo is small; this sidesteps any pointer-into-map lifetime
@@ -70,8 +81,9 @@ private:
     std::unordered_map<std::string, SymbolInfo> symbols_; // module-level (global) names
     std::unordered_map<std::string, SymbolInfo> locals_;   // current SUB/FUNCTION's params/DIMs
     bool insideProcedure_ = false;
-    TypeKind currentFunctionReturnType_ = TypeKind::Unknown; // valid while insideProcedure_ and it's a FUNCTION
+    Type currentFunctionReturnType_; // valid while insideProcedure_ and it's a FUNCTION
     std::unordered_map<std::string, ProcedureInfo> procedures_;
+    std::unordered_map<std::string, RecordInfo> structs_; // canonical TYPE name -> its fields
     std::unordered_map<std::string, long long> constIntValues_; // CONST/ENUM int value, for evalConstInt
     std::unordered_set<std::string> labels_;
     std::unordered_set<std::string> gosubTargets_; // labels referenced by at least one GOSUB

@@ -151,6 +151,7 @@ Token Lexer::lexIdentifierOrKeyword() {
         {"BYREF", TokenKind::KwByRef},     {"RETURN", TokenKind::KwReturn},
         {"CALL", TokenKind::KwCall},       {"REDIM", TokenKind::KwRedim},
         {"PRESERVE", TokenKind::KwPreserve}, {"GOSUB", TokenKind::KwGosub},
+        {"TYPE", TokenKind::KwType},
     };
 
     auto it = keywords.find(upper);
@@ -219,6 +220,7 @@ std::vector<Token> Lexer::tokenize() {
                 else { tokens.push_back(makeToken(TokenKind::Greater, ">", loc)); }
                 continue;
             case ',': advance(); tokens.push_back(makeToken(TokenKind::Comma, ",", loc)); continue;
+            case '.': advance(); tokens.push_back(makeToken(TokenKind::Dot, ".", loc)); continue;
             default:
                 diags_.error(loc, std::string("unexpected character '") + c + "'");
                 advance();

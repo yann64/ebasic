@@ -70,7 +70,7 @@ Module Parser::parseModule() {
     return module;
 }
 
-TypeKind Parser::parseTypeKeyword() {
+Type Parser::parseTypeKeyword() {
     if (match(TokenKind::KwByte)) return TypeKind::Byte;
     if (match(TokenKind::KwUByte)) return TypeKind::UByte;
     if (match(TokenKind::KwShort)) return TypeKind::Short;
@@ -84,9 +84,19 @@ TypeKind Parser::parseTypeKeyword() {
     if (match(TokenKind::KwDouble)) return TypeKind::Double;
     if (match(TokenKind::KwBoolean)) return TypeKind::Boolean;
     if (match(TokenKind::KwString)) return TypeKind::StringT;
+    if (check(TokenKind::Identifier)) {
+        // A user-defined TYPE name. Whether this identifier actually names a
+        // declared TYPE is a Sema question, not a parser one - same
+        // deferred-disambiguation philosophy as the Call expression (array
+        // read vs. function call), resolved by looking up what it names.
+        Type t;
+        t.kind = TypeKind::UserDefined;
+        t.typeName = advance().text;
+        return t;
+    }
     diags_.error(peek().loc,
                  "expected a type name (BYTE, UBYTE, SHORT, USHORT, INTEGER, LONG, UINTEGER, "
-                 "LONGINT, ULONGINT, SINGLE, DOUBLE, BOOLEAN, or STRING)");
+                 "LONGINT, ULONGINT, SINGLE, DOUBLE, BOOLEAN, STRING, or a declared TYPE name)");
     return TypeKind::Unknown;
 }
 
@@ -205,6 +215,36 @@ StmtPtr Parser::parseEnum() {
     return stmt;
 }
 
+StmtPtr Parser::parseTypeDecl() {
+    SourceLoc loc = peek().loc;
+    advance(); // TYPE
+    const Token& nameTok = expect(TokenKind::Identifier, "expected a name after TYPE");
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->kind = StmtKind::TypeDecl;
+    stmt->loc = loc;
+    stmt->name = nameTok.text;
+    expectStmtEnd();
+    skipNewlines();
+
+    while (!check(TokenKind::KwEnd) && !check(TokenKind::End)) {
+        const Token& fieldTok = expect(TokenKind::Identifier, "expected a field name");
+        FieldDecl field;
+        field.name = fieldTok.text;
+        field.loc = fieldTok.loc;
+        expect(TokenKind::KwAs, "expected AS after field name");
+        field.type = parseTypeKeyword();
+        expectStmtEnd();
+        stmt->fields.push_back(std::move(field));
+        skipNewlines();
+    }
+
+    expect(TokenKind::KwEnd, "expected END TYPE");
+    expect(TokenKind::KwType, "expected END TYPE");
+    expectStmtEnd();
+    return stmt;
+}
+
 StmtPtr Parser::parsePrint() {
     SourceLoc loc = peek().loc;
     advance(); // PRINT
@@ -235,9 +275,42 @@ StmtPtr Parser::parseAssign() {
 
     bool isReturnAssign =
         !currentFunctionName_.empty() && canonicalName(name) == currentFunctionName_;
-    if (!isReturnAssign && match(TokenKind::LParen)) {
-        stmt->index = parseExpr();
-        expect(TokenKind::RParen, "expected ')' after array index");
+
+    if (!isReturnAssign) {
+        ExprPtr base;
+        if (match(TokenKind::LParen)) {
+            ExprPtr idx = parseExpr();
+            expect(TokenKind::RParen, "expected ')' after array index");
+            if (check(TokenKind::Dot)) {
+                // name(idx).field... - becomes a general lvalue chain.
+                auto call = std::make_unique<Expr>();
+                call->kind = ExprKind::Call;
+                call->loc = loc;
+                call->stringValue = name;
+                call->args.push_back(std::move(idx));
+                base = std::move(call);
+            } else {
+                stmt->index = std::move(idx); // fast path: name(idx) = expr
+            }
+        } else if (check(TokenKind::Dot)) {
+            auto ident = std::make_unique<Expr>();
+            ident->kind = ExprKind::Ident;
+            ident->loc = loc;
+            ident->stringValue = name;
+            base = std::move(ident);
+        }
+
+        while (base && match(TokenKind::Dot)) {
+            const Token& fieldTok = expect(TokenKind::Identifier, "expected a field name after '.'");
+            auto member = std::make_unique<Expr>();
+            member->kind = ExprKind::Member;
+            member->loc = fieldTok.loc;
+            member->stringValue = fieldTok.text;
+            member->lhs = std::move(base);
+            base = std::move(member);
+        }
+
+        stmt->target = std::move(base);
     }
 
     expect(TokenKind::Equals, "expected '=' in assignment");
@@ -264,6 +337,7 @@ StmtPtr Parser::parseStatement() {
     if (check(TokenKind::KwRedim)) return parseRedim();
     if (check(TokenKind::KwConst)) return parseConst();
     if (check(TokenKind::KwEnum)) return parseEnum();
+    if (check(TokenKind::KwType)) return parseTypeDecl();
     if (check(TokenKind::KwPrint)) return parsePrint();
     if (check(TokenKind::KwIf)) return parseIf();
     if (check(TokenKind::KwSelect)) return parseSelectCase();
@@ -509,9 +583,13 @@ std::vector<Param> Parser::parseParamList() {
 
             const Token& nameTok = expect(TokenKind::Identifier, "expected a parameter name");
             expect(TokenKind::KwAs, "expected AS after parameter name");
-            TypeKind type = parseTypeKeyword();
+            Type type = parseTypeKeyword();
 
-            bool byRef = explicitByRef || (!explicitByVal && type == TypeKind::StringT);
+            // FreeBASIC defaults to BYREF for STRING and user-defined TYPE,
+            // BYVAL for every other built-in type (verified against docs).
+            bool byRef = explicitByRef ||
+                         (!explicitByVal && (type.kind == TypeKind::StringT ||
+                                             type.kind == TypeKind::UserDefined));
 
             Param p;
             p.name = nameTok.text;
@@ -816,25 +894,38 @@ ExprPtr Parser::parsePrimary() {
     }
     if (tok.kind == TokenKind::Identifier) {
         advance();
+        ExprPtr base;
         if (match(TokenKind::LParen)) {
-            auto expr = std::make_unique<Expr>();
-            expr->kind = ExprKind::Call;
-            expr->loc = tok.loc;
-            expr->stringValue = tok.text;
+            auto call = std::make_unique<Expr>();
+            call->kind = ExprKind::Call;
+            call->loc = tok.loc;
+            call->stringValue = tok.text;
             if (!check(TokenKind::RParen)) {
-                expr->args.push_back(parseExpr());
+                call->args.push_back(parseExpr());
                 while (match(TokenKind::Comma)) {
-                    expr->args.push_back(parseExpr());
+                    call->args.push_back(parseExpr());
                 }
             }
             expect(TokenKind::RParen, "expected ')'");
-            return expr;
+            base = std::move(call);
+        } else {
+            auto ident = std::make_unique<Expr>();
+            ident->kind = ExprKind::Ident;
+            ident->loc = tok.loc;
+            ident->stringValue = tok.text;
+            base = std::move(ident);
         }
-        auto expr = std::make_unique<Expr>();
-        expr->kind = ExprKind::Ident;
-        expr->loc = tok.loc;
-        expr->stringValue = tok.text;
-        return expr;
+
+        while (match(TokenKind::Dot)) {
+            const Token& fieldTok = expect(TokenKind::Identifier, "expected a field name after '.'");
+            auto member = std::make_unique<Expr>();
+            member->kind = ExprKind::Member;
+            member->loc = fieldTok.loc;
+            member->stringValue = fieldTok.text;
+            member->lhs = std::move(base);
+            base = std::move(member);
+        }
+        return base;
     }
     if (match(TokenKind::LParen)) {
         ExprPtr inner = parseExpr();
