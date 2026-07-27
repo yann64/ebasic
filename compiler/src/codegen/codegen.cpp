@@ -87,10 +87,15 @@ std::string Codegen::genExpr(const Expr& expr) {
             return mangleName(expr.stringValue);
         case ExprKind::Call: {
             if (expr.lhs) {
-                // Namespace.Name(args) -> C++ eb_ns::eb_name(args); anything
-                // else (This, a variable, a field, ...) is a method call on
-                // that receiver -> eb_recv.eb_name(args), or this->eb_name(args)
-                // for This specifically (this is a pointer in C++).
+                // Namespace.Name(args) -> C++ eb_ns::eb_name(args); This
+                // -> this->eb_name(args) (a normal, potentially-virtual
+                // call); Base -> a *qualified*, non-virtual call to the
+                // immediate base's own implementation
+                // (eb_base::eb_name(args), implicitly using the current
+                // `this` - exactly like C++'s own `Base::method()` from
+                // inside a derived member function); anything else (a
+                // variable, a field, ...) is a plain method call on that
+                // receiver -> eb_recv.eb_name(args).
                 std::string prefix;
                 bool lhsIsNamespaceIdent = expr.lhs->kind == ExprKind::Ident &&
                                            namespaces_.count(canonicalName(expr.lhs->stringValue));
@@ -98,6 +103,8 @@ std::string Codegen::genExpr(const Expr& expr) {
                     prefix = mangleName(expr.lhs->stringValue) + "::";
                 } else if (expr.lhs->kind == ExprKind::This) {
                     prefix = "this->";
+                } else if (expr.lhs->kind == ExprKind::Base) {
+                    prefix = mangleName(baseTypeOf_.at(currentOwnerType_)) + "::";
                 } else {
                     prefix = genExpr(*expr.lhs) + ".";
                 }
@@ -127,7 +134,10 @@ std::string Codegen::genExpr(const Expr& expr) {
             if (expr.lhs->kind == ExprKind::Ident && namespaces_.count(canonicalName(expr.lhs->stringValue))) {
                 return mangleName(expr.lhs->stringValue) + "::" + mangleName(expr.stringValue);
             }
-            if (expr.lhs->kind == ExprKind::This) {
+            if (expr.lhs->kind == ExprKind::This || expr.lhs->kind == ExprKind::Base) {
+                // Base.field reaches the same storage as This.field (fields
+                // aren't versioned by inheritance the way virtual methods
+                // are) - both need `this->`, not `.` (`this` is a pointer).
                 return "this->" + mangleName(expr.stringValue);
             }
             return genExpr(*expr.lhs) + "." + mangleName(expr.stringValue);
@@ -136,7 +146,14 @@ std::string Codegen::genExpr(const Expr& expr) {
         case ExprKind::Deref:
             return "(*(" + genExpr(*expr.lhs) + "))";
         case ExprKind::This:
-            return "this";
+        case ExprKind::Base:
+            // A bare This/Base used as a value (not immediately followed by
+            // `.field`/`.Method()`, which Member/Call special-case above
+            // without going through this branch at all) needs the
+            // dereferenced *value*, not the raw `this` pointer - e.g.
+            // passing `This` to a BYREF/BYVAL parameter, or `@This` taking
+            // its address (`&this` is ill-formed C++; `&(*this)` is not).
+            return "(*this)";
         case ExprKind::UnaryNeg:
             return "(-" + genExpr(*expr.lhs) + ")";
         case ExprKind::UnaryNot:
@@ -428,10 +445,11 @@ void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out, int indent) {
             throw std::runtime_error("codegen: NAMESPACE must be top-level (sema should have caught "
                                       "this)");
         case StmtKind::CallStmt: {
-            // Same three shapes as the expression-position Call: a
-            // Namespace.Name(args) qualifier (`::`), a This.Method(args) or
-            // obj.Method(args) receiver (`->`/`.`), or a plain free-function
-            // call (no prefix).
+            // Same shapes as the expression-position Call: a
+            // Namespace.Name(args) qualifier (`::`), a This.Method(args)
+            // receiver (`->`), a Base.Method(args) qualified non-virtual
+            // call (`eb_base::`), an obj.Method(args) receiver (`.`), or a
+            // plain free-function call (no prefix).
             std::string prefix;
             if (stmt.target) {
                 bool targetIsNamespaceIdent = stmt.target->kind == ExprKind::Ident &&
@@ -440,6 +458,8 @@ void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out, int indent) {
                     prefix = mangleName(stmt.target->stringValue) + "::";
                 } else if (stmt.target->kind == ExprKind::This) {
                     prefix = "this->";
+                } else if (stmt.target->kind == ExprKind::Base) {
+                    prefix = mangleName(baseTypeOf_.at(currentOwnerType_)) + "::";
                 } else {
                     prefix = genExpr(*stmt.target) + ".";
                 }
@@ -481,6 +501,13 @@ void Codegen::genTypeDecl(const Stmt& stmt) {
         auto it = typeDeclsByName_.find(canonicalName(field.type.typeName));
         if (it != typeDeclsByName_.end()) genTypeDecl(*it->second);
     }
+    // A base class needs its *full* definition above the derived struct too
+    // (inheriting from an incomplete type is illegal, same reason an
+    // embedded-by-value field does) - so it's a dependency exactly like one.
+    if (!stmt.baseTypeName.empty()) {
+        auto baseIt = typeDeclsByName_.find(canonicalName(stmt.baseTypeName));
+        if (baseIt != typeDeclsByName_.end()) genTypeDecl(*baseIt->second);
+    }
 
     // A C++ union may have at most one member with a default (in-class)
     // initializer - so unlike a struct's per-field `{}`, a union's members
@@ -490,7 +517,11 @@ void Codegen::genTypeDecl(const Stmt& stmt) {
     // initializes to zero" default (STRING*N fields, the one exception,
     // are Sema-rejected from UNIONs entirely - see collectTypes).
     bool isUnion = stmt.kind == StmtKind::UnionDecl;
-    typesOut_ << (isUnion ? "union " : "struct ") << mangleName(stmt.name) << " {\n";
+    typesOut_ << (isUnion ? "union " : "struct ") << mangleName(stmt.name);
+    if (!stmt.baseTypeName.empty()) {
+        typesOut_ << " : public " << mangleName(stmt.baseTypeName);
+    }
+    typesOut_ << " {\n";
     for (const FieldDecl& field : stmt.fields) {
         typesOut_ << ind(1) << cppType(field.type) << " " << mangleName(field.name);
         if (!isUnion) typesOut_ << "{}";
@@ -511,8 +542,12 @@ void Codegen::genTypeDecl(const Stmt& stmt) {
         }
         bool isFunction = method->kind == StmtKind::FunctionDecl;
         std::string retType = isFunction ? cppType(method->declaredType) : "void";
-        typesOut_ << ind(1) << retType << " " << mangleName(method->name) << "("
-                   << buildParamList(method->params) << ");\n";
+        // `Override` implies participation in the vtable too, whether or
+        // not `Virtual` was also explicitly written (Sema's own rule).
+        bool isVirtual = method->isVirtual || method->isOverride;
+        typesOut_ << ind(1) << (isVirtual ? "virtual " : "") << retType << " "
+                   << mangleName(method->name) << "(" << buildParamList(method->params) << ")"
+                   << (method->isOverride ? " override" : "") << ";\n";
     }
     typesOut_ << "};\n\n";
 
@@ -582,7 +617,10 @@ void Codegen::genMethodDefinition(const Stmt& stmt) {
     // A local array can shadow a global of the same name; save/restore so
     // that mapping doesn't leak into code generated after this method.
     auto savedArrayLowerBounds = arrayLowerBoundVar_;
+    std::string savedOwnerType = currentOwnerType_;
+    currentOwnerType_ = canonicalName(stmt.ownerType);
     genBlock(stmt.body, procOut_, 1);
+    currentOwnerType_ = savedOwnerType;
     arrayLowerBoundVar_ = savedArrayLowerBounds;
     if (isFunction) {
         procOut_ << ind(1) << "return eb__ret;\n";
@@ -651,6 +689,9 @@ std::string Codegen::generate(const Module& module) {
         if (stmtPtr->kind == StmtKind::GoSub) gosubTargets_.insert(canonicalName(stmtPtr->name));
         else if (stmtPtr->kind == StmtKind::TypeDecl || stmtPtr->kind == StmtKind::UnionDecl) {
             typeDeclsByName_[canonicalName(stmtPtr->name)] = stmtPtr.get();
+            if (!stmtPtr->baseTypeName.empty()) {
+                baseTypeOf_[canonicalName(stmtPtr->name)] = canonicalName(stmtPtr->baseTypeName);
+            }
         } else if (stmtPtr->kind == StmtKind::NamespaceDecl) {
             namespaces_.insert(canonicalName(stmtPtr->name));
         }

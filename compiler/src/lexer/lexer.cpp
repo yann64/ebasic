@@ -157,6 +157,10 @@ Token Lexer::lexIdentifierOrKeyword() {
         {"CONSTRUCTOR", TokenKind::KwConstructor},
         {"DESTRUCTOR", TokenKind::KwDestructor},
         {"THIS", TokenKind::KwThis},
+        {"EXTENDS", TokenKind::KwExtends},
+        {"VIRTUAL", TokenKind::KwVirtual},
+        {"OVERRIDE", TokenKind::KwOverride},
+        {"BASE", TokenKind::KwBase},
     };
 
     auto it = keywords.find(upper);

@@ -26,42 +26,6 @@ bool pointeesIdentical(const Type& a, const Type& b) {
     return true;
 }
 
-// Checks a value's type against a target variable/const/param type. Two
-// different user-defined types both report kind==UserDefined, so identity
-// there needs comparing typeName too - just comparing the enum tag would
-// incorrectly accept assigning a Foo to a Bar-typed target.
-bool isAssignCompatible(const Type& targetType, const Type& valueType) {
-    // Pointer target/value: ANY PTR (null pointee) is universally compatible
-    // with any other pointer on either side (verified against FB docs -
-    // "implicitly converted to and from other pointer types"); two typed
-    // pointers require identical pointees. Assigning an integer-family value
-    // (the null-literal `0` convention) to a pointer target is allowed
-    // structurally here - the backend (g++) rejects any non-zero
-    // non-pointer-constant case, the same "defer to the backend" pattern
-    // used elsewhere in this codebase. Assigning a pointer to a non-pointer
-    // target is never allowed.
-    bool targetIsPtr = targetType.kind == TypeKind::Pointer;
-    bool valueIsPtr = valueType.kind == TypeKind::Pointer;
-    if (targetIsPtr || valueIsPtr) {
-        if (targetIsPtr && valueIsPtr) {
-            if (!targetType.pointee || !valueType.pointee) return true;
-            return pointeesIdentical(*targetType.pointee, *valueType.pointee);
-        }
-        return targetIsPtr && isIntegerFamily(valueType.kind);
-    }
-
-    bool targetIsString = targetType.kind == TypeKind::StringT;
-    bool valueIsString = valueType.kind == TypeKind::StringT;
-    if (targetIsString != valueIsString) return false;
-
-    bool targetIsUser = targetType.kind == TypeKind::UserDefined;
-    bool valueIsUser = valueType.kind == TypeKind::UserDefined;
-    if (targetIsUser != valueIsUser) return false;
-    if (targetIsUser) {
-        return canonicalName(targetType.typeName) == canonicalName(valueType.typeName);
-    }
-    return true;
-}
 
 /// Recursively checks whether `type` is, or (for a `UserDefined` field)
 /// transitively contains, a `STRING`. Used to enforce FreeBASIC's UNION
@@ -139,6 +103,25 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
             info.fields.push_back(field);
         }
 
+        // EXTENDS (single inheritance only) - UNION cannot use it (kept
+        // simple: real FB allows a restricted form, but combining UNION's
+        // own "no complex members" restriction with inheritance isn't
+        // needed to prove TYPE inheritance/virtual dispatch, this slice's
+        // actual goal).
+        if (!stmt->baseTypeName.empty()) {
+            if (stmt->kind == StmtKind::UnionDecl) {
+                diags_.error(stmt->loc, "UNION cannot use EXTENDS");
+            } else {
+                std::string baseKey = canonicalName(stmt->baseTypeName);
+                if (!structs_.count(baseKey)) {
+                    diags_.error(stmt->loc,
+                                 "unknown base TYPE '" + stmt->baseTypeName + "' in EXTENDS");
+                } else {
+                    info.baseName = baseKey;
+                }
+            }
+        }
+
         // Method/constructor/destructor prototypes (Declare ... inside the
         // TYPE body) - UNION cannot have any (FreeBASIC unions may not
         // contain members with constructors/destructors).
@@ -178,6 +161,9 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
                 procInfo.isFunction = method->kind == StmtKind::FunctionDecl;
                 procInfo.returnType = method->declaredType;
                 procInfo.params = method->params;
+                // An override necessarily participates in the vtable too,
+                // whether or not `Virtual` was also explicitly written.
+                procInfo.isVirtual = method->isVirtual || method->isOverride;
                 info.methods[methodKey] = std::move(procInfo);
             }
         }
@@ -280,6 +266,60 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
             }
         }
     }
+    // Pass 6: EXTENDS cycle check. Every base-name lookup above only
+    // required the base to *exist*, not that its own chain be acyclic -
+    // walk each TYPE's chain now that every baseName is resolved, so a
+    // cycle (A extends B, B extends A, ...) is reported once cleanly
+    // instead of surfacing later as unbounded recursion in codegen/lookup
+    // helpers (which are cycle-guarded defensively, but a clear diagnostic
+    // here is much friendlier than silent truncation there).
+    for (auto& stmt : stmts) {
+        if (stmt->kind != StmtKind::TypeDecl) continue;
+        std::string key = canonicalName(stmt->name);
+        auto it = structs_.find(key);
+        if (it == structs_.end() || it->second.baseName.empty()) continue;
+        std::unordered_set<std::string> visited{key};
+        std::string cur = it->second.baseName;
+        bool cyclic = false;
+        while (!cur.empty()) {
+            if (!visited.insert(cur).second) {
+                cyclic = true;
+                break;
+            }
+            auto curIt = structs_.find(cur);
+            if (curIt == structs_.end()) break;
+            cur = curIt->second.baseName;
+        }
+        if (cyclic) {
+            diags_.error(stmt->loc, "circular inheritance involving TYPE '" + stmt->name + "'");
+        }
+    }
+    // Pass 7: an Override method must match a Virtual method somewhere up
+    // the (now fully-resolved and acyclic) base chain - run only after
+    // pass 6 confirms no cycles, so this walk is guaranteed to terminate
+    // without relying on its own cycle guard. A narrower "is it actually
+    // virtual" mismatch is left for the backend: Codegen emits a literal
+    // `override` regardless, and g++ already gives a precise error for
+    // that case ("marked override, but does not override").
+    for (auto& stmt : stmts) {
+        if (stmt->kind != StmtKind::TypeDecl) continue;
+        std::string key = canonicalName(stmt->name);
+        auto it = structs_.find(key);
+        if (it == structs_.end()) continue;
+        for (const StmtPtr& method : stmt->methods) {
+            if (!method->isOverride || it->second.baseName.empty()) {
+                if (method->isOverride && it->second.baseName.empty()) {
+                    diags_.error(method->loc, "'" + method->name + "' is marked Override but TYPE '" +
+                                                   stmt->name + "' has no base TYPE (no EXTENDS)");
+                }
+                continue;
+            }
+            if (!findMethodInChain(it->second.baseName, canonicalName(method->name))) {
+                diags_.error(method->loc, "no method '" + method->name + "' found in a base TYPE "
+                                           "of '" + stmt->name + "' to override");
+            }
+        }
+    }
 }
 
 void Sema::collectLabels(std::vector<StmtPtr>& stmts) {
@@ -372,6 +412,83 @@ const ProcedureInfo* Sema::findProcedure(const std::string& key) const {
     }
     auto it = procedures_.find(key);
     return it != procedures_.end() ? &it->second : nullptr;
+}
+
+bool Sema::isSameOrDerivedFrom(const std::string& typeKey, const std::string& baseKey) const {
+    std::string key = typeKey;
+    std::unordered_set<std::string> visited;
+    while (!key.empty() && visited.insert(key).second) {
+        if (key == baseKey) return true;
+        auto it = structs_.find(key);
+        if (it == structs_.end()) return false;
+        key = it->second.baseName;
+    }
+    return false;
+}
+
+const FieldDecl* Sema::findFieldInChain(const std::string& typeKey, const std::string& fieldKey) const {
+    std::string key = typeKey;
+    std::unordered_set<std::string> visited;
+    while (!key.empty() && visited.insert(key).second) {
+        auto it = structs_.find(key);
+        if (it == structs_.end()) return nullptr;
+        for (const FieldDecl& field : it->second.fields) {
+            if (canonicalName(field.name) == fieldKey) return &field;
+        }
+        key = it->second.baseName;
+    }
+    return nullptr;
+}
+
+const ProcedureInfo* Sema::findMethodInChain(const std::string& typeKey, const std::string& methodKey) const {
+    std::string key = typeKey;
+    std::unordered_set<std::string> visited;
+    while (!key.empty() && visited.insert(key).second) {
+        auto it = structs_.find(key);
+        if (it == structs_.end()) return nullptr;
+        auto methodIt = it->second.methods.find(methodKey);
+        if (methodIt != it->second.methods.end()) return &methodIt->second;
+        key = it->second.baseName;
+    }
+    return nullptr;
+}
+
+bool Sema::isAssignCompatible(const Type& targetType, const Type& valueType) const {
+    // Pointer target/value: ANY PTR (null pointee) is universally compatible
+    // with any other pointer on either side (verified against FB docs -
+    // "implicitly converted to and from other pointer types"); two typed
+    // pointers require identical pointees. Assigning an integer-family value
+    // (the null-literal `0` convention) to a pointer target is allowed
+    // structurally here - the backend (g++) rejects any non-zero
+    // non-pointer-constant case, the same "defer to the backend" pattern
+    // used elsewhere in this codebase. Assigning a pointer to a non-pointer
+    // target is never allowed.
+    bool targetIsPtr = targetType.kind == TypeKind::Pointer;
+    bool valueIsPtr = valueType.kind == TypeKind::Pointer;
+    if (targetIsPtr || valueIsPtr) {
+        if (targetIsPtr && valueIsPtr) {
+            if (!targetType.pointee || !valueType.pointee) return true;
+            return pointeesIdentical(*targetType.pointee, *valueType.pointee);
+        }
+        return targetIsPtr && isIntegerFamily(valueType.kind);
+    }
+
+    bool targetIsString = targetType.kind == TypeKind::StringT;
+    bool valueIsString = valueType.kind == TypeKind::StringT;
+    if (targetIsString != valueIsString) return false;
+
+    bool targetIsUser = targetType.kind == TypeKind::UserDefined;
+    bool valueIsUser = valueType.kind == TypeKind::UserDefined;
+    if (targetIsUser != valueIsUser) return false;
+    if (targetIsUser) {
+        // An implicit upcast: a value of a TYPE derived (directly or
+        // transitively) from the target's TYPE is compatible, matching
+        // C++'s own base-pointer/reference/slicing-assignment behavior -
+        // needed for e.g. passing a Derived instance to a BYREF Base
+        // parameter to demonstrate virtual dispatch.
+        return isSameOrDerivedFrom(canonicalName(valueType.typeName), canonicalName(targetType.typeName));
+    }
+    return true;
 }
 
 bool Sema::isLvalue(const Expr& expr) const {
@@ -566,19 +683,16 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
             if (!lookupSymbol(key, info)) {
                 // Implicit `This.field = value` when inside a method, no
                 // array index, and no local/parameter/global matches -
-                // mirrors the read-side Ident fallback in checkExpr.
+                // mirrors the read-side Ident fallback in checkExpr. Walks
+                // the base chain too, so assigning an inherited field works.
                 if (!stmt.index && !currentClassName_.empty()) {
-                    auto structIt = structs_.find(currentClassName_);
-                    if (structIt != structs_.end()) {
-                        for (const FieldDecl& field : structIt->second.fields) {
-                            if (canonicalName(field.name) != key) continue;
-                            Type exprType = checkExpr(*stmt.expr);
-                            if (!isAssignCompatible(field.type, exprType)) {
-                                diags_.error(stmt.loc, "assigned value's type does not match "
-                                                            "member '" + stmt.name + "'");
-                            }
-                            return;
+                    if (const FieldDecl* field = findFieldInChain(currentClassName_, key)) {
+                        Type exprType = checkExpr(*stmt.expr);
+                        if (!isAssignCompatible(field->type, exprType)) {
+                            diags_.error(stmt.loc, "assigned value's type does not match "
+                                                        "member '" + stmt.name + "'");
                         }
+                        return;
                     }
                 }
                 diags_.error(stmt.loc, "variable '" + stmt.name + "' is not declared");
@@ -794,8 +908,10 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                     checkCallArgs(it->second, stmt.args, stmt.loc);
                     return;
                 }
-                // CALL obj.Method(args) / CALL This.Method(args) - target is
-                // a receiver expression, resolved by what its type is.
+                // CALL obj.Method(args) / CALL This.Method(args) / CALL
+                // Base.Method(args) - target is a receiver expression,
+                // resolved by what its type is (walking the base chain, so
+                // an inherited method resolves too).
                 Type receiverType = checkExpr(*stmt.target);
                 if (receiverType.kind != TypeKind::UserDefined) {
                     if (receiverType.kind != TypeKind::Unknown) {
@@ -806,20 +922,20 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                     for (auto& arg : stmt.args) checkExpr(*arg);
                     return;
                 }
-                auto structIt = structs_.find(canonicalName(receiverType.typeName));
-                if (structIt == structs_.end()) {
+                std::string typeKey = canonicalName(receiverType.typeName);
+                if (!structs_.count(typeKey)) {
                     diags_.error(stmt.loc, "unknown TYPE '" + receiverType.typeName + "'");
                     for (auto& arg : stmt.args) checkExpr(*arg);
                     return;
                 }
-                auto methodIt = structIt->second.methods.find(canonicalName(stmt.name));
-                if (methodIt == structIt->second.methods.end()) {
+                const ProcedureInfo* method = findMethodInChain(typeKey, canonicalName(stmt.name));
+                if (!method) {
                     diags_.error(stmt.loc, "TYPE '" + receiverType.typeName + "' has no method '" +
                                                 stmt.name + "'");
                     for (auto& arg : stmt.args) checkExpr(*arg);
                     return;
                 }
-                checkCallArgs(methodIt->second, stmt.args, stmt.loc);
+                checkCallArgs(*method, stmt.args, stmt.loc);
                 return;
             }
             const ProcedureInfo* proc = findProcedure(canonicalName(stmt.name));
@@ -927,16 +1043,12 @@ Type Sema::checkExpr(Expr& expr) {
             if (!lookupSymbol(key, info)) {
                 // Implicit `This.field` when inside a method and no
                 // local/parameter/global matches - a local/param always
-                // wins (verified FB rule: it "hides" the member).
+                // wins (verified FB rule: it "hides" the member). Walks the
+                // base chain too, so an inherited field resolves.
                 if (!currentClassName_.empty()) {
-                    auto structIt = structs_.find(currentClassName_);
-                    if (structIt != structs_.end()) {
-                        for (const FieldDecl& field : structIt->second.fields) {
-                            if (canonicalName(field.name) == key) {
-                                expr.type = field.type;
-                                return expr.type;
-                            }
-                        }
+                    if (const FieldDecl* field = findFieldInChain(currentClassName_, key)) {
+                        expr.type = field->type;
+                        return expr.type;
                     }
                 }
                 diags_.error(expr.loc, "variable '" + expr.stringValue + "' is not declared");
@@ -959,6 +1071,25 @@ Type Sema::checkExpr(Expr& expr) {
             Type t;
             t.kind = TypeKind::UserDefined;
             t.typeName = currentClassName_;
+            expr.type = t;
+            return expr.type;
+        }
+        case ExprKind::Base: {
+            if (currentClassName_.empty()) {
+                diags_.error(expr.loc, "'Base' can only be used inside a TYPE method");
+                expr.type = TypeKind::Unknown;
+                return expr.type;
+            }
+            auto it = structs_.find(currentClassName_);
+            std::string baseName = it != structs_.end() ? it->second.baseName : std::string();
+            if (baseName.empty()) {
+                diags_.error(expr.loc, "TYPE has no base TYPE (no EXTENDS) - 'Base' cannot be used");
+                expr.type = TypeKind::Unknown;
+                return expr.type;
+            }
+            Type t;
+            t.kind = TypeKind::UserDefined;
+            t.typeName = baseName;
             expr.type = t;
             return expr.type;
         }
@@ -986,10 +1117,11 @@ Type Sema::checkExpr(Expr& expr) {
                     expr.type = proc.returnType;
                     return expr.type;
                 }
-                // obj.Method(args) / This.Method(args) - lhs is a receiver
-                // expression, resolved by looking up what its type actually
-                // is (a third instance of this codebase's "disambiguate by
-                // what it names" pattern, after array-vs-function Call and
+                // obj.Method(args) / This.Method(args) / Base.Method(args) -
+                // lhs is a receiver expression, resolved by looking up what
+                // its type actually is, walking the base chain (a third
+                // instance of this codebase's "disambiguate by what it
+                // names" pattern, after array-vs-function Call and
                 // NAMESPACE's qualified lookup).
                 Type receiverType = checkExpr(*expr.lhs);
                 if (receiverType.kind != TypeKind::UserDefined) {
@@ -1002,28 +1134,27 @@ Type Sema::checkExpr(Expr& expr) {
                     expr.type = TypeKind::Unknown;
                     return expr.type;
                 }
-                auto structIt = structs_.find(canonicalName(receiverType.typeName));
-                if (structIt == structs_.end()) {
+                std::string typeKey = canonicalName(receiverType.typeName);
+                if (!structs_.count(typeKey)) {
                     diags_.error(expr.loc, "unknown TYPE '" + receiverType.typeName + "'");
                     for (auto& arg : expr.args) checkExpr(*arg);
                     expr.type = TypeKind::Unknown;
                     return expr.type;
                 }
-                auto methodIt = structIt->second.methods.find(canonicalName(expr.stringValue));
-                if (methodIt == structIt->second.methods.end()) {
+                const ProcedureInfo* method = findMethodInChain(typeKey, canonicalName(expr.stringValue));
+                if (!method) {
                     diags_.error(expr.loc, "TYPE '" + receiverType.typeName + "' has no method '" +
                                                 expr.stringValue + "'");
                     for (auto& arg : expr.args) checkExpr(*arg);
                     expr.type = TypeKind::Unknown;
                     return expr.type;
                 }
-                const ProcedureInfo& method = methodIt->second;
-                if (!method.isFunction) {
+                if (!method->isFunction) {
                     diags_.error(expr.loc, "'" + expr.stringValue +
                                                 "' is a SUB and cannot be used in an expression");
                 }
-                checkCallArgs(method, expr.args, expr.loc);
-                expr.type = method.returnType;
+                checkCallArgs(*method, expr.args, expr.loc);
+                expr.type = method->returnType;
                 return expr.type;
             }
             std::string key = canonicalName(expr.stringValue);
@@ -1082,18 +1213,17 @@ Type Sema::checkExpr(Expr& expr) {
                 expr.type = TypeKind::Unknown;
                 return expr.type;
             }
-            auto typeIt = structs_.find(canonicalName(baseType.typeName));
-            if (typeIt == structs_.end()) {
+            std::string typeKey = canonicalName(baseType.typeName);
+            if (!structs_.count(typeKey)) {
                 diags_.error(expr.loc, "unknown TYPE '" + baseType.typeName + "'");
                 expr.type = TypeKind::Unknown;
                 return expr.type;
             }
-            std::string fieldKey = canonicalName(expr.stringValue);
-            for (const FieldDecl& field : typeIt->second.fields) {
-                if (canonicalName(field.name) == fieldKey) {
-                    expr.type = field.type;
-                    return expr.type;
-                }
+            // Walks the base chain too, so an inherited field resolves the
+            // same as one declared directly.
+            if (const FieldDecl* field = findFieldInChain(typeKey, canonicalName(expr.stringValue))) {
+                expr.type = field->type;
+                return expr.type;
             }
             diags_.error(expr.loc,
                          "TYPE '" + baseType.typeName + "' has no field '" + expr.stringValue + "'");
@@ -1324,6 +1454,7 @@ bool Sema::isConstantExpr(const Expr& expr) const {
         case ExprKind::Deref:
             return false; // pointer ops are never compile-time constants here
         case ExprKind::This:
+        case ExprKind::Base:
             return false; // the current instance is never a compile-time constant
         case ExprKind::UnaryNeg:
         case ExprKind::UnaryNot:

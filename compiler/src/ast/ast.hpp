@@ -69,6 +69,12 @@ enum class ExprKind {
     /// C++ `this` (a pointer) - `This.field` therefore needs the same
     /// arrow-vs-dot special case as a `Deref`-based Member.
     This,
+    /// `Base` - refers to the current TYPE's immediate base (EXTENDS)
+    /// inside a method. No fields used; its type is the base TYPE
+    /// (Sema::currentClassName_'s baseName). `Base.Method(args)` is a
+    /// non-virtual qualified call to the base's own implementation
+    /// (bypassing any override) - Codegen emits literal `eb_base::eb_method(args)`.
+    Base,
 };
 
 enum class BinOp {
@@ -345,6 +351,9 @@ struct Stmt {
     // rule). UNION cannot have any (Sema-rejected - FB unions may not
     // contain members with constructors/destructors).
     std::vector<StmtPtr> methods;
+    // TypeDecl only: the name after EXTENDS, empty if none. FreeBASIC is
+    // single-inheritance only - one base, not a list.
+    std::string baseTypeName;
 
     // If: one condition per IF/ELSEIF branch, and one body per branch in
     // `blocks`. If hasElse, `blocks` has one extra trailing entry for ELSE.
@@ -384,6 +393,15 @@ struct Stmt {
     std::string ownerType;
     bool isCtor = false;
     bool isDtor = false;
+    // Method prototypes only (meaningful on the Declare-form Stmt stored in
+    // TypeDecl::methods; parsed-and-ignored on the out-of-line definition,
+    // where repeating `Virtual`/`Override` mirrors real FreeBASIC syntax
+    // but C++ itself only allows them on the in-class declaration).
+    // `isOverride` implies virtual too (an override necessarily
+    // participates in the vtable), whether or not `Virtual` was also
+    // explicitly written - Sema doesn't require both.
+    bool isVirtual = false;
+    bool isOverride = false;
 };
 
 struct Module {

@@ -96,6 +96,10 @@ enum class TokenKind {
     KwConstructor,
     KwDestructor,
     KwThis,
+    KwExtends,
+    KwVirtual,
+    KwOverride,
+    KwBase,
 };
 
 struct Token {

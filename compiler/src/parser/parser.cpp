@@ -253,6 +253,11 @@ StmtPtr Parser::parseRecordDecl() {
     stmt->kind = isUnion ? StmtKind::UnionDecl : StmtKind::TypeDecl;
     stmt->loc = loc;
     stmt->name = nameTok.text;
+    if (match(TokenKind::KwExtends)) {
+        // Left for Sema to reject on a UNION (single inheritance only
+        // applies to TYPE in this version).
+        stmt->baseTypeName = expect(TokenKind::Identifier, "expected a base TYPE name after EXTENDS").text;
+    }
     expectStmtEnd();
     skipNewlines();
 
@@ -296,6 +301,7 @@ StmtPtr Parser::parseMethodPrototype() {
 
     auto stmt = std::make_unique<Stmt>();
     stmt->loc = loc;
+    bool isVirtual = match(TokenKind::KwVirtual); // only meaningful before SUB/FUNCTION
 
     if (match(TokenKind::KwConstructor)) {
         stmt->kind = StmtKind::SubDecl;
@@ -316,12 +322,16 @@ StmtPtr Parser::parseMethodPrototype() {
         stmt->kind = StmtKind::SubDecl;
         stmt->name = expect(TokenKind::Identifier, "expected a method name after Declare Sub").text;
         stmt->params = parseParamList();
+        stmt->isVirtual = isVirtual;
+        stmt->isOverride = match(TokenKind::KwOverride);
     } else if (match(TokenKind::KwFunction)) {
         stmt->kind = StmtKind::FunctionDecl;
         stmt->name = expect(TokenKind::Identifier, "expected a method name after Declare Function").text;
         stmt->params = parseParamList();
         expect(TokenKind::KwAs, "expected AS <return type> after Declare Function's parameter list");
         stmt->declaredType = parseTypeKeyword();
+        stmt->isVirtual = isVirtual;
+        stmt->isOverride = match(TokenKind::KwOverride);
     } else {
         diags_.error(peek().loc, "expected SUB, FUNCTION, CONSTRUCTOR, or DESTRUCTOR after DECLARE");
     }
@@ -512,6 +522,8 @@ StmtPtr Parser::parseStatement() {
     if (check(TokenKind::KwExit)) return parseExit();
     if (check(TokenKind::KwSub)) return parseSub();
     if (check(TokenKind::KwFunction)) return parseFunction();
+    if (check(TokenKind::KwVirtual) && peek(1).kind == TokenKind::KwSub) return parseSub();
+    if (check(TokenKind::KwVirtual) && peek(1).kind == TokenKind::KwFunction) return parseFunction();
     if (check(TokenKind::KwConstructor)) return parseConstructor();
     if (check(TokenKind::KwDestructor)) return parseDestructor();
     if (check(TokenKind::KwCall)) return parseCallStmt();
@@ -773,6 +785,12 @@ std::vector<Param> Parser::parseParamList() {
 }
 
 StmtPtr Parser::parseSub() {
+    // An optional leading VIRTUAL on an out-of-line method definition
+    // mirrors real FreeBASIC syntax (`Virtual Sub Foo.Bar(...)`), but real
+    // C++ can't repeat `virtual` on an out-of-line definition - parsed and
+    // discarded; only the Declare-prototype's Virtual/Override matter for
+    // Codegen.
+    match(TokenKind::KwVirtual);
     SourceLoc loc = peek().loc;
     advance(); // SUB
     const Token& nameTok = expect(TokenKind::Identifier, "expected a name after SUB");
@@ -789,6 +807,7 @@ StmtPtr Parser::parseSub() {
         stmt->name = nameTok.text;
     }
     stmt->params = parseParamList();
+    match(TokenKind::KwOverride); // ditto: parsed-and-discarded here
     expectStmtEnd();
 
     stmt->body = parseBlockUntil({TokenKind::KwEnd});
@@ -799,6 +818,7 @@ StmtPtr Parser::parseSub() {
 }
 
 StmtPtr Parser::parseFunction() {
+    match(TokenKind::KwVirtual); // see parseSub's comment
     SourceLoc loc = peek().loc;
     advance(); // FUNCTION
     const Token& nameTok = expect(TokenKind::Identifier, "expected a name after FUNCTION");
@@ -816,6 +836,7 @@ StmtPtr Parser::parseFunction() {
     stmt->params = parseParamList();
     expect(TokenKind::KwAs, "expected AS <return type> after FUNCTION parameter list");
     stmt->declaredType = parseTypeKeyword();
+    match(TokenKind::KwOverride); // see parseSub's comment
     expectStmtEnd();
 
     std::string outerFunction = currentFunctionName_;
@@ -889,15 +910,18 @@ StmtPtr Parser::parseCallStmt() {
     stmt->kind = StmtKind::CallStmt;
     stmt->loc = loc;
 
-    if (check(TokenKind::KwThis)) {
+    if (check(TokenKind::KwThis) || check(TokenKind::KwBase)) {
         // CALL This.Method(args) - one method calling another on itself.
+        // CALL Base.Method(args) - a non-virtual call to the immediate
+        // base's own implementation (bypassing any override).
+        bool isBase = check(TokenKind::KwBase);
         advance();
         auto qualifier = std::make_unique<Expr>();
-        qualifier->kind = ExprKind::This;
+        qualifier->kind = isBase ? ExprKind::Base : ExprKind::This;
         qualifier->loc = loc;
         stmt->target = std::move(qualifier);
-        expect(TokenKind::Dot, "expected '.' after THIS");
-        stmt->name = expect(TokenKind::Identifier, "expected a method name after 'This.'").text;
+        expect(TokenKind::Dot, isBase ? "expected '.' after BASE" : "expected '.' after THIS");
+        stmt->name = expect(TokenKind::Identifier, "expected a method name after '.'").text;
     } else {
         const Token& nameTok = expect(TokenKind::Identifier, "expected a procedure name after CALL");
         stmt->name = nameTok.text;
@@ -1205,6 +1229,13 @@ ExprPtr Parser::parsePrimary() {
         advance();
         auto expr = std::make_unique<Expr>();
         expr->kind = ExprKind::This;
+        expr->loc = tok.loc;
+        return parseMemberOrCallChain(std::move(expr));
+    }
+    if (tok.kind == TokenKind::KwBase) {
+        advance();
+        auto expr = std::make_unique<Expr>();
+        expr->kind = ExprKind::Base;
         expr->loc = tok.loc;
         return parseMemberOrCallChain(std::move(expr));
     }

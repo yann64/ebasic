@@ -29,6 +29,10 @@ struct ProcedureInfo {
     bool isFunction = false;
     Type returnType; // unused for SUB
     std::vector<Param> params;
+    // Methods only (meaningless for free/namespace procedures): true if
+    // declared Virtual, or Override (an override necessarily participates
+    // in the vtable too). Codegen emits literal `virtual`/`override`.
+    bool isVirtual = false;
 };
 
 // A declared TYPE's fields and member procedures, registered up front
@@ -48,6 +52,10 @@ struct RecordInfo {
     bool hasDtor = false; // a Declare Destructor() was found
     bool ctorDefined = false;
     bool dtorDefined = false;
+    // Canonical name of the immediate EXTENDS base TYPE, empty if none.
+    // FreeBASIC is single-inheritance only - one base, not a list. UNION
+    // never populates this (Sema-rejected).
+    std::string baseName;
 };
 
 class Sema {
@@ -100,6 +108,27 @@ private:
     // BYREF-argument validation and for '@' (AddressOf)'s operand. Does not
     // itself check constness; callers that care (BYREF) check separately.
     bool isLvalue(const Expr& expr) const;
+
+    // Checks a value's type against a target variable/const/param type. Two
+    // different user-defined types both report kind==UserDefined, so
+    // identity there needs comparing typeName too - and, for inheritance, a
+    // value of a TYPE derived (directly or transitively) from the target's
+    // TYPE is also compatible (an implicit upcast, matching C++'s own base-
+    // pointer/reference/slicing-assignment behavior once TYPE compiles to a
+    // real C++ struct with real inheritance). A member function (not a free
+    // function) so it can walk structs_'s inheritance chains.
+    bool isAssignCompatible(const Type& targetType, const Type& valueType) const;
+
+    // Walks up `typeKey`'s EXTENDS chain (single inheritance - a short loop,
+    // not a general MRO algorithm), returning true if `typeKey` names
+    // `baseKey` itself or (transitively) derives from it. Cycle-guarded.
+    bool isSameOrDerivedFrom(const std::string& typeKey, const std::string& baseKey) const;
+
+    // Looks up a field/method by walking `typeKey`'s own RecordInfo first,
+    // then its EXTENDS chain (single inheritance) - so an inherited member
+    // resolves the same as one declared directly. Cycle-guarded.
+    const FieldDecl* findFieldInChain(const std::string& typeKey, const std::string& fieldKey) const;
+    const ProcedureInfo* findMethodInChain(const std::string& typeKey, const std::string& methodKey) const;
 
     // Structural constant-expression check for CONST initializers: literals,
     // and Idents that refer to an already-declared CONST/ENUM member,

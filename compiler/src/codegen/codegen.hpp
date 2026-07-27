@@ -102,6 +102,16 @@ private:
     // Member/Call whose base name matches this set is namespace-qualified
     // access, rendered as C++ `::`, rather than `.` field/method access).
     std::unordered_set<std::string> namespaces_;
+    // Canonical TYPE name -> its EXTENDS base's canonical name (empty if
+    // none), computed once up front in generate(). Needed to resolve
+    // `Base.Method(args)` to a qualified non-virtual call
+    // (`eb_base::eb_method(args)`) - Codegen has no other way to know the
+    // current method's owning TYPE's base.
+    std::unordered_map<std::string, std::string> baseTypeOf_;
+    // Canonical name of the TYPE whose method/constructor/destructor is
+    // currently being emitted (by genMethodDefinition), or empty. Mirrors
+    // Sema::currentClassName_ - needed to resolve `Base.Method(args)`.
+    std::string currentOwnerType_;
 };
 
 } // namespace ebasic
