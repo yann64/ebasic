@@ -222,6 +222,12 @@ struct Expr {
     std::unique_ptr<Expr> lhs;
     std::unique_ptr<Expr> rhs;
     std::vector<std::unique_ptr<Expr>> args; // Call
+    // Member only: true when `stringValue` names a PROPERTY rather than a
+    // plain field - set by Sema, read by Codegen to rewrite the access into
+    // a getter/setter method call (`.eb_name_get()` / `.eb_name_set(v)`)
+    // instead of plain `.eb_name` field access, since C++ has no native
+    // property syntax.
+    bool isProperty = false;
 };
 
 using ExprPtr = std::unique_ptr<Expr>;
@@ -402,6 +408,15 @@ struct Stmt {
     // explicitly written - Sema doesn't require both.
     bool isVirtual = false;
     bool isOverride = false;
+    // `Declare Property Name(...)` / out-of-line `Property TypeName.Name(...)`
+    // - a getter (kind==FunctionDecl, 0 params, has a return type) or a
+    // setter (kind==SubDecl, exactly 1 param, no return type),
+    // disambiguated by signature exactly like real FreeBASIC. This version
+    // requires every property to have both a getter and a setter (of the
+    // same type) - deliberately simpler than allowing a read-only/write-
+    // only property, which would need read/write-context-sensitive
+    // resolution at every use site instead of always-both being assumed.
+    bool isProperty = false;
 };
 
 struct Module {

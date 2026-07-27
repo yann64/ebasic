@@ -130,6 +130,12 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
                          "UNION cannot have member procedures (constructors, destructors, or "
                          "methods)");
         } else {
+            // Per-TYPE scratch data, just for this loop: which properties
+            // have already seen a getter/setter declaration, so a genuine
+            // getter+setter pair can be told apart from a duplicate
+            // getter/getter or setter/setter, and a type mismatch between
+            // the two halves can be caught.
+            std::unordered_map<std::string, bool> propGetterSeen, propSetterSeen;
             for (const StmtPtr& method : stmt->methods) {
                 if (method->isCtor) {
                     if (info.hasCtor) {
@@ -145,6 +151,39 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
                                                    "declared destructor (only one is allowed)");
                     }
                     info.hasDtor = true;
+                    continue;
+                }
+                if (method->isProperty) {
+                    std::string propKey = canonicalName(method->name);
+                    bool isGetter = method->kind == StmtKind::FunctionDecl;
+                    bool collides = info.methods.count(propKey);
+                    for (const FieldDecl& field : info.fields) {
+                        if (canonicalName(field.name) == propKey) collides = true;
+                    }
+                    if (collides) {
+                        diags_.error(method->loc, "'" + method->name + "' is already declared as "
+                                                   "a member of TYPE '" + stmt->name + "'");
+                        continue;
+                    }
+                    bool& seen = isGetter ? propGetterSeen[propKey] : propSetterSeen[propKey];
+                    if (seen) {
+                        diags_.error(method->loc, "PROPERTY '" + method->name + "' already has a "
+                                                   "declared " + std::string(isGetter ? "getter" : "setter"));
+                        continue;
+                    }
+                    seen = true;
+                    Type thisType = isGetter ? method->declaredType
+                                              : (method->params.empty() ? Type(TypeKind::Unknown)
+                                                                         : method->params[0].type);
+                    auto propIt = info.properties.find(propKey);
+                    if (propIt == info.properties.end()) {
+                        info.properties[propKey] = PropertyInfo{thisType};
+                    } else if (!(propIt->second.type.kind == thisType.kind &&
+                                 canonicalName(propIt->second.type.typeName) ==
+                                     canonicalName(thisType.typeName))) {
+                        diags_.error(method->loc, "PROPERTY '" + method->name +
+                                                       "'s getter and setter must be the same type");
+                    }
                     continue;
                 }
                 std::string methodKey = canonicalName(method->name);
@@ -165,6 +204,20 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
                 // whether or not `Virtual` was also explicitly written.
                 procInfo.isVirtual = method->isVirtual || method->isOverride;
                 info.methods[methodKey] = std::move(procInfo);
+            }
+            // Every declared property must have BOTH a getter and a setter
+            // declared (this version's deliberate simplification - see
+            // Stmt::isProperty's comment).
+            for (const auto& [propKey, propInfo] : info.properties) {
+                (void)propInfo;
+                if (!propGetterSeen.count(propKey)) {
+                    diags_.error(stmt->loc, "PROPERTY '" + propKey + "' on TYPE '" + stmt->name +
+                                                 "' has a setter but no getter declared");
+                }
+                if (!propSetterSeen.count(propKey)) {
+                    diags_.error(stmt->loc, "PROPERTY '" + propKey + "' on TYPE '" + stmt->name +
+                                                 "' has a getter but no setter declared");
+                }
             }
         }
         it->second = std::move(info);
@@ -225,6 +278,22 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
             }
             continue;
         }
+        if (stmt->isProperty) {
+            std::string propKey = canonicalName(stmt->name);
+            bool isGetter = stmt->kind == StmtKind::FunctionDecl;
+            if (!info.properties.count(propKey)) {
+                diags_.error(stmt->loc, "'" + stmt->ownerType + "." + stmt->name + "' has no "
+                                         "matching 'Declare Property' inside TYPE '" +
+                                             stmt->ownerType + "'");
+                continue;
+            }
+            auto& definedSet = isGetter ? info.definedGetters : info.definedSetters;
+            if (!definedSet.insert(propKey).second) {
+                diags_.error(stmt->loc, "PROPERTY '" + stmt->ownerType + "." + stmt->name + "'s " +
+                                             (isGetter ? "getter" : "setter") + " is already defined");
+            }
+            continue;
+        }
         std::string methodKey = canonicalName(stmt->name);
         auto methodIt = info.methods.find(methodKey);
         if (methodIt == info.methods.end()) {
@@ -263,6 +332,17 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
             if (!info.definedMethods.count(methodName)) {
                 diags_.error(stmt->loc, "TYPE '" + stmt->name + "' declares method '" + methodName +
                                              "' but never defines it");
+            }
+        }
+        for (const auto& [propName, propInfo] : info.properties) {
+            (void)propInfo;
+            if (!info.definedGetters.count(propName)) {
+                diags_.error(stmt->loc, "TYPE '" + stmt->name + "' declares PROPERTY '" + propName +
+                                             "' but never defines its getter");
+            }
+            if (!info.definedSetters.count(propName)) {
+                diags_.error(stmt->loc, "TYPE '" + stmt->name + "' declares PROPERTY '" + propName +
+                                             "' but never defines its setter");
             }
         }
     }
@@ -448,6 +528,19 @@ const ProcedureInfo* Sema::findMethodInChain(const std::string& typeKey, const s
         if (it == structs_.end()) return nullptr;
         auto methodIt = it->second.methods.find(methodKey);
         if (methodIt != it->second.methods.end()) return &methodIt->second;
+        key = it->second.baseName;
+    }
+    return nullptr;
+}
+
+const PropertyInfo* Sema::findPropertyInChain(const std::string& typeKey, const std::string& propKey) const {
+    std::string key = typeKey;
+    std::unordered_set<std::string> visited;
+    while (!key.empty() && visited.insert(key).second) {
+        auto it = structs_.find(key);
+        if (it == structs_.end()) return nullptr;
+        auto propIt = it->second.properties.find(propKey);
+        if (propIt != it->second.properties.end()) return &propIt->second;
         key = it->second.baseName;
     }
     return nullptr;
@@ -1223,6 +1316,17 @@ Type Sema::checkExpr(Expr& expr) {
             // same as one declared directly.
             if (const FieldDecl* field = findFieldInChain(typeKey, canonicalName(expr.stringValue))) {
                 expr.type = field->type;
+                return expr.type;
+            }
+            // A PROPERTY looks exactly like a field at its access site (no
+            // parens) - resolved the same way, walking the base chain too.
+            // Every declared property is guaranteed to have both a getter
+            // and setter (Sema's own simplifying requirement), so no
+            // separate "does a getter/setter actually exist" check is
+            // needed here regardless of read/write context.
+            if (const PropertyInfo* prop = findPropertyInChain(typeKey, canonicalName(expr.stringValue))) {
+                expr.type = prop->type;
+                expr.isProperty = true;
                 return expr.type;
             }
             diags_.error(expr.loc,

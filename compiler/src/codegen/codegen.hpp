@@ -48,6 +48,12 @@ private:
     void genNamespaceDecl(const Stmt& stmt);
     std::string genExpr(const Expr& expr);
     std::string genCondition(const Expr& expr);
+    // Renders the `recv.`/`this->`/`eb_base::` prefix for a Member/Call
+    // whose receiver is `lhs` - shared by genExpr's Member/Call cases and
+    // Assign's own codegen for a PROPERTY setter call (which can't just
+    // call genExpr on the whole target, since that produces the *getter*
+    // form).
+    std::string memberReceiverPrefix(const Expr& lhs);
 
     // A unique, per-invocation name for a generated temporary or label, e.g.
     // nextName("eb__forend") -> "eb__forend0", then "eb__forend1", ...

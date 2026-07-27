@@ -50,6 +50,7 @@ private:
     StmtPtr parseMethodPrototype();
     StmtPtr parseConstructor();
     StmtPtr parseDestructor();
+    StmtPtr parseProperty();
     StmtPtr parseNamespaceDecl();
     std::vector<Param> parseParamList();
 

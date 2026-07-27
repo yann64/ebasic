@@ -332,8 +332,29 @@ StmtPtr Parser::parseMethodPrototype() {
         stmt->declaredType = parseTypeKeyword();
         stmt->isVirtual = isVirtual;
         stmt->isOverride = match(TokenKind::KwOverride);
+    } else if (match(TokenKind::KwProperty)) {
+        // Getter vs setter, disambiguated by signature exactly like real
+        // FreeBASIC: a getter takes no parameters and has `AS <type>`; a
+        // setter takes exactly one parameter and has no return type.
+        stmt->isProperty = true;
+        stmt->name = expect(TokenKind::Identifier, "expected a property name after Declare Property").text;
+        stmt->params = parseParamList();
+        if (check(TokenKind::KwAs)) {
+            stmt->kind = StmtKind::FunctionDecl;
+            advance();
+            stmt->declaredType = parseTypeKeyword();
+            if (!stmt->params.empty()) {
+                diags_.error(loc, "a property getter takes no parameters");
+            }
+        } else {
+            stmt->kind = StmtKind::SubDecl;
+            if (stmt->params.size() != 1) {
+                diags_.error(loc, "a property setter takes exactly one parameter");
+            }
+        }
     } else {
-        diags_.error(peek().loc, "expected SUB, FUNCTION, CONSTRUCTOR, or DESTRUCTOR after DECLARE");
+        diags_.error(peek().loc,
+                     "expected SUB, FUNCTION, CONSTRUCTOR, DESTRUCTOR, or PROPERTY after DECLARE");
     }
 
     expectStmtEnd();
@@ -526,6 +547,7 @@ StmtPtr Parser::parseStatement() {
     if (check(TokenKind::KwVirtual) && peek(1).kind == TokenKind::KwFunction) return parseFunction();
     if (check(TokenKind::KwConstructor)) return parseConstructor();
     if (check(TokenKind::KwDestructor)) return parseDestructor();
+    if (check(TokenKind::KwProperty)) return parseProperty();
     if (check(TokenKind::KwCall)) return parseCallStmt();
     if (check(TokenKind::KwReturn)) return parseReturn();
     if (check(TokenKind::Identifier) && peek(1).kind == TokenKind::Newline &&
@@ -898,6 +920,54 @@ StmtPtr Parser::parseDestructor() {
     stmt->body = parseBlockUntil({TokenKind::KwEnd});
     expect(TokenKind::KwEnd, "expected END DESTRUCTOR");
     expect(TokenKind::KwDestructor, "expected END DESTRUCTOR");
+    expectStmtEnd();
+    return stmt;
+}
+
+/// `Property TypeName.Name(...) [As type] ... End Property` - the
+/// out-of-line definition matching a `Declare Property Name(...)`
+/// prototype. Getter vs setter disambiguated the same way as the
+/// prototype: no parameters + `AS type` = getter, one parameter + no
+/// return type = setter.
+StmtPtr Parser::parseProperty() {
+    SourceLoc loc = peek().loc;
+    advance(); // PROPERTY
+    const Token& nameTok = expect(TokenKind::Identifier, "expected a TYPE name after PROPERTY");
+    expect(TokenKind::Dot, "expected '.' after the TYPE name");
+    const Token& propTok = expect(TokenKind::Identifier, "expected a property name after '.'");
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->loc = loc;
+    stmt->ownerType = nameTok.text;
+    stmt->name = propTok.text;
+    stmt->isProperty = true;
+    stmt->params = parseParamList();
+    if (check(TokenKind::KwAs)) {
+        stmt->kind = StmtKind::FunctionDecl;
+        advance();
+        stmt->declaredType = parseTypeKeyword();
+        if (!stmt->params.empty()) {
+            diags_.error(loc, "a property getter takes no parameters");
+        }
+    } else {
+        stmt->kind = StmtKind::SubDecl;
+        if (stmt->params.size() != 1) {
+            diags_.error(loc, "a property setter takes exactly one parameter");
+        }
+    }
+    expectStmtEnd();
+
+    // A getter's body uses the same `PropName = value` return-assignment
+    // pseudo-syntax as a real FUNCTION - thread currentFunctionName_ so
+    // parseAssign recognizes it (a setter has no return value, so nothing
+    // to thread there).
+    bool isGetter = stmt->kind == StmtKind::FunctionDecl;
+    std::string outerFunction = currentFunctionName_;
+    if (isGetter) currentFunctionName_ = canonicalName(stmt->name);
+    stmt->body = parseBlockUntil({TokenKind::KwEnd});
+    if (isGetter) currentFunctionName_ = outerFunction;
+    expect(TokenKind::KwEnd, "expected END PROPERTY");
+    expect(TokenKind::KwProperty, "expected END PROPERTY");
     expectStmtEnd();
     return stmt;
 }

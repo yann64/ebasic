@@ -35,6 +35,13 @@ struct ProcedureInfo {
     bool isVirtual = false;
 };
 
+// A declared PROPERTY's value type. This version requires every property
+// to have both a getter and a setter (of the same type) - see
+// Stmt::isProperty's comment for why.
+struct PropertyInfo {
+    Type type;
+};
+
 // A declared TYPE's fields and member procedures, registered up front
 // (collectTypes) so a field/method can be referenced regardless of
 // declaration order. Methods follow FreeBASIC's own "declared within,
@@ -56,6 +63,9 @@ struct RecordInfo {
     // FreeBASIC is single-inheritance only - one base, not a list. UNION
     // never populates this (Sema-rejected).
     std::string baseName;
+    std::unordered_map<std::string, PropertyInfo> properties; // canonical property name -> value type
+    std::unordered_set<std::string> definedGetters;
+    std::unordered_set<std::string> definedSetters;
 };
 
 class Sema {
@@ -129,6 +139,7 @@ private:
     // resolves the same as one declared directly. Cycle-guarded.
     const FieldDecl* findFieldInChain(const std::string& typeKey, const std::string& fieldKey) const;
     const ProcedureInfo* findMethodInChain(const std::string& typeKey, const std::string& methodKey) const;
+    const PropertyInfo* findPropertyInChain(const std::string& typeKey, const std::string& propKey) const;
 
     // Structural constant-expression check for CONST initializers: literals,
     // and Idents that refer to an already-declared CONST/ENUM member,

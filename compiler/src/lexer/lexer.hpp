@@ -100,6 +100,7 @@ enum class TokenKind {
     KwVirtual,
     KwOverride,
     KwBase,
+    KwProperty,
 };
 
 struct Token {

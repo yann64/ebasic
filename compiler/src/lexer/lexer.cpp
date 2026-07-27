@@ -161,6 +161,7 @@ Token Lexer::lexIdentifierOrKeyword() {
         {"VIRTUAL", TokenKind::KwVirtual},
         {"OVERRIDE", TokenKind::KwOverride},
         {"BASE", TokenKind::KwBase},
+        {"PROPERTY", TokenKind::KwProperty},
     };
 
     auto it = keywords.find(upper);

@@ -73,6 +73,26 @@ bool isRelational(BinOp op) {
 }
 } // namespace
 
+std::string Codegen::memberReceiverPrefix(const Expr& lhs) {
+    // Namespace.Name -> C++ eb_ns::eb_name; This -> this->eb_name (a
+    // normal, potentially-virtual access/call); Base -> a *qualified*,
+    // non-virtual access to the immediate base's own implementation
+    // (eb_base::eb_name, implicitly using the current `this` - exactly
+    // like C++'s own `Base::member` from inside a derived member
+    // function); anything else (a variable, a field, ...) is plain
+    // `.`-access on that receiver.
+    if (lhs.kind == ExprKind::Ident && namespaces_.count(canonicalName(lhs.stringValue))) {
+        return mangleName(lhs.stringValue) + "::";
+    }
+    if (lhs.kind == ExprKind::This) {
+        return "this->";
+    }
+    if (lhs.kind == ExprKind::Base) {
+        return mangleName(baseTypeOf_.at(currentOwnerType_)) + "::";
+    }
+    return genExpr(lhs) + ".";
+}
+
 std::string Codegen::genExpr(const Expr& expr) {
     switch (expr.kind) {
         case ExprKind::IntLiteral:
@@ -96,18 +116,7 @@ std::string Codegen::genExpr(const Expr& expr) {
                 // inside a derived member function); anything else (a
                 // variable, a field, ...) is a plain method call on that
                 // receiver -> eb_recv.eb_name(args).
-                std::string prefix;
-                bool lhsIsNamespaceIdent = expr.lhs->kind == ExprKind::Ident &&
-                                           namespaces_.count(canonicalName(expr.lhs->stringValue));
-                if (lhsIsNamespaceIdent) {
-                    prefix = mangleName(expr.lhs->stringValue) + "::";
-                } else if (expr.lhs->kind == ExprKind::This) {
-                    prefix = "this->";
-                } else if (expr.lhs->kind == ExprKind::Base) {
-                    prefix = mangleName(baseTypeOf_.at(currentOwnerType_)) + "::";
-                } else {
-                    prefix = genExpr(*expr.lhs) + ".";
-                }
+                std::string prefix = memberReceiverPrefix(*expr.lhs);
                 std::string result = prefix + mangleName(expr.stringValue) + "(";
                 for (size_t i = 0; i < expr.args.size(); ++i) {
                     if (i > 0) result += ", ";
@@ -130,17 +139,18 @@ std::string Codegen::genExpr(const Expr& expr) {
             result += ")";
             return result;
         }
-        case ExprKind::Member:
-            if (expr.lhs->kind == ExprKind::Ident && namespaces_.count(canonicalName(expr.lhs->stringValue))) {
-                return mangleName(expr.lhs->stringValue) + "::" + mangleName(expr.stringValue);
+        case ExprKind::Member: {
+            std::string prefix = memberReceiverPrefix(*expr.lhs);
+            // A PROPERTY has no native C++ syntax - rewrite the read into a
+            // getter call (`.eb_name_get()`); the write side is handled
+            // separately in Assign's own codegen, since it needs a
+            // completely different shape (`.eb_name_set(value)`, not
+            // `= value`).
+            if (expr.isProperty) {
+                return prefix + mangleName(expr.stringValue) + "_get()";
             }
-            if (expr.lhs->kind == ExprKind::This || expr.lhs->kind == ExprKind::Base) {
-                // Base.field reaches the same storage as This.field (fields
-                // aren't versioned by inheritance the way virtual methods
-                // are) - both need `this->`, not `.` (`this` is a pointer).
-                return "this->" + mangleName(expr.stringValue);
-            }
-            return genExpr(*expr.lhs) + "." + mangleName(expr.stringValue);
+            return prefix + mangleName(expr.stringValue);
+        }
         case ExprKind::AddressOf:
             return "(&(" + genExpr(*expr.lhs) + "))";
         case ExprKind::Deref:
@@ -279,6 +289,16 @@ void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out, int indent) {
                 return;
             }
             if (stmt.target) {
+                // A PROPERTY setter needs a completely different shape
+                // (`.eb_name_set(value)`, a method call) than a plain
+                // assignment - can't just call genExpr on the whole target,
+                // since that produces the *getter* form instead.
+                if (stmt.target->kind == ExprKind::Member && stmt.target->isProperty) {
+                    out << ind(indent) << memberReceiverPrefix(*stmt.target->lhs)
+                        << mangleName(stmt.target->stringValue) << "_set(" << genExpr(*stmt.expr)
+                        << ");\n";
+                    return;
+                }
                 // A general Member/Call-chain lvalue (obj.field, arr(i).field,
                 // ...) - genExpr already produces a valid C++ lvalue for it.
                 out << ind(indent) << genExpr(*stmt.target) << " = " << genExpr(*stmt.expr) << ";\n";
@@ -451,19 +471,7 @@ void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out, int indent) {
             // call (`eb_base::`), an obj.Method(args) receiver (`.`), or a
             // plain free-function call (no prefix).
             std::string prefix;
-            if (stmt.target) {
-                bool targetIsNamespaceIdent = stmt.target->kind == ExprKind::Ident &&
-                                               namespaces_.count(canonicalName(stmt.target->stringValue));
-                if (targetIsNamespaceIdent) {
-                    prefix = mangleName(stmt.target->stringValue) + "::";
-                } else if (stmt.target->kind == ExprKind::This) {
-                    prefix = "this->";
-                } else if (stmt.target->kind == ExprKind::Base) {
-                    prefix = mangleName(baseTypeOf_.at(currentOwnerType_)) + "::";
-                } else {
-                    prefix = genExpr(*stmt.target) + ".";
-                }
-            }
+            if (stmt.target) prefix = memberReceiverPrefix(*stmt.target);
             out << ind(indent) << prefix << mangleName(stmt.name) << "(";
             for (size_t i = 0; i < stmt.args.size(); ++i) {
                 if (i > 0) out << ", ";
@@ -540,6 +548,16 @@ void Codegen::genTypeDecl(const Stmt& stmt) {
             typesOut_ << ind(1) << "~" << mangleName(stmt.name) << "();\n";
             continue;
         }
+        if (method->isProperty) {
+            // A PROPERTY has no native C++ syntax - declared as two plain
+            // methods, `_get`/`_set`, rewritten from field-like access at
+            // every use site by genExpr(Member)/Assign's own codegen.
+            bool isGetter = method->kind == StmtKind::FunctionDecl;
+            std::string retType = isGetter ? cppType(method->declaredType) : "void";
+            typesOut_ << ind(1) << retType << " " << mangleName(method->name)
+                       << (isGetter ? "_get(" : "_set(") << buildParamList(method->params) << ");\n";
+            continue;
+        }
         bool isFunction = method->kind == StmtKind::FunctionDecl;
         std::string retType = isFunction ? cppType(method->declaredType) : "void";
         // `Override` implies participation in the vtable too, whether or
@@ -607,7 +625,11 @@ void Codegen::genMethodDefinition(const Stmt& stmt) {
         qualifiedName = owner + "::~" + owner;
     } else {
         retType = (isFunction ? cppType(stmt.declaredType) : "void") + " ";
-        qualifiedName = owner + "::" + mangleName(stmt.name);
+        // A PROPERTY's getter/setter share one FreeBASIC identifier but
+        // need two distinct C++ method names (matching genTypeDecl's own
+        // declarations) - `isFunction` (has a return type) already tells
+        // getter from setter, same as for the declaration.
+        qualifiedName = owner + "::" + mangleName(stmt.name) + (stmt.isProperty ? (isFunction ? "_get" : "_set") : "");
     }
 
     procOut_ << retType << qualifiedName << "(" << paramList << ") {\n";
