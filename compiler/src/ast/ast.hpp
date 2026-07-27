@@ -199,6 +199,7 @@ enum class StmtKind {
     FunctionDecl,
     CallStmt,
     Return,
+    GoSub, // reuses `name` for the target label
 };
 
 // Which loop- or procedure-introducing keyword a scope was opened with.

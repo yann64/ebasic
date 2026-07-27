@@ -1,0 +1,9 @@
+before first call
+after first call, counter =
+1
+before second call
+after second call, counter =
+2
+after skip
+11
+done

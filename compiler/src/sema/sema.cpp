@@ -22,6 +22,7 @@ bool isAssignCompatible(TypeKind targetType, TypeKind valueType) {
 void Sema::check(Module& module) {
     collectLabels(module.stmts);
     collectProcedures(module.stmts);
+    collectGosubUsage(module.stmts);
     checkBlock(module.stmts, /*atTopLevel=*/true);
 }
 
@@ -31,6 +32,24 @@ void Sema::collectLabels(std::vector<StmtPtr>& stmts) {
         std::string key = canonicalName(stmt->name);
         if (!labels_.insert(key).second) {
             diags_.error(stmt->loc, "label '" + stmt->name + "' is already declared");
+        }
+    }
+}
+
+void Sema::collectGosubUsage(std::vector<StmtPtr>& stmts) {
+    for (auto& stmt : stmts) {
+        if (stmt->kind == StmtKind::GoSub) {
+            gosubTargets_.insert(canonicalName(stmt->name));
+        } else if (stmt->kind == StmtKind::Goto) {
+            gotoTargets_.insert(canonicalName(stmt->name));
+        }
+    }
+    for (auto& stmt : stmts) {
+        if (stmt->kind != StmtKind::Label) continue;
+        std::string key = canonicalName(stmt->name);
+        if (gosubTargets_.count(key) && gotoTargets_.count(key)) {
+            diags_.error(stmt->loc, "label '" + stmt->name + "' is used as both a GOTO target and a "
+                                     "GOSUB target, which is not supported");
         }
     }
 }
@@ -331,6 +350,20 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                              "labels are only supported at the top level of a program in this "
                              "version of ebc");
             }
+            // A new label always ends any GOSUB body span in progress, and
+            // starts a new one if this label is itself a GOSUB target.
+            insideGosubBody_ = gosubTargets_.count(canonicalName(stmt.name)) != 0;
+            return;
+        }
+        case StmtKind::GoSub: {
+            if (!atTopLevel) {
+                diags_.error(stmt.loc,
+                             "GOSUB is only supported at the top level of a program in this "
+                             "version of ebc");
+            }
+            if (!labels_.count(canonicalName(stmt.name))) {
+                diags_.error(stmt.loc, "label '" + stmt.name + "' is not defined");
+            }
             return;
         }
         case StmtKind::ExitLoop: {
@@ -406,8 +439,8 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                 if (*it == LoopKind::Sub) { insideSub = true; break; }
                 if (*it == LoopKind::Function) { insideFunction = true; break; }
             }
-            if (!insideSub && !insideFunction) {
-                diags_.error(stmt.loc, "RETURN used outside of a SUB or FUNCTION");
+            if (!insideSub && !insideFunction && !insideGosubBody_) {
+                diags_.error(stmt.loc, "RETURN used outside of a SUB, FUNCTION, or GOSUB target");
                 if (stmt.expr) checkExpr(*stmt.expr);
                 return;
             }
@@ -423,7 +456,8 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                                  "type");
                 }
             } else if (stmt.expr) {
-                diags_.error(stmt.expr->loc, "SUB cannot RETURN a value; use a bare RETURN or EXIT SUB");
+                diags_.error(stmt.expr->loc,
+                             "a SUB or GOSUB target cannot RETURN a value; use a bare RETURN");
             }
             return;
         }

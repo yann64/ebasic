@@ -39,6 +39,7 @@ private:
     StmtPtr parseDo();
     StmtPtr parseWhile();
     StmtPtr parseGoto();
+    StmtPtr parseGosub();
     StmtPtr parseLabel();
     StmtPtr parseExit();
     StmtPtr parseSub();

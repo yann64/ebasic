@@ -271,6 +271,7 @@ StmtPtr Parser::parseStatement() {
     if (check(TokenKind::KwDo)) return parseDo();
     if (check(TokenKind::KwWhile)) return parseWhile();
     if (check(TokenKind::KwGoto)) return parseGoto();
+    if (check(TokenKind::KwGosub)) return parseGosub();
     if (check(TokenKind::KwExit)) return parseExit();
     if (check(TokenKind::KwSub)) return parseSub();
     if (check(TokenKind::KwFunction)) return parseFunction();
@@ -445,6 +446,19 @@ StmtPtr Parser::parseGoto() {
 
     auto stmt = std::make_unique<Stmt>();
     stmt->kind = StmtKind::Goto;
+    stmt->loc = loc;
+    stmt->name = nameTok.text;
+    expectStmtEnd();
+    return stmt;
+}
+
+StmtPtr Parser::parseGosub() {
+    SourceLoc loc = peek().loc;
+    advance(); // GOSUB
+    const Token& nameTok = expect(TokenKind::Identifier, "expected a label name after GOSUB");
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->kind = StmtKind::GoSub;
     stmt->loc = loc;
     stmt->name = nameTok.text;
     expectStmtEnd();

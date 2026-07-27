@@ -110,6 +110,14 @@ M1–M3 are the bulk of "FreeBASIC-compatible" work and will likely split furthe
 - `REDIM`'s bounds are re-evaluated and re-cached into the array's existing lower-bound temporary (the same one `DIM` created), so later reads/writes keep using the up-to-date bound. Known limitation, not implemented: if `PRESERVE` is combined with *also* changing the lower bound in the same `REDIM`, existing elements are preserved by their internal (relative) position, not re-indexed to line up with the new bound - matches `std::vector::resize()`'s natural semantics but not necessarily FB's, and is an unusual enough combination (most real code preserves with the same base) that it's left as-is rather than adding manual re-indexing.
 - Remaining in M2: `GOSUB`/`RETURN`, multi-file `#include`.
 
+## GOSUB / RETURN Implementation Notes (done; M2's last item is multi-file #include)
+
+- Verified against the docs first (legacy/deprecated but still real syntax): "the line label where GoSub jumps must be in the same main/function/sub block as GoSub" - i.e. it's a genuine call-with-implicit-return-address, sharing variables with its enclosing scope, not a plain jump.
+- Implementation: each label that's the target of at least one `GOSUB` has the top-level statements between it and the next label (of any kind, or end of program) hoisted into a synthesized parameterless `void` function (reusing the exact same machinery as `SUB`/`FUNCTION` - prototype + body + a trailing `return;` safety net); `GOSUB label` becomes a call to that function, and a bare `RETURN` inside the span becomes a plain `return;`. This is why multiple call sites to the same `GOSUB` target each correctly resume at their own call site, and why nested/recursive `GOSUB` (a target calling another, or itself) just works - it's real C++ call/return underneath.
+- A label may be a `GOTO` target *or* a `GOSUB` target, not both - Sema rejects the ambiguous dual-use case outright rather than trying to support it.
+- **Accepted gap, by design, per discussion with the user**: normal top-to-bottom fallthrough into a `GOSUB`-target label is not supported - since that code is hoisted into its own function, it can only be reached via an explicit `GOSUB` call, never by execution simply reaching the label inline. Real classic-BASIC code relying on such fallthrough is already considered a footgun/anti-pattern (most programs explicitly `GOTO`/`END` past their `GOSUB` targets specifically to avoid it), so this was judged an acceptable, clearly-documented deviation rather than a reason to build a more general (and substantially more complex) call-stack-based interpreter-style solution.
+- Remaining in M2: multi-file `#include`.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

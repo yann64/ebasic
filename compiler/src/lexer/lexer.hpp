@@ -83,6 +83,7 @@ enum class TokenKind {
     KwCall,
     KwRedim,
     KwPreserve,
+    KwGosub,
 };
 
 struct Token {

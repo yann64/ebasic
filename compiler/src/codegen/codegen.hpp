@@ -5,6 +5,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -31,6 +32,10 @@ private:
     static std::string cppType(TypeKind type);
     static std::string mangleName(const std::string& name);
     static std::string escapeStringLiteral(const std::string& s);
+    // Name of the synthesized parameterless void function a GOSUB-target
+    // label's code is hoisted into. Distinct prefix from mangleName's "eb_"
+    // so it can't collide with an ordinary variable of the same source name.
+    static std::string gosubFunctionName(const std::string& label);
 
     int tempCounter_ = 0;
     // Currently-open loops, innermost last, paired with the label placed
@@ -45,9 +50,15 @@ private:
     // a Call expression: present here => array, else => function call.
     std::unordered_map<std::string, std::string> arrayLowerBoundVar_;
     // Forward declarations and bodies for SUB/FUNCTION, accumulated across
-    // the whole generate() call and emitted before main().
+    // the whole generate() call and emitted before main(). GOSUB-target
+    // spans are hoisted into synthesized parameterless functions and share
+    // these same two streams.
     std::ostringstream protoOut_;
     std::ostringstream procOut_;
+    // Canonical labels that are the target of at least one GOSUB, computed
+    // once up front in generate(). A Label matching this set is hoisted into
+    // its own function instead of emitted inline.
+    std::unordered_set<std::string> gosubTargets_;
 };
 
 } // namespace ebasic

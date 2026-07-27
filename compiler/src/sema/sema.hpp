@@ -40,6 +40,7 @@ public:
 private:
     void collectLabels(std::vector<StmtPtr>& stmts);
     void collectProcedures(std::vector<StmtPtr>& stmts);
+    void collectGosubUsage(std::vector<StmtPtr>& stmts);
     void checkBlock(std::vector<StmtPtr>& stmts, bool atTopLevel);
     void checkStmt(Stmt& stmt, bool atTopLevel);
     void checkCondition(Expr& expr, const char* what);
@@ -73,6 +74,12 @@ private:
     std::unordered_map<std::string, ProcedureInfo> procedures_;
     std::unordered_map<std::string, long long> constIntValues_; // CONST/ENUM int value, for evalConstInt
     std::unordered_set<std::string> labels_;
+    std::unordered_set<std::string> gosubTargets_; // labels referenced by at least one GOSUB
+    std::unordered_set<std::string> gotoTargets_;  // labels referenced by at least one GOTO
+    // True while sequentially walking top-level statements between a
+    // GOSUB-target Label and the next Label (of any kind) - lets a bare
+    // RETURN there be valid, the same as inside a SUB.
+    bool insideGosubBody_ = false;
     std::vector<LoopKind> loopStack_;
     DiagnosticEngine& diags_;
 };
