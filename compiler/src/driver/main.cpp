@@ -86,31 +86,32 @@ int main(int argc, char** argv) {
     std::string rawSource = buf.str();
 
     ebasic::DiagnosticEngine diags;
+    diags.registerFile(opts.inputPath); // fileId 0
 
-    std::string source = ebasic::preprocess(rawSource, diags);
+    ebasic::PreprocessResult preprocessed = ebasic::preprocess(rawSource, opts.inputPath, diags);
     if (diags.hasErrors()) {
-        diags.printAll(std::cerr, opts.inputPath);
+        diags.printAll(std::cerr);
         return 1;
     }
 
-    ebasic::Lexer lexer(source, diags);
+    ebasic::Lexer lexer(preprocessed.source, preprocessed.lineMap, diags);
     auto tokens = lexer.tokenize();
     if (diags.hasErrors()) {
-        diags.printAll(std::cerr, opts.inputPath);
+        diags.printAll(std::cerr);
         return 1;
     }
 
     ebasic::Parser parser(std::move(tokens), diags);
     ebasic::Module module = parser.parseModule();
     if (diags.hasErrors()) {
-        diags.printAll(std::cerr, opts.inputPath);
+        diags.printAll(std::cerr);
         return 1;
     }
 
     ebasic::Sema sema(diags);
     sema.check(module);
     if (diags.hasErrors()) {
-        diags.printAll(std::cerr, opts.inputPath);
+        diags.printAll(std::cerr);
         return 1;
     }
 

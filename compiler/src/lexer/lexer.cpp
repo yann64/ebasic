@@ -17,10 +17,18 @@ std::string toUpper(const std::string& s) {
 
 } // namespace
 
-Lexer::Lexer(std::string source, DiagnosticEngine& diags)
-    : source_(std::move(source)), diags_(diags) {}
+Lexer::Lexer(std::string source, const std::vector<SourceLoc>& lineMap, DiagnosticEngine& diags)
+    : source_(std::move(source)), lineMap_(lineMap), diags_(diags) {}
 
 bool Lexer::isAtEnd() const { return pos_ >= source_.size(); }
+
+SourceLoc Lexer::currentLoc() const {
+    if (lineMap_.empty()) return SourceLoc{line_, col_, 0};
+    size_t idx = (line_ >= 1) ? static_cast<size_t>(line_ - 1) : 0;
+    if (idx >= lineMap_.size()) idx = lineMap_.size() - 1;
+    const SourceLoc& mapped = lineMap_[idx];
+    return SourceLoc{mapped.line, col_, mapped.fileId};
+}
 
 char Lexer::peek(int offset) const {
     size_t p = pos_ + static_cast<size_t>(offset);
@@ -65,7 +73,7 @@ void Lexer::skipSpacesAndComments() {
 }
 
 Token Lexer::lexNumber() {
-    SourceLoc loc{line_, col_};
+    SourceLoc loc = currentLoc();
     size_t start = pos_;
     bool isDouble = false;
     while (std::isdigit(static_cast<unsigned char>(peek()))) advance();
@@ -85,7 +93,7 @@ Token Lexer::lexNumber() {
 }
 
 Token Lexer::lexString() {
-    SourceLoc loc{line_, col_};
+    SourceLoc loc = currentLoc();
     advance(); // opening quote
     std::string value;
     for (;;) {
@@ -109,7 +117,7 @@ Token Lexer::lexString() {
 }
 
 Token Lexer::lexIdentifierOrKeyword() {
-    SourceLoc loc{line_, col_};
+    SourceLoc loc = currentLoc();
     size_t start = pos_;
     while (std::isalnum(static_cast<unsigned char>(peek())) || peek() == '_') advance();
     std::string text = source_.substr(start, pos_ - start);
@@ -156,7 +164,7 @@ std::vector<Token> Lexer::tokenize() {
     std::vector<Token> tokens;
     for (;;) {
         skipSpacesAndComments();
-        SourceLoc loc{line_, col_};
+        SourceLoc loc = currentLoc();
 
         if (isAtEnd()) {
             tokens.push_back(makeToken(TokenKind::End, "", loc));

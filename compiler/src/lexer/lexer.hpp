@@ -96,7 +96,12 @@ struct Token {
 
 class Lexer {
 public:
-    Lexer(std::string source, DiagnosticEngine& diags);
+    // `lineMap[i]` gives the true {fileId, line} of `source`'s (i+1)-th
+    // line, as produced by preprocess() - since `source` may be a flattened
+    // multi-file result, the lexer's own line_ counter (over `source`) is
+    // translated through this map rather than used directly, so tokens (and
+    // therefore diagnostics) report their real originating file/line.
+    Lexer(std::string source, const std::vector<SourceLoc>& lineMap, DiagnosticEngine& diags);
 
     std::vector<Token> tokenize();
 
@@ -110,11 +115,13 @@ private:
     Token lexNumber();
     Token lexString();
     Token lexIdentifierOrKeyword();
+    SourceLoc currentLoc() const;
 
     std::string source_;
     size_t pos_ = 0;
     int line_ = 1;
     int col_ = 1;
+    const std::vector<SourceLoc>& lineMap_;
     DiagnosticEngine& diags_;
 };
 
