@@ -21,6 +21,10 @@ public:
 
     bool operator==(const BString& other) const { return data_ == other.data_; }
     bool operator!=(const BString& other) const { return !(*this == other); }
+    bool operator<(const BString& other) const { return data_ < other.data_; }
+    bool operator>(const BString& other) const { return data_ > other.data_; }
+    bool operator<=(const BString& other) const { return data_ <= other.data_; }
+    bool operator>=(const BString& other) const { return data_ >= other.data_; }
 
     const std::string& str() const { return data_; }
 

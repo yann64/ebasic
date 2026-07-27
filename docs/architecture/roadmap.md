@@ -72,6 +72,12 @@ Compiler/runtime/stdlib/pkg/docgen are separate top-level components (each with 
 
 M1–M3 are the bulk of "FreeBASIC-compatible" work and will likely split further in practice (e.g. M1a numeric types, M1b control flow) — the table above is the right roadmap granularity, finer breakdown happens once work starts.
 
+## M1a Implementation Notes (types & operators, done)
+
+- Types added: `BYTE`/`UBYTE`/`SHORT`/`USHORT`/`INTEGER`/`LONG`/`UINTEGER`/`LONGINT`/`ULONGINT`/`SINGLE`/`BOOLEAN` alongside the existing `DOUBLE`/`STRING`. `INTEGER` and `LONG` both map to `int32_t` for now; true platform-native `INTEGER` width is still deferred. `BOOLEAN` is represented as `int8_t` with `TRUE`/`FALSE` = `-1`/`0`, so `AND`/`OR`/`XOR`/`NOT` can be implemented as plain C++ bitwise ops that double as logical ops (matches classic BASIC/FB semantics).
+- Operators implemented with FreeBASIC's documented precedence: `^` > unary `-` > `*`/`/` > `\` > `MOD` > `SHL`/`SHR` > `+`/`-` > `&` > relational (`=`/`<>`/`<`/`<=`/`>=`/`>`) > `NOT` > `AND` > `OR` > `XOR`. Not yet implemented (deferred, no user-facing need yet): `EQV`/`IMP`/`ANDALSO`/`ORELSE`, and the `CAST`/pointer/array-index/`Is` tiers (need pointers/arrays/OOP first).
+- `/` is always real division (promotes to `DOUBLE` even for two integer operands); `\` and `MOD` require integer-family operands (no implicit float truncation yet — pass already-integer values). `^` always yields a `DOUBLE` result; FB's integer-result special case for non-negative integer exponents is deferred.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

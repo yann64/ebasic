@@ -116,9 +116,19 @@ Token Lexer::lexIdentifierOrKeyword() {
     std::string upper = toUpper(text);
 
     static const std::unordered_map<std::string, TokenKind> keywords = {
-        {"DIM", TokenKind::KwDim},       {"AS", TokenKind::KwAs},
-        {"PRINT", TokenKind::KwPrint},   {"INTEGER", TokenKind::KwInteger},
-        {"DOUBLE", TokenKind::KwDouble}, {"STRING", TokenKind::KwString},
+        {"DIM", TokenKind::KwDim},         {"AS", TokenKind::KwAs},
+        {"PRINT", TokenKind::KwPrint},     {"BYTE", TokenKind::KwByte},
+        {"UBYTE", TokenKind::KwUByte},     {"SHORT", TokenKind::KwShort},
+        {"USHORT", TokenKind::KwUShort},   {"INTEGER", TokenKind::KwInteger},
+        {"LONG", TokenKind::KwLong},       {"UINTEGER", TokenKind::KwUInteger},
+        {"LONGINT", TokenKind::KwLongInt}, {"ULONGINT", TokenKind::KwULongInt},
+        {"SINGLE", TokenKind::KwSingle},   {"DOUBLE", TokenKind::KwDouble},
+        {"BOOLEAN", TokenKind::KwBoolean}, {"STRING", TokenKind::KwString},
+        {"TRUE", TokenKind::KwTrue},       {"FALSE", TokenKind::KwFalse},
+        {"MOD", TokenKind::KwMod},         {"AND", TokenKind::KwAnd},
+        {"OR", TokenKind::KwOr},           {"XOR", TokenKind::KwXor},
+        {"NOT", TokenKind::KwNot},         {"SHL", TokenKind::KwShl},
+        {"SHR", TokenKind::KwShr},
     };
 
     auto it = keywords.find(upper);
@@ -169,10 +179,23 @@ std::vector<Token> Lexer::tokenize() {
             case '-': advance(); tokens.push_back(makeToken(TokenKind::Minus, "-", loc)); continue;
             case '*': advance(); tokens.push_back(makeToken(TokenKind::Star, "*", loc)); continue;
             case '/': advance(); tokens.push_back(makeToken(TokenKind::Slash, "/", loc)); continue;
+            case '\\': advance(); tokens.push_back(makeToken(TokenKind::Backslash, "\\", loc)); continue;
+            case '^': advance(); tokens.push_back(makeToken(TokenKind::Caret, "^", loc)); continue;
             case '&': advance(); tokens.push_back(makeToken(TokenKind::Amp, "&", loc)); continue;
             case '(': advance(); tokens.push_back(makeToken(TokenKind::LParen, "(", loc)); continue;
             case ')': advance(); tokens.push_back(makeToken(TokenKind::RParen, ")", loc)); continue;
             case '=': advance(); tokens.push_back(makeToken(TokenKind::Equals, "=", loc)); continue;
+            case '<':
+                advance();
+                if (peek() == '>') { advance(); tokens.push_back(makeToken(TokenKind::NotEq, "<>", loc)); }
+                else if (peek() == '=') { advance(); tokens.push_back(makeToken(TokenKind::LessEq, "<=", loc)); }
+                else { tokens.push_back(makeToken(TokenKind::Less, "<", loc)); }
+                continue;
+            case '>':
+                advance();
+                if (peek() == '=') { advance(); tokens.push_back(makeToken(TokenKind::GreaterEq, ">=", loc)); }
+                else { tokens.push_back(makeToken(TokenKind::Greater, ">", loc)); }
+                continue;
             case ',': advance(); tokens.push_back(makeToken(TokenKind::Comma, ",", loc)); continue;
             default:
                 diags_.error(loc, std::string("unexpected character '") + c + "'");

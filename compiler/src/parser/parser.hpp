@@ -30,9 +30,22 @@ private:
     StmtPtr parseAssign();
 
     ExprPtr parseExpr();
-    ExprPtr parseTerm();
-    ExprPtr parseUnary();
+    ExprPtr parseXor();
+    ExprPtr parseOr();
+    ExprPtr parseAnd();
+    ExprPtr parseNot();
+    ExprPtr parseRelational();
+    ExprPtr parseConcat();
+    ExprPtr parseAdditive();
+    ExprPtr parseShift();
+    ExprPtr parseMod();
+    ExprPtr parseIDiv();
+    ExprPtr parseMulDiv();
+    ExprPtr parseNegate();
+    ExprPtr parsePow();
     ExprPtr parsePrimary();
+
+    static ExprPtr makeBinary(BinOp op, SourceLoc loc, ExprPtr lhs, ExprPtr rhs);
 
     TypeKind parseTypeKeyword();
 

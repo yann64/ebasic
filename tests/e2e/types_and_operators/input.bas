@@ -1,0 +1,51 @@
+' M1a: primitive types and full FreeBASIC-precedence operators.
+
+DIM b AS BYTE
+DIM ub AS UBYTE
+DIM sh AS SHORT
+DIM us AS USHORT
+DIM lo AS LONG
+DIM ui AS UINTEGER
+DIM li AS LONGINT
+DIM ul AS ULONGINT
+DIM sg AS SINGLE
+
+b = 100
+ub = 200
+sh = 30000
+us = 40000
+lo = 70000
+ui = 4000000000
+li = 5000000000
+ul = 5000000000
+sg = 1.5
+
+PRINT b
+PRINT ub
+PRINT sh
+PRINT us
+PRINT lo
+PRINT ui
+PRINT li
+PRINT ul
+PRINT sg
+
+PRINT 2 ^ 3
+PRINT -2 ^ 2
+PRINT 2 ^ -1
+PRINT 7 \ 2
+PRINT 7 MOD 2
+PRINT 7 / 2
+PRINT 1 SHL 4
+PRINT 256 SHR 4
+PRINT 5 AND 3
+PRINT 5 OR 2
+PRINT 5 XOR 1
+PRINT NOT 0
+PRINT NOT -1
+PRINT TRUE
+PRINT FALSE
+PRINT (3 > 2)
+PRINT (3 = 3) AND (2 < 1)
+PRINT "abc" < "abd"
+PRINT "abc" = "abc"
