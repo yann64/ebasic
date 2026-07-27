@@ -35,6 +35,18 @@ cmake --build --preset linux-gcc
 ctest --preset linux-gcc
 ```
 
+## Documentation
+
+API documentation for the compiler's own C++ source is generated with
+[Doxygen](https://www.doxygen.nl/) (config at `docs/Doxyfile`):
+
+```sh
+cmake --build build/linux-gcc --target docs
+```
+
+Output lands in `build/docs/html/index.html` (requires `doxygen`; `dot`
+from Graphviz is used for class/include graphs if present).
+
 ## Usage
 
 ```sh
