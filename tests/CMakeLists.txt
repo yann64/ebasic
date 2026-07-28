@@ -145,3 +145,12 @@ add_test(
     NAME e2e_pkg_lib_with_tests
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/lib_with_tests . test
 )
+
+# M7b: docgen against a small fixture with a documented CONST/FUNCTION, an
+# undocumented FUNCTION, and a plain (non-doc) comment that must not be
+# attached - the Markdown output is diffed (the HTML output is hand-
+# verified instead, per the M7 plan).
+add_test(
+    NAME e2e_docgen_simple
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e_docgen/run_case.sh $<TARGET_FILE:docgen> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_docgen/simple
+)
