@@ -1,0 +1,7 @@
+[package]
+name = "simple_bin"
+version = "0.1.0"
+
+[bin]
+name = "simple_bin"
+path = "src/main.bas"

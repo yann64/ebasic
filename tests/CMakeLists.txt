@@ -116,3 +116,11 @@ add_test(
     NAME e2e_extern_handle
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/extern_handle ${EBASIC_FIXTURE_LIB_DIR}
 )
+
+# M5: a parallel golden-test harness (tests/e2e_pkg/) driving ebpm rather
+# than ebc directly - each case dir is itself a fixture package (ebasic.toml
+# + src/) plus an expected.stdout, round-tripped through `ebpm run`.
+add_test(
+    NAME e2e_pkg_simple_bin
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/simple_bin
+)

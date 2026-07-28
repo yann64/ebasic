@@ -8,5 +8,6 @@ target_include_directories(tomlplusplus INTERFACE ${CMAKE_SOURCE_DIR}/third_part
 add_executable(ebpm
     src/main.cpp
     src/manifest.cpp
+    src/build.cpp
 )
 target_link_libraries(ebpm PRIVATE tomlplusplus ebasic_process)

@@ -1,10 +1,15 @@
 #include "manifest.hpp"
 
+#include <filesystem>
 #include <toml++/toml.hpp>
 
 namespace ebpm {
 
 bool loadManifest(const std::string& manifestPath, Manifest& out, std::string& err) {
+    if (!std::filesystem::exists(manifestPath)) {
+        err = "no such file: '" + manifestPath + "' (not an ebpm package directory?)";
+        return false;
+    }
     toml::table tbl;
     try {
         tbl = toml::parse_file(manifestPath);

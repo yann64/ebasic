@@ -1,3 +1,5 @@
+#include "build.hpp"
+#include "driver/process.hpp"
 #include "manifest.hpp"
 
 #include <filesystem>
@@ -16,6 +18,15 @@ void printUsage(std::ostream& os) {
     os << "commands:\n";
     os << "  new <name> [--lib]   scaffold a new package directory <name>/\n";
     os << "  init [--lib]         scaffold a package in the current directory\n";
+    os << "  build                build the package in the current directory\n";
+    os << "  run [-- args...]     build (if stale), then run the [bin] target\n";
+}
+
+// Loads "ebasic.toml" from the current directory - every command below
+// operates on the package rooted at cwd (M5b: no dependency graph, no
+// package-path argument yet).
+bool loadCurrentManifest(ebpm::Manifest& out, std::string& err) {
+    return ebpm::loadManifest("ebasic.toml", out, err);
 }
 
 // Bare package-name text for a manifest's [package] name = "..." line - not
@@ -135,6 +146,67 @@ int cmdInit(const std::vector<std::string>& args) {
     return 0;
 }
 
+int cmdBuild(const std::vector<std::string>& args) {
+    if (!args.empty()) {
+        std::cerr << "ebpm: error: 'build' takes no arguments yet\n";
+        return 1;
+    }
+    ebpm::Manifest manifest;
+    std::string err;
+    if (!loadCurrentManifest(manifest, err)) {
+        std::cerr << "ebpm: error: " << err << "\n";
+        return 1;
+    }
+    int rc = ebpm::buildPackage(manifest, ".", {}, {}, err);
+    if (!err.empty()) {
+        std::cerr << "ebpm: error: " << err << "\n";
+        return 1;
+    }
+    return rc;
+}
+
+int cmdRun(const std::vector<std::string>& args) {
+    // Everything before a literal "--" would be an ebpm-side run option -
+    // none exist yet, so any argument not after "--" is an error. Everything
+    // after "--" is forwarded verbatim to the built binary.
+    std::vector<std::string> forwardArgs;
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (args[i] == "--") {
+            forwardArgs.assign(args.begin() + static_cast<long>(i) + 1, args.end());
+            break;
+        }
+        std::cerr << "ebpm: error: unknown argument to 'run': " << args[i]
+                   << " (forward program arguments after --)\n";
+        return 1;
+    }
+
+    ebpm::Manifest manifest;
+    std::string err;
+    if (!loadCurrentManifest(manifest, err)) {
+        std::cerr << "ebpm: error: " << err << "\n";
+        return 1;
+    }
+    if (!manifest.hasBin) {
+        std::cerr << "ebpm: error: package '" << manifest.name << "' has no [bin] target to run\n";
+        return 1;
+    }
+
+    std::string binPath = ebpm::binaryPath(manifest, ".");
+    std::string srcPath = (fs::path(".") / manifest.bin.path).string();
+    if (ebpm::isStale(srcPath, binPath)) {
+        int rc = ebpm::buildPackage(manifest, ".", {}, {}, err);
+        if (!err.empty()) {
+            std::cerr << "ebpm: error: " << err << "\n";
+            return 1;
+        }
+        if (rc != 0) return rc;
+    }
+
+    std::vector<std::string> runArgs = {binPath};
+    for (const std::string& a : forwardArgs) runArgs.push_back(a);
+    return ebasic::runProcess(runArgs);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -148,6 +220,8 @@ int main(int argc, char** argv) {
 
     if (command == "new") return cmdNew(rest);
     if (command == "init") return cmdInit(rest);
+    if (command == "build") return cmdBuild(rest);
+    if (command == "run") return cmdRun(rest);
 
     std::cerr << "ebpm: error: unknown command '" << command << "'\n";
     printUsage(std::cerr);
