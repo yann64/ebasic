@@ -21,7 +21,7 @@ type inference for variables (unlike `CONST`, below).
 - `DIM name(lowerBound TO upperBound) AS Type` declares explicit bounds
   (`DIM grid(1 TO 3) AS INTEGER` has 3 elements, `grid(1)` through `grid(3)`).
 - `DIM name() AS Type` (empty parens) declares a **dynamic array** - size 0
-  until resized with `REDIM` (see [`REDIM`](procedures-and-arrays.md#redim--redim-preserve)).
+  until resized with `REDIM` (see [`REDIM`](procedures-and-arrays.md#redim-redim-preserve)).
   A dynamic array cannot be `REDIM`'d if it wasn't declared this way.
 
 ```basic
@@ -59,11 +59,11 @@ grid(1) = 1
 `BOOLEAN` is stored as `-1` (true) / `0` (false), not `1`/`0` - this is
 BASIC's own convention (not C++'s), and it's why bitwise `AND`/`OR`/`XOR`/`NOT`
 double as logical operators: see
-[Operators](operators.md#logical--bitwise-operators).
+[Operators](operators.md#logical-bitwise-operators).
 
 `STRING` is a dynamic, always-copy value type (no reference counting/COW yet
 - deferred until real string-heavy programs need it). Two `STRING`s can be
-compared and concatenated - see [Operators](operators.md#the--string-concatenation-operator).
+compared and concatenated - see [Operators](operators.md#the-string-concatenation-operator).
 
 `ZSTRING` is a raw, null-terminated C string. A `STRING` converts to/from a
 `ZSTRING`/`ZSTRING PTR` argument automatically at a call site (no manual

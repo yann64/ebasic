@@ -16,6 +16,24 @@ PRINT y     ' 2
 (A colon immediately after a bare identifier at the start of a line is
 instead parsed as a [label](#goto-and-labels), e.g. `skip:`.)
 
+## `PRINT`
+
+```
+PRINT expr, expr, ...
+PRINT
+```
+
+Writes each comma-separated argument in order, with **no separator
+inserted between them** - unlike some BASIC dialects, a comma does not
+print a space, tab, or column-align. Exactly one trailing newline is
+written after all arguments (or immediately, for a bare `PRINT` with no
+arguments):
+
+```basic
+PRINT "a", "b", 1, 2   ' ab12
+PRINT                  ' (just a newline)
+```
+
 ## `IF` / `THEN` / `ELSEIF` / `ELSE` / `END IF`
 
 ```
@@ -177,7 +195,7 @@ NEXT i
 ```
 
 `EXIT SUB`/`EXIT FUNCTION` are covered together with
-[`SUB`/`FUNCTION`](procedures-and-arrays.md#sub--function) themselves.
+[`SUB`/`FUNCTION`](procedures-and-arrays.md#sub-function) themselves.
 
 ## `GOTO` and labels
 

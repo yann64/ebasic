@@ -15,7 +15,7 @@ END TYPE
 ```
 
 Declares a record type. Fields have no initializer syntax - give them
-values via a [constructor](#constructor--destructor) or after declaring a
+values via a [constructor](#constructor-destructor) or after declaring a
 variable of the type.
 
 ```basic
@@ -57,7 +57,7 @@ pts(0).x = 10
 ```
 
 A `TYPE`-typed `SUB`/`FUNCTION` parameter defaults to `BYREF` (see
-[Procedures and Arrays](procedures-and-arrays.md#parameters-byval--byref)).
+[Procedures and Arrays](procedures-and-arrays.md#parameters-byval-byref)).
 
 ## `Constructor` / `Destructor`
 

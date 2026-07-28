@@ -33,9 +33,32 @@ PRINT Factorial(5)   ' 120
 including mutual recursion - every signature is registered before any body
 is checked.
 
-A `SUB` is called with `CALL Name(args)`; a bare `Name(args)` (no `CALL`) is
-not a valid statement. A `FUNCTION` is called as an expression (`x =
-Factorial(5)`, `PRINT Factorial(5)`).
+A `FUNCTION` is called as an expression (`x = Factorial(5)`, `PRINT
+Factorial(5)`). A `SUB` has no return value, so it's called with its own
+statement form instead - see `CALL` below.
+
+## `CALL`
+
+```
+CALL Name(args...)
+```
+
+Calls a `SUB` (or a `FUNCTION`, discarding its return value) as a
+statement. A bare `Name(args)` with no `CALL` is **not** a valid statement -
+`CALL` is required:
+
+```basic
+SUB Greet()
+    PRINT "hi"
+END SUB
+
+CALL Greet()
+```
+
+Inside a [method](type-oop.md#methods), `CALL This.Method(args)` calls
+another method on the same instance, and `CALL Base.Method(args)` calls the
+immediate base's own implementation directly, bypassing any `Override` -
+see [`EXTENDS`](type-oop.md#extends---inheritance).
 
 ### Parameters: `BYVAL` / `BYREF`
 

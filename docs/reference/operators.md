@@ -114,18 +114,18 @@ comparing a `CASE` value against the selector - see
 ### `-` (negate)
 
 Arithmetic negation. Binds looser than `^` but tighter than `*`/`/`/`\` -
-see [`^`](#-power) above for how this interacts with exponentiation.
+see [`^`](#power) above for how this interacts with exponentiation.
 
 ### `NOT`
 
-See [Logical / bitwise operators](#logical--bitwise-operators) above. Binds
+See [Logical / bitwise operators](#logical-bitwise-operators) above. Binds
 looser than `AND` but tighter than a relational comparison, so `NOT a > b`
 is `NOT (a > b)`.
 
 ### `@` (address-of), `*` (dereference)
 
 Pointer operators - covered in
-[Namespaces, Pointers, and Unions](namespaces-pointers-unions.md#pointers)
+[Namespaces, Pointers, and Unions](namespaces-pointers-unions.md#pointers-ptr--)
 since they only make sense together with the `PTR` type.
 
 ## Precedence table
