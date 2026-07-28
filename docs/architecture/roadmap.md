@@ -443,6 +443,15 @@ A six-slice plan (Doc-1 through Doc-6), following the exact same slice-per-miles
 - `DO`/`LOOP`'s four independent pre-test/post-test x WHILE/UNTIL combinations were all individually compiled and run (`DO WHILE`/`DO UNTIL` pre-test, `LOOP WHILE`/`LOOP UNTIL` post-test) rather than assuming symmetry from the two already-e2e-tested forms.
 - Verified: `docs` Doxygen target unaffected; full e2e suite still 26/26.
 - Next: `docs/reference/` - procedures, arrays, TYPE/OOP, namespaces/pointers/unions (Doc-3).
+- **Post-commit fix**: writing Doc-3's operator-overload example (grounded in `tests/e2e/operators/input.bas`, which uses `v1.x = 1 : v1.y = 2`) surfaced a real gap in Doc-2's `control-flow.md` - the `:` statement separator had no entry at all. Verified live (`:` is lexed as a Newline-kind token, so it separates statements anywhere a newline would) and added as its own small entry, in a follow-up commit rather than amending the already-pushed one.
+
+## Doc-3 Implementation Notes (language reference: procedures/arrays, TYPE/OOP, namespaces/pointers/unions, done)
+
+- New `docs/reference/procedures-and-arrays.md` (`SUB`/`FUNCTION`, `BYVAL`/`BYREF`, `EXIT SUB`/`EXIT FUNCTION`, scoping/shadowing, `REDIM`/`REDIM PRESERVE`), `docs/reference/type-oop.md` (`TYPE` fields, memberwise-copy assignment, `Constructor`/`Destructor`, methods + `This`, `EXTENDS` + `Virtual`/`Override` dispatch + `Base.Method()`, `PROPERTY`, free-standing operator overloading), `docs/reference/namespaces-pointers-unions.md` (`NAMESPACE` incl. reopening, `PTR`/`@`/`*`/`->` incl. pointer arithmetic, `UNION`).
+- Every example - including several combined/adapted from `tests/e2e/{sub_function,redim,type_records,classes,inheritance,properties,operators,namespace,pointers,unions}/input.bas` rather than copied verbatim - was compiled and run as a whole (not just visually cross-checked against the original test), catching nothing further wrong this time but confirming the adaptations (renamed variables, trimmed-down snippets, recombined into single files) stayed correct.
+- Explicit, Sema-verified restrictions stated precisely rather than assumed: `REDIM` on a fixed-size array is a real error (`'<name>' is a fixed-size array and cannot be REDIM'd`); operator overloads are free-standing only (no member-declared form yet) and require at least one operand to be a user-defined `TYPE`; `PROPERTY` requires both a getter and setter of the same type; `UNION` rejects `STRING` (directly or nested) and any field with a constructor/destructor; `NAMESPACE` nesting is not supported.
+- Verified: `docs` Doxygen target unaffected; full e2e suite still 26/26.
+- Next: `docs/reference/` - `EXTERN`/C-C++ interop, doc-comments, and the keyword index (Doc-4).
 
 ## Testing Strategy
 
