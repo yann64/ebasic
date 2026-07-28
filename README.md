@@ -22,10 +22,10 @@ The eBasic compiler is an extented version of the BASIC programmming language th
 
 ## Status
 
-eBasic is under active early development. See `docs/architecture/` for the compiler
-architecture and phased roadmap. The current milestone (M0) implements a minimal
-pipeline: `DIM`, `PRINT`, assignment, and arithmetic/string-concatenation expressions,
-compiled to C++ and built via `g++`/`clang++`.
+eBasic is under active development. See `docs/architecture/` for the compiler
+architecture and phased roadmap - M0 through M7 are complete (full core language,
+C/C++ interop, the `ebpm` package manager, a precompiled runtime header, and
+`docgen`); M8 (Windows/macOS/Haiku ports) is in progress.
 
 ## Building
 
@@ -34,6 +34,11 @@ cmake --preset linux-gcc
 cmake --build --preset linux-gcc
 ctest --preset linux-gcc
 ```
+
+Other presets (see `CMakePresets.json`): `linux-clang`, `windows-mingw` (MinGW,
+run from an MSYS2 shell), `macos`, `haiku` - the latter three are new in M8 and
+verified primarily through CI rather than on this development machine (see
+`docs/architecture/roadmap.md`'s M8 notes).
 
 ## Documentation
 

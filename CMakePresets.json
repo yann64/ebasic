@@ -19,14 +19,51 @@
         "CMAKE_CXX_COMPILER": "clang++",
         "CMAKE_BUILD_TYPE": "Debug"
       }
+    },
+    {
+      "name": "windows-mingw",
+      "description": "MinGW port (M8) - run inside an MSYS2 (mingw64) shell, matching this project's CI (msys2/setup-msys2), where g++/gcc/Unix Makefiles are all provided natively - not a cross-compilation setup. MSVC is deferred (see docs/architecture/roadmap.md's M8 notes).",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/windows-mingw",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "g++",
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "macos",
+      "description": "macOS's own system compiler is Clang (Xcode Command Line Tools), same reasoning as linux-clang.",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/macos",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "haiku",
+      "description": "Haiku's traditional system compiler is GCC, same shape as linux-gcc. Unverified locally (M8) - no live Haiku access yet, see docs/architecture/roadmap.md's M8e notes.",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/haiku",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "g++",
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
     }
   ],
   "buildPresets": [
     { "name": "linux-gcc", "configurePreset": "linux-gcc" },
-    { "name": "linux-clang", "configurePreset": "linux-clang" }
+    { "name": "linux-clang", "configurePreset": "linux-clang" },
+    { "name": "windows-mingw", "configurePreset": "windows-mingw" },
+    { "name": "macos", "configurePreset": "macos" },
+    { "name": "haiku", "configurePreset": "haiku" }
   ],
   "testPresets": [
     { "name": "linux-gcc", "configurePreset": "linux-gcc", "output": { "outputOnFailure": true } },
-    { "name": "linux-clang", "configurePreset": "linux-clang", "output": { "outputOnFailure": true } }
+    { "name": "linux-clang", "configurePreset": "linux-clang", "output": { "outputOnFailure": true } },
+    { "name": "windows-mingw", "configurePreset": "windows-mingw", "output": { "outputOnFailure": true } },
+    { "name": "macos", "configurePreset": "macos", "output": { "outputOnFailure": true } },
+    { "name": "haiku", "configurePreset": "haiku", "output": { "outputOnFailure": true } }
   ]
 }
