@@ -7,18 +7,28 @@ add_library(ebasic_process STATIC
 )
 target_include_directories(ebasic_process PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
-add_executable(ebc
-    src/driver/main.cpp
+# M7: the compiler's front end (lexing/preprocessing/parsing/diagnostics,
+# producing a real Module AST) - split out of ebc so docgen/ can reuse it
+# too, mirroring the exact ebasic_process precedent above. Deliberately
+# excludes sema/codegen: docgen only ever needs a parsed Module (every
+# declared type is already resolved structurally by the parser itself), not
+# a type-checked or lowered one.
+add_library(ebasic_frontend STATIC
     src/diagnostics/diagnostics.cpp
     src/lexer/lexer.cpp
     src/preprocessor/preprocessor.cpp
     src/parser/parser.cpp
+)
+target_include_directories(ebasic_frontend PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(ebc
+    src/driver/main.cpp
     src/sema/sema.cpp
     src/codegen/codegen.cpp
 )
 
 target_include_directories(ebc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(ebc PRIVATE ebasic_process)
+target_link_libraries(ebc PRIVATE ebasic_process ebasic_frontend)
 
 target_compile_definitions(ebc PRIVATE
     EBASIC_RUNTIME_INCLUDE_DIR="${CMAKE_SOURCE_DIR}/runtime/include"

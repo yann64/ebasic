@@ -59,10 +59,51 @@ void Parser::synchronize() {
     if (check(TokenKind::Newline)) advance();
 }
 
+std::string Parser::collectDocComment() {
+    std::vector<std::string> lines;
+    while (check(TokenKind::DocComment)) {
+        lines.push_back(advance().text);
+        if (check(TokenKind::Newline)) advance();
+    }
+    if (lines.empty()) return "";
+    std::string result = lines.front();
+    for (size_t i = 1; i < lines.size(); ++i) {
+        result += "\n" + lines[i];
+    }
+    return result;
+}
+
+bool Parser::isDocumentableKind(StmtKind kind) {
+    switch (kind) {
+        case StmtKind::SubDecl:
+        case StmtKind::FunctionDecl:
+        case StmtKind::TypeDecl:
+        case StmtKind::UnionDecl:
+        case StmtKind::NamespaceDecl:
+        case StmtKind::Const:
+        case StmtKind::Enum:
+            return true;
+        default:
+            return false;
+    }
+}
+
 Module Parser::parseModule() {
     Module module;
     skipNewlines();
     while (!check(TokenKind::End)) {
+        // M7: a run of leading '''  lines belongs to whatever documentable
+        // declaration follows - collected before dispatching, so an EXTERN
+        // block (which never receives a doc comment - see
+        // isDocumentableKind) doesn't accidentally swallow one meant for
+        // something else.
+        std::string doc = collectDocComment();
+        // A trailing/orphaned doc comment with nothing left to attach to
+        // (e.g. the very last thing in the file) - silently ignored rather
+        // than falling into parseStatement() below, which would otherwise
+        // report a spurious "expected a statement" for content that isn't
+        // actually a statement at all.
+        if (check(TokenKind::End)) break;
         // An EXTERN block (M4) yields multiple top-level Stmts (one per
         // Declare line) - handled directly here rather than through
         // parseStatement()'s one-Stmt-per-call contract, and restricted to
@@ -72,7 +113,10 @@ Module Parser::parseModule() {
             parseExternBlock(module.stmts);
         } else {
             StmtPtr stmt = parseStatement();
-            if (stmt) module.stmts.push_back(std::move(stmt));
+            if (stmt) {
+                if (isDocumentableKind(stmt->kind)) stmt->docComment = doc;
+                module.stmts.push_back(std::move(stmt));
+            }
         }
         skipNewlines();
     }

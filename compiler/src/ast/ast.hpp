@@ -339,6 +339,14 @@ struct Stmt {
     StmtKind kind;
     SourceLoc loc;
 
+    // M7: the joined ("\n"-separated) text of every consecutive `'''` doc
+    // comment line immediately preceding this statement, empty if none.
+    // Only ever populated by the parser for top-level SubDecl/
+    // FunctionDecl/TypeDecl/UnionDecl/NamespaceDecl/Const/Enum (see
+    // Parser::collectDocComment) - never for anything else, even when a
+    // `'''` line happens to precede it syntactically.
+    std::string docComment;
+
     std::string name;              // Dim, Const, Assign, ForNext (loop var), Goto/Label, TypeDecl
     Type declaredType;             // Dim (required); Const (optional - inferred if Unknown); Redim (optional restated AS type)
     ExprPtr expr;                               // Assign/Const value; If/SelectCase/WhileWend condition/selector; ForNext start

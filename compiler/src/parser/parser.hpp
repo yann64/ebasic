@@ -25,6 +25,18 @@ private:
     void skipNewlines();
     void expectStmtEnd();
     void synchronize();
+    // M7: consumes consecutive DocComment tokens (each followed by exactly
+    // one Newline - a blank line inside the block is not tolerated),
+    // joining their text with "\n". Returns "" if none are present. Called
+    // at the top of parseModule()'s loop; the joined text is attached to
+    // the following statement only if its kind is one of the
+    // "documentable" top-level kinds - see ast.hpp's Stmt::docComment.
+    std::string collectDocComment();
+    // M7: true for the StmtKinds collectDocComment's result may be
+    // attached to (SubDecl/FunctionDecl/TypeDecl/UnionDecl/NamespaceDecl/
+    // Const/Enum) - the same "public API surface" set M5's
+    // Codegen::generateLibraryInterface already treats as exportable.
+    static bool isDocumentableKind(StmtKind kind);
 
     StmtPtr parseStatement();
     StmtPtr parseDim();

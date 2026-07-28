@@ -14,6 +14,12 @@ enum class TokenKind {
     IntLiteral,
     DoubleLiteral,
     StringLiteral,
+    // M7: a `'''`-marked doc comment line (three or more leading
+    // apostrophes) - `text` holds everything after the marker, with at
+    // most one leading space trimmed (matching `/// text`'s convention). A
+    // plain `'`/`''` comment is still silently discarded by
+    // skipSpacesAndComments and never produces any token at all.
+    DocComment,
     Plus,
     Minus,
     Star,
@@ -138,6 +144,10 @@ private:
     Token lexNumber();
     Token lexString();
     Token lexIdentifierOrKeyword();
+    // M7: lexes a `'''`-marked doc comment line (skipSpacesAndComments has
+    // already stopped just before the leading apostrophes rather than
+    // skipping them, unlike a plain comment).
+    Token lexDocComment();
     SourceLoc currentLoc() const;
 
     std::string source_;
