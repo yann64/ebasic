@@ -78,7 +78,11 @@ FUNCTION Bad() AS INTEGER
 END FUNCTION
 EOF
 LIB_URI="$(to_file_uri "$WORKDIR/lib.bas")"
-MAIN2_URI="file://$WORKDIR/main.bas"
+# main.bas is never written to disk (its content only ever exists as the
+# didOpen "text"), but its *directory* must still be a real, natively
+# resolvable path - it's what the preprocessor resolves the #include
+# target against.
+MAIN2_URI="$(to_file_uri "$WORKDIR/main.bas")"
 {
     frame '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
     frame '{"jsonrpc":"2.0","method":"initialized","params":{}}'
