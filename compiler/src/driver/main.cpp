@@ -49,12 +49,12 @@ struct Options {
     // dependency's auto-generated interface file without knowing its exact
     // relative filesystem path.
     std::vector<std::string> includeDirs;
-    // -v/--version and -h/--help short-circuit everything else in main() -
-    // parseArgs still returns true with these set even if no input file was
-    // given, since printing the version/usage is a valid, complete
-    // invocation on its own.
+    /// -v/--version and -h/--help short-circuit everything else in main() -
+    /// parseArgs still returns true with these set even if no input file
+    /// was given, since printing the version/usage is a valid, complete
+    /// invocation on its own.
     bool showVersion = false;
-    bool showHelp = false;
+    bool showHelp = false; ///< see showVersion
 };
 
 bool parseArgs(int argc, char** argv, Options& opts, std::string& err) {
@@ -130,11 +130,11 @@ void printUsage(std::ostream& os) {
     os << "  module's own Lib \"name\" clauses.\n";
 }
 
-// M8e: resolves ebc's own on-disk location from argv[0], so
-// runtimeIncludeArgs (below) can look for an *installed* runtime sitting
-// alongside this executable before falling back to the build-tree path
-// baked in at compile time - a real install (Haiku package or otherwise)
-// can't rely on the build tree it was built in still existing.
+/// M8e: resolves ebc's own on-disk location from argv[0], so
+/// runtimeIncludeArgs (below) can look for an *installed* runtime sitting
+/// alongside this executable before falling back to the build-tree path
+/// baked in at compile time - a real install (Haiku package or otherwise)
+/// can't rely on the build tree it was built in still existing.
 fs::path resolveOwnExecutablePath(const std::string& argv0) {
     fs::path p(argv0);
     std::error_code ec;
@@ -173,18 +173,18 @@ fs::path resolveOwnExecutablePath(const std::string& argv0) {
     return p;
 }
 
-// M6/M8e: the runtime's PCH shadow directory and header include dir, added
-// as extra -I entries (PCH dir first) so a plain
-// `#include "ebasic/runtime/runtime.hpp"` automatically prefers a
-// precompiled .gch sitting there - no other change to the compile
-// invocation is needed (verified empirically: GCC's own automatic PCH
-// lookup, and its own graceful fallback when the .gch doesn't match, both
-// require no special flags at all). Tries the installed layout relative to
-// ebc's own executable path first (EBASIC_RUNTIME_INSTALL_RELDIR, see
-// compiler/CMakeLists.txt and runtime/CMakeLists.txt's install() rules),
-// falling back to the build-tree paths baked in at compile time - which is
-// what every existing dev/test workflow (running ebc straight from the
-// build tree) still gets, unchanged.
+/// M6/M8e: the runtime's PCH shadow directory and header include dir, added
+/// as extra -I entries (PCH dir first) so a plain
+/// `#include "ebasic/runtime/runtime.hpp"` automatically prefers a
+/// precompiled .gch sitting there - no other change to the compile
+/// invocation is needed (verified empirically: GCC's own automatic PCH
+/// lookup, and its own graceful fallback when the .gch doesn't match, both
+/// require no special flags at all). Tries the installed layout relative to
+/// ebc's own executable path first (EBASIC_RUNTIME_INSTALL_RELDIR, see
+/// compiler/CMakeLists.txt and runtime/CMakeLists.txt's install() rules),
+/// falling back to the build-tree paths baked in at compile time - which is
+/// what every existing dev/test workflow (running ebc straight from the
+/// build tree) still gets, unchanged.
 std::vector<std::string> runtimeIncludeArgs(const std::string& argv0) {
     std::vector<std::string> args;
 

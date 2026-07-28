@@ -1,10 +1,22 @@
 #pragma once
 #include <string>
 
+/// Generated from version.hpp.in by the top-level CMakeLists.txt
+/// (configure_file) - not meant to be edited directly.
 namespace ebasic {
+
+/// The project's semantic version (`project(ebasic VERSION ...)` in the
+/// top-level CMakeLists.txt is the single source of truth).
 inline constexpr const char* kProjectVersion = "@PROJECT_VERSION@";
+
+/// Short git commit hash of the tree this was configured from, or an empty
+/// string when unavailable (no `.git` directory - e.g. a HaikuPorts source
+/// tarball build, or scripts/haiku_verify.sh's own `git archive` deploy -
+/// or no `git` binary at configure time).
 inline constexpr const char* kGitHash = "@EBASIC_GIT_HASH@";
 
+/// Formats kProjectVersion and, when present, kGitHash for -v/--version
+/// output, e.g. "0.1.0 (a37c8bf)" or just "0.1.0" when there's no hash.
 inline std::string versionString() {
     std::string s = kProjectVersion;
     if (kGitHash[0] != '\0') {
@@ -14,4 +26,5 @@ inline std::string versionString() {
     }
     return s;
 }
+
 } // namespace ebasic
