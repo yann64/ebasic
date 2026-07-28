@@ -977,8 +977,11 @@ symlinked temp dir) before pushing.
 
 All six planned LSP slices (transport/sync, diagnostics, symbols/hover,
 go-to-definition/references, `ebpm`-awareness, completion) are now
-complete and CI-green on all 4 platforms. `docs/guide/lsp.md` updated to
-reflect this (no longer "work in progress").
+complete and CI-green on all 4 platforms - `linux-gcc`/`linux-clang`/
+`macos`/`windows-mingw` via GitHub Actions, and re-confirmed on real Haiku
+hardware via `scripts/haiku_verify.sh` (34/34, including all 6 `lsp_*`
+tests). `docs/guide/lsp.md` updated to reflect this (no longer "work in
+progress").
 
 ## Testing Strategy
 
