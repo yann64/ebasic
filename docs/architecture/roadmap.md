@@ -624,6 +624,45 @@ duplicating the source or reaching across component boundaries):
   `third_party/tomlplusplus/` already is - needed for the LSP's own
   JSON-RPC transport (LSP-1).
 
+## LSP-1 Implementation Notes (transport + document sync, done)
+
+New `lsp/` component, new `ebasic_lsp` executable (`lsp/CMakeLists.txt`,
+linking `ebasic_frontend`/`ebasic_sema`/`ebasic_pkg`/`nlohmann_json` - the
+latter two unused until LSP-5/LSP-3 respectively, linked now so later
+slices don't need to reshape the CMake target).
+
+- `lsp/src/rpc.{hpp,cpp}`: `Content-Length`-framed JSON-RPC read/write over
+  `std::istream`/`std::ostream` - tolerant of a bare `\n` line ending in
+  headers (the spec mandates `\r\n`, but tolerating both costs nothing and
+  matches how forgiving real LSP servers tend to be).
+- `lsp/src/documents.{hpp,cpp}`: `DocumentStore` - an in-memory
+  `uri -> text` map, replaced wholesale on every `didChange` (Full sync,
+  not incremental - `.bas` files are small enough that this is a
+  deliberate simplicity choice, not a stopgap).
+- `lsp/src/server.{hpp,cpp}`: the method dispatch table -
+  `initialize`/`initialized`/`shutdown`/`exit` (advertising
+  `textDocumentSync: 1` only so far; later slices add
+  `hoverProvider`/`definitionProvider`/etc. to the same capabilities object
+  as each lands) and `textDocument/didOpen`/`didChange`/`didClose`. An
+  unrecognized *request* gets a real JSON-RPC `MethodNotFound` (`-32601`);
+  an unrecognized *notification* is silently ignored, matching the spec.
+  Exit code is spec-mandated: `0` if `shutdown` preceded `exit` (or a
+  clean end-of-stream after one), `1` on an unclean disconnect (the client
+  process died, or exited without ever calling `shutdown`).
+- **No editor available in this sandbox to verify interactively** (neither
+  `nvim` nor `vim` installed) - `tests/lsp/smoke_test.sh` substitutes a
+  scripted, real protocol-level conversation (constructs real
+  `Content-Length` frames with `printf`, pipes a fixed request/notification
+  sequence into one `ebasic_lsp` invocation, greps the compact-JSON
+  response stream for what each step must produce) as this session's own
+  verification, registered as a permanent CTest (`lsp_smoke`) alongside the
+  rest of the suite - not a one-off throwaway check. `docs/guide/lsp.md`
+  documents a real Neovim `vim.lsp.start` snippet for the user's own,
+  genuinely interactive verification once they have a moment to try it by
+  hand.
+- Verified: full e2e suite (29/29, including the new `lsp_smoke`), a clean
+  `-Wall -Wextra` rebuild.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

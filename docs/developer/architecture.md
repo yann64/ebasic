@@ -66,6 +66,7 @@ compiler/src/    the compiler front end + back end (see pipeline above)
 runtime/include/ the C++ runtime backing built-in types (BString, printLine, ...)
 pkg/src/         ebpm - the package manager
 docgen/src/      docgen - doc-comment ('''-marked) -> Markdown/HTML
+lsp/src/         ebasic_lsp - the language server (see docs/guide/lsp.md)
 tests/           e2e golden tests (one directory per feature area) + fixtures
 scripts/         dev-facing scripts (Haiku verification, PCH benchmarking)
 packaging/haiku/ draft HaikuPorts recipe
@@ -76,26 +77,39 @@ examples/        example .bas programs
 Each of `compiler/`, `runtime/`, `pkg/`, `docgen/`, `tests/` has its own
 `CMakeLists.txt`, included from the top-level one.
 
-## Shared libraries: why `ebc`, `ebpm`, and `docgen` aren't three silos
+## Shared libraries: why `ebc`, `ebpm`, `docgen`, and `ebasic_lsp` aren't four silos
 
-Two small static libraries (`compiler/CMakeLists.txt`) exist purely to avoid
-duplicating code across the three binaries:
+Small static libraries exist purely to avoid duplicating code across the
+four binaries:
 
-- **`ebasic_process`** (`compiler/src/driver/process.cpp`): the
-  cross-platform subprocess execution helper (`runProcess`,
+- **`ebasic_process`** (`compiler/CMakeLists.txt`, `compiler/src/driver/process.cpp`):
+  the cross-platform subprocess execution helper (`runProcess`,
   `runProcessCaptureOutput`) - POSIX (`fork`/`execvp`/`waitpid`/`pipe`) or
   Windows (`CreateProcess`) under the hood, picked at compile time. `ebc`
   needs it to invoke the backend compiler; `ebpm` needs it for the same
   reason (building each package) plus to shell out to `git` for git
   dependencies.
-- **`ebasic_frontend`**: the Preprocessor/Lexer/Parser/Diagnostics quartet,
-  with Sema and Codegen deliberately excluded. `docgen` links this to get a
-  real, parsed `Module` - it needs the exact same parsing behavior `ebc`
-  itself uses (no second, drifting parser implementation), but never needs
-  type-checking or code generation, since every declaration it documents is
-  already structurally resolved by the parser alone.
+- **`ebasic_frontend`** (`compiler/CMakeLists.txt`): the Preprocessor/
+  Lexer/Parser/Diagnostics quartet, with Sema and Codegen deliberately
+  excluded. `docgen` links this to get a real, parsed `Module` - it needs
+  the exact same parsing behavior `ebc` itself uses (no second, drifting
+  parser implementation), but never needs type-checking or code
+  generation, since every declaration it documents is already structurally
+  resolved by the parser alone.
+- **`ebasic_sema`** (`compiler/CMakeLists.txt`): `Sema` on its own, split
+  out the same way for the same reason - `ebasic_lsp` needs *real*,
+  resolved symbol/type information (for hover, go-to-definition, and
+  diagnostics that match `ebc` exactly) but never needs Codegen, since it
+  never emits C++.
+- **`ebasic_pkg`** (`pkg/CMakeLists.txt`): `ebpm`'s manifest parsing,
+  dependency-graph resolution, and build-flag computation
+  (`manifest.cpp`/`resolve.cpp`/`build.cpp`/`lockfile.cpp`/`gitdep.cpp`),
+  split out so `ebasic_lsp` can resolve a workspace's `ebpm` dependencies
+  (`#include "dep.iface.bas"`) the exact same way a real `ebpm build`
+  would, in-process - not a second, potentially-drifting reimplementation
+  of dependency resolution.
 
-Both mirror the same shape: a `STATIC` library with
+Every one of these mirrors the same shape: a `STATIC` library with
 `target_include_directories(... PUBLIC ...)` so a consumer can `#include`
 the relevant headers directly.
 

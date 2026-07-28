@@ -176,3 +176,13 @@ add_test(
     NAME cli_version_help
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/cli/version_help.sh $<TARGET_FILE:ebc> $<TARGET_FILE:ebpm> $<TARGET_FILE:docgen>
 )
+
+# LSP-1: a protocol-level smoke test - speaks real Content-Length-framed
+# JSON-RPC over ebasic_lsp's stdio (initialize/didOpen/didChange/didClose/
+# shutdown/exit, plus the unimplemented-method and unclean-disconnect exit-
+# code paths) - see tests/lsp/smoke_test.sh's own comment for why this
+# substitutes for interactive editor testing in CI/this sandbox.
+add_test(
+    NAME lsp_smoke
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/lsp/smoke_test.sh $<TARGET_FILE:ebasic_lsp>
+)

@@ -29,7 +29,7 @@ visible instead of hidden.
 
 `docgen` reuses the exact same Preprocessor/Lexer/Parser eBasic's own
 compiler uses (no second, drifting implementation) - see
-[Developer Documentation](../developer/architecture.md#shared-libraries-why-ebc-ebpm-and-docgen-arent-three-silos).
+[Developer Documentation](../developer/architecture.md#shared-libraries-why-ebc-ebpm-docgen-and-ebasic_lsp-arent-four-silos).
 It never runs Sema, so it has no type information beyond what the parser
 itself resolves structurally - this is why, for example, an `ENUM`
 member's value is never shown (auto-increment resolution is Sema's job).

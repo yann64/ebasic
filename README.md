@@ -67,7 +67,7 @@ actually installed, so this works unmodified regardless of prefix.
 
 - **[Getting Started](docs/guide/getting-started.md)** - build, first program, first package
 - **[Language Reference](docs/reference/index.md)** - every keyword, dictionary-style
-- **End-user guide**: [`ebc`](docs/guide/ebc.md), [`ebpm`](docs/guide/ebpm.md), [`docgen`](docs/guide/docgen.md)
+- **End-user guide**: [`ebc`](docs/guide/ebc.md), [`ebpm`](docs/guide/ebpm.md), [`docgen`](docs/guide/docgen.md), [`ebasic_lsp`](docs/guide/lsp.md) (work in progress)
 - **[`examples/`](examples/)** - one small, runnable program per language feature area
 - **[Developer Documentation](docs/developer/architecture.md)** - compile pipeline, module map, for anyone extending the compiler itself
 - **API docs** - generated with [Doxygen](https://www.doxygen.nl/) (`cmake --build build/linux-gcc --target docs`, output at `build/docs/html/index.html`)

@@ -48,6 +48,14 @@ add_subdirectory(compiler)
 add_subdirectory(pkg)
 add_subdirectory(docgen)
 
+# nlohmann/json - vendored as a single header (third_party/nlohmann_json),
+# same rationale as pkg/CMakeLists.txt's own tomlplusplus vendoring: no
+# network access needed at configure time. Used by lsp/'s own JSON-RPC
+# transport.
+add_library(nlohmann_json INTERFACE)
+target_include_directories(nlohmann_json INTERFACE ${CMAKE_SOURCE_DIR}/third_party/nlohmann_json)
+add_subdirectory(lsp)
+
 enable_testing()
 add_subdirectory(tests)
 
