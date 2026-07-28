@@ -94,6 +94,42 @@ std::string Codegen::memberReceiverPrefix(const Expr& lhs) {
     return genExpr(lhs) + ".";
 }
 
+std::string Codegen::resolveCalleeName(const Expr* lhs, const std::string& name) {
+    if (!lhs) {
+        auto it = externProcNames_.find(canonicalName(name));
+        return it != externProcNames_.end() ? it->second : mangleName(name);
+    }
+    if (lhs->kind == ExprKind::Ident && namespaces_.count(canonicalName(lhs->stringValue))) {
+        std::string key = canonicalName(lhs->stringValue) + "::" + canonicalName(name);
+        auto it = externProcNames_.find(key);
+        if (it != externProcNames_.end()) return it->second;
+        return mangleName(lhs->stringValue) + "::" + mangleName(name);
+    }
+    return memberReceiverPrefix(*lhs) + mangleName(name);
+}
+
+void Codegen::collectExternProcNames(const std::vector<StmtPtr>& stmts, const std::string& keyPrefix,
+                                      const std::string& realPrefix) {
+    for (const auto& stmtPtr : stmts) {
+        if (stmtPtr->kind == StmtKind::NamespaceDecl) {
+            // Two parallel prefixes: `keyPrefix` is built from BASIC-visible
+            // names (what a Call/CallStmt's lhs/target actually spells, used
+            // to look this entry back up), `realPrefix` from the real
+            // (possibly aliased) external name(s) (what Codegen must
+            // actually emit) - they can differ (M4c's whole point).
+            std::string nsKey = (keyPrefix.empty() ? "" : keyPrefix + "::") + canonicalName(stmtPtr->name);
+            std::string realNs = stmtPtr->externAlias.empty() ? stmtPtr->name : stmtPtr->externAlias;
+            std::string nsReal = (realPrefix.empty() ? "" : realPrefix + "::") + realNs;
+            collectExternProcNames(stmtPtr->body, nsKey, nsReal);
+            continue;
+        }
+        if (!stmtPtr->isExtern) continue;
+        std::string key = (keyPrefix.empty() ? "" : keyPrefix + "::") + canonicalName(stmtPtr->name);
+        std::string realName = stmtPtr->externAlias.empty() ? stmtPtr->name : stmtPtr->externAlias;
+        externProcNames_[key] = (realPrefix.empty() ? "" : realPrefix + "::") + realName;
+    }
+}
+
 std::string Codegen::genExpr(const Expr& expr) {
     switch (expr.kind) {
         case ExprKind::IntLiteral:
@@ -108,17 +144,18 @@ std::string Codegen::genExpr(const Expr& expr) {
             return mangleName(expr.stringValue);
         case ExprKind::Call: {
             if (expr.lhs) {
-                // Namespace.Name(args) -> C++ eb_ns::eb_name(args); This
-                // -> this->eb_name(args) (a normal, potentially-virtual
-                // call); Base -> a *qualified*, non-virtual call to the
-                // immediate base's own implementation
-                // (eb_base::eb_name(args), implicitly using the current
-                // `this` - exactly like C++'s own `Base::method()` from
-                // inside a derived member function); anything else (a
-                // variable, a field, ...) is a plain method call on that
-                // receiver -> eb_recv.eb_name(args).
-                std::string prefix = memberReceiverPrefix(*expr.lhs);
-                std::string result = prefix + mangleName(expr.stringValue) + "(";
+                // Namespace.Name(args) -> C++ eb_ns::eb_name(args) (or,
+                // for an Extern "C++" NAMESPACE binding, the real
+                // qualified external name verbatim - see
+                // resolveCalleeName); This -> this->eb_name(args) (a
+                // normal, potentially-virtual call); Base -> a
+                // *qualified*, non-virtual call to the immediate base's
+                // own implementation (eb_base::eb_name(args), implicitly
+                // using the current `this` - exactly like C++'s own
+                // `Base::method()` from inside a derived member function);
+                // anything else (a variable, a field, ...) is a plain
+                // method call on that receiver -> eb_recv.eb_name(args).
+                std::string result = resolveCalleeName(expr.lhs.get(), expr.stringValue) + "(";
                 for (size_t i = 0; i < expr.args.size(); ++i) {
                     if (i > 0) result += ", ";
                     result += genExpr(*expr.args[i]);
@@ -132,12 +169,7 @@ std::string Codegen::genExpr(const Expr& expr) {
                 return mangleName(expr.stringValue) + "[static_cast<std::size_t>((" +
                        genExpr(*expr.args[0]) + ") - " + arrIt->second + ")]";
             }
-            // An EXTERN/DECLARE-bound procedure (M4) must be called by its
-            // real external name, verbatim - never mangleName.
-            auto externIt = externProcNames_.find(key);
-            std::string calleeName = externIt != externProcNames_.end() ? externIt->second
-                                                                         : mangleName(expr.stringValue);
-            std::string result = calleeName + "(";
+            std::string result = resolveCalleeName(nullptr, expr.stringValue) + "(";
             for (size_t i = 0; i < expr.args.size(); ++i) {
                 if (i > 0) result += ", ";
                 result += genExpr(*expr.args[i]);
@@ -485,17 +517,8 @@ void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out, int indent) {
             // receiver (`->`), a Base.Method(args) qualified non-virtual
             // call (`eb_base::`), an obj.Method(args) receiver (`.`), or a
             // plain free-function call (no prefix).
-            std::string prefix;
-            std::string calleeName = mangleName(stmt.name);
-            if (stmt.target) {
-                prefix = memberReceiverPrefix(*stmt.target);
-            } else {
-                // An EXTERN/DECLARE-bound procedure (M4) must be called by
-                // its real external name, verbatim - never mangleName.
-                auto externIt = externProcNames_.find(canonicalName(stmt.name));
-                if (externIt != externProcNames_.end()) calleeName = externIt->second;
-            }
-            out << ind(indent) << prefix << calleeName << "(";
+            std::string calleeName = resolveCalleeName(stmt.target.get(), stmt.name);
+            out << ind(indent) << calleeName << "(";
             for (size_t i = 0; i < stmt.args.size(); ++i) {
                 if (i > 0) out << ", ";
                 out << genExpr(*stmt.args[i]);
@@ -742,13 +765,40 @@ void Codegen::genNamespaceDecl(const Stmt& stmt) {
     // avoid emitting empty `namespace eb_x { }` noise.
     bool hasProcs = false;
     bool hasGlobals = false;
+    // A "purely extern" NAMESPACE (M4c: every member is an EXTERN/DECLARE
+    // binding, e.g. `Extern "C++" Namespace ebfixture ... End Namespace`)
+    // must NOT be wrapped in this BASIC-side eb_-mangled namespace at all:
+    // each member's externAlias already carries its own fully-qualified
+    // real external name (e.g. "ebfixture::Square"), computed once at
+    // parse time - nesting that inside `namespace eb_ebfixture { ... }`
+    // would look for the wrong, doubly-qualified symbol.
+    bool isPureExtern = true;
     for (const auto& memberPtr : stmt.body) {
         if (memberPtr->kind == StmtKind::SubDecl || memberPtr->kind == StmtKind::FunctionDecl) {
             hasProcs = true;
+            if (!memberPtr->isExtern) isPureExtern = false;
         } else if (memberPtr->kind == StmtKind::Dim || memberPtr->kind == StmtKind::Const ||
                    memberPtr->kind == StmtKind::Enum) {
             hasGlobals = true;
+            isPureExtern = false;
         }
+    }
+    if (hasProcs && isPureExtern) {
+        // A qualified standalone declaration (`RetType realNs::Member(...)`)
+        // requires `realNs` to already be an open namespace somewhere in
+        // the translation unit - it isn't, so genProcedure's own
+        // (unqualified) name is instead wrapped in a real
+        // `namespace realNs { ... }` block here, using the namespace's
+        // real (possibly aliased) external name, never mangleName. Every
+        // isExtern member has no body at all, so only protoOut_ ever gets
+        // anything - no need to also open this block in procOut_.
+        std::string realNs = stmt.externAlias.empty() ? stmt.name : stmt.externAlias;
+        protoOut_ << "namespace " << realNs << " {\n";
+        for (const auto& memberPtr : stmt.body) {
+            genProcedure(*memberPtr);
+        }
+        protoOut_ << "} // namespace " << realNs << "\n";
+        return;
     }
 
     if (hasProcs) {
@@ -802,11 +852,9 @@ std::string Codegen::generate(const Module& module) {
             }
         } else if (stmtPtr->kind == StmtKind::NamespaceDecl) {
             namespaces_.insert(canonicalName(stmtPtr->name));
-        } else if (stmtPtr->isExtern) {
-            externProcNames_[canonicalName(stmtPtr->name)] =
-                stmtPtr->externAlias.empty() ? stmtPtr->name : stmtPtr->externAlias;
         }
     }
+    collectExternProcNames(module.stmts, "", "");
 
     // Forward-declare every TYPE/UNION before any full definition. A pointer
     // field (self-referential, e.g. a linked-list Node, or pointing at

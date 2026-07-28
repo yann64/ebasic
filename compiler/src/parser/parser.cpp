@@ -409,17 +409,70 @@ void Parser::parseExternBlock(std::vector<StmtPtr>& out) {
     skipNewlines();
 
     while (!check(TokenKind::KwEnd) && !check(TokenKind::End)) {
-        if (!check(TokenKind::KwDeclare)) {
-            diags_.error(peek().loc, "expected DECLARE inside an EXTERN block");
+        if (check(TokenKind::KwNamespace)) {
+            parseExternNamespace(out, linkage, lib);
+        } else if (check(TokenKind::KwDeclare)) {
+            out.push_back(parseExternDecl(linkage, lib));
+        } else {
+            diags_.error(peek().loc, "expected DECLARE or NAMESPACE inside an EXTERN block");
             synchronize();
-            continue;
         }
-        out.push_back(parseExternDecl(linkage, lib));
         skipNewlines();
     }
     expect(TokenKind::KwEnd, "expected END EXTERN");
     expect(TokenKind::KwExtern, "expected END EXTERN");
     expectStmtEnd();
+}
+
+/// `Namespace Name [Alias "realName"] ... End Namespace`, nested inside an
+/// `Extern "C++" ... End Extern` block (M4c) - real FreeBASIC's own way to
+/// bind a namespaced C++ function, reusing its existing NAMESPACE
+/// construct rather than a bespoke clause on Declare. Produces an ordinary
+/// StmtKind::NamespaceDecl (so `ns.Name(args)` resolves via the existing
+/// namespace-qualified Member/Call machinery from M3b, unchanged) whose
+/// body is a list of isExtern Declares, each with its externAlias
+/// pre-qualified by the namespace's real (possibly aliased) name - so
+/// Codegen calls the actual `realName::Declared` C++ symbol, while the
+/// BASIC-visible namespace/name (used only for call-site resolution) can
+/// differ freely.
+void Parser::parseExternNamespace(std::vector<StmtPtr>& out, const std::string& linkage,
+                                   const std::string& lib) {
+    advance(); // NAMESPACE
+    const Token& nameTok = expect(TokenKind::Identifier, "expected a name after NAMESPACE");
+    std::string realName = nameTok.text;
+    if (match(TokenKind::KwAlias)) {
+        realName = expect(TokenKind::StringLiteral, "expected a string after ALIAS").text;
+    }
+    expectStmtEnd();
+    skipNewlines();
+
+    auto nsStmt = std::make_unique<Stmt>();
+    nsStmt->kind = StmtKind::NamespaceDecl;
+    nsStmt->loc = nameTok.loc;
+    nsStmt->name = nameTok.text;
+    // The real (possibly aliased) C++ namespace name - Codegen wraps this
+    // namespace's members in a real `namespace realName { ... }` block
+    // (rather than qualifying each member's name individually), since a
+    // qualified `RetType realName::Member(...)` standalone declaration
+    // requires `realName` to already be an open namespace somewhere in
+    // the translation unit - it isn't, this is the only place it's ever
+    // mentioned. The BASIC-visible name/namespace (`ns.Name(args)`
+    // call-site resolution) is unaffected either way.
+    nsStmt->externAlias = realName;
+
+    while (!check(TokenKind::KwEnd) && !check(TokenKind::End)) {
+        if (!check(TokenKind::KwDeclare)) {
+            diags_.error(peek().loc, "expected DECLARE inside a NAMESPACE in an EXTERN block");
+            synchronize();
+            continue;
+        }
+        nsStmt->body.push_back(parseExternDecl(linkage, lib));
+        skipNewlines();
+    }
+    expect(TokenKind::KwEnd, "expected END NAMESPACE");
+    expect(TokenKind::KwNamespace, "expected END NAMESPACE");
+    expectStmtEnd();
+    out.push_back(std::move(nsStmt));
 }
 
 StmtPtr Parser::parseExternDecl(const std::string& defaultLinkage, const std::string& defaultLib) {

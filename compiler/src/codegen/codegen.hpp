@@ -58,6 +58,23 @@ private:
     // call genExpr on the whole target, since that produces the *getter*
     // form).
     std::string memberReceiverPrefix(const Expr& lhs);
+    // Renders the full callee expression (name, plus prefix) for a Call
+    // expression/CallStmt naming `name`, qualified via receiver `lhs`
+    // (nullptr = an unqualified, free-standing call). Consults
+    // externProcNames_ first - a plain free call or a Namespace.Name(args)
+    // call may be bound to a real EXTERN/DECLARE procedure (M4), which
+    // must be called by its real external name verbatim, never
+    // mangleName. Falls back to memberReceiverPrefix + mangleName(name)
+    // for everything else (This/Base/a general receiver, or an ordinary
+    // non-extern procedure/namespace member).
+    std::string resolveCalleeName(const Expr* lhs, const std::string& name);
+    // Recursively collects every isExtern SubDecl/FunctionDecl's real
+    // external name into externProcNames_, keyed by its (possibly
+    // namespace-qualified) canonical BASIC name - recurses into
+    // NamespaceDecl bodies so an Extern "C++" NAMESPACE binding (M4c) is
+    // found too, not just top-level EXTERN declarations (M4b).
+    void collectExternProcNames(const std::vector<StmtPtr>& stmts, const std::string& keyPrefix,
+                                const std::string& realPrefix);
 
     // A unique, per-invocation name for a generated temporary or label, e.g.
     // nextName("eb__forend") -> "eb__forend0", then "eb__forend1", ...

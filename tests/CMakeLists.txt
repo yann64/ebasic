@@ -106,3 +106,8 @@ add_test(
     NAME e2e_extern_c
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/extern_c ${EBASIC_FIXTURE_LIB_DIR}
 )
+
+add_test(
+    NAME e2e_extern_cpp
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/extern_cpp ${EBASIC_FIXTURE_LIB_DIR}
+)

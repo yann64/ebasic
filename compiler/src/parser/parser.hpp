@@ -68,6 +68,13 @@ private:
     // standalone (non-block) Declare passes "C" (the only linkage a
     // standalone Declare can produce in real FreeBASIC too) and "".
     StmtPtr parseExternDecl(const std::string& defaultLinkage, const std::string& defaultLib);
+    // `Namespace Name [Alias "realName"] ... End Namespace` nested inside
+    // an Extern block (M4c) - real FreeBASIC's own way to bind a
+    // namespaced C++ function. Appends one NamespaceDecl Stmt to `out`
+    // (matching parseExternBlock's own out-param convention, since this
+    // could in principle also hold more than one Stmt in the future).
+    void parseExternNamespace(std::vector<StmtPtr>& out, const std::string& linkage,
+                               const std::string& lib);
     std::vector<Param> parseParamList();
 
     // Parses an Identifier's trailing chain of `.field` (Member) and, for
