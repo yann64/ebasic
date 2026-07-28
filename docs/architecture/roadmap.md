@@ -435,6 +435,15 @@ A six-slice plan (Doc-1 through Doc-6), following the exact same slice-per-miles
 - Verified: `docs` Doxygen target still builds clean (unaffected, as expected for a pure Markdown addition); full e2e suite still 26/26.
 - Next: `docs/reference/` - types/literals, operators, control-flow (Doc-2).
 
+## Doc-2 Implementation Notes (language reference: types/literals, operators, control-flow, done)
+
+- New `docs/reference/types-and-literals.md`, `docs/reference/operators.md`, `docs/reference/control-flow.md` - dictionary-style entries per the user's confirmed exhaustive scope, each keyword/construct with exact syntax, semantics, and a runnable example.
+- **Every example actually compiled and run** (not written from memory) - caught two real inaccuracies before they made it into the docs: (1) an assumed `1 & 2` numeric-concat example fails a real Sema check (`&` requires both operands already be `STRING` - no implicit numeric-to-string conversion, unlike some BASIC dialects); (2) a bare `Greet()` call-as-statement doesn't parse at all - `CALL Greet()` is required. Both corrected in the docs to match real behavior rather than assumed FreeBASIC-style convenience.
+- The full 14-level operator precedence table was derived from the parser's actual recursive-descent call chain (`compiler/src/parser/parser.hpp`'s `parseXor -> parseOr -> parseAnd -> parseNot -> parseRelational -> parseConcat -> parseAdditive -> parseShift -> parseMod -> parseIDiv -> parseMulDiv -> parseNegate -> parsePow -> parseUnaryPtrOps -> parsePrimary`), then spot-verified live rather than trusted from the chain alone: `-2 ^ 2` = `-4` (confirms `^` binds tighter than unary `-`), `2 ^ -1` = `0.5` (confirms `^`'s own right operand can start with unary `-`), `2 ^ 2 ^ 3` = `256` not `64` (confirms `^` is right-associative), `7 MOD 2 + 1` = `2` (confirms `MOD` binds tighter than `+`), `1 OR 0 AND 0` = `1` (confirms `AND` binds tighter than `OR`), `3 > 2 AND 1 > 5` = `0` (confirms relational binds tighter than `AND`).
+- `DO`/`LOOP`'s four independent pre-test/post-test x WHILE/UNTIL combinations were all individually compiled and run (`DO WHILE`/`DO UNTIL` pre-test, `LOOP WHILE`/`LOOP UNTIL` post-test) rather than assuming symmetry from the two already-e2e-tested forms.
+- Verified: `docs` Doxygen target unaffected; full e2e suite still 26/26.
+- Next: `docs/reference/` - procedures, arrays, TYPE/OOP, namespaces/pointers/unions (Doc-3).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
