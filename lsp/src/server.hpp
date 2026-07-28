@@ -30,6 +30,8 @@ private:
     void handleDidOpen(const nlohmann::json& params, std::ostream& out);
     void handleDidChange(const nlohmann::json& params, std::ostream& out);
     void handleDidClose(const nlohmann::json& params);
+    void handleDocumentSymbol(const nlohmann::json& id, const nlohmann::json& params, std::ostream& out);
+    void handleHover(const nlohmann::json& id, const nlohmann::json& params, std::ostream& out);
 
     /// Re-runs the compile pipeline over `uri`'s current text and publishes
     /// one `textDocument/publishDiagnostics` per affected file (the edited

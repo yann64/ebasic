@@ -33,7 +33,13 @@ frame() {
     frame '{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///tmp/hello.bas","languageId":"ebasic","version":1,"text":"PRINT \"hi\"\n"}}}'
     frame '{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file:///tmp/hello.bas","version":2},"contentChanges":[{"text":"PRINT \"hi again\"\n"}]}}'
     frame '{"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":"file:///tmp/hello.bas"}}}'
-    frame '{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{}}'
+    # textDocument/completion isn't implemented until LSP-6.
+    frame '{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{}}'
+    # A malformed request for an *implemented* method (missing the required
+    # textDocument field) must get InvalidParams, not crash the server - a
+    # real bug once hover started doing params.at("textDocument") with no
+    # exception boundary around dispatch().
+    frame '{"jsonrpc":"2.0","id":4,"method":"textDocument/hover","params":{}}'
     frame '{"jsonrpc":"2.0","id":3,"method":"shutdown"}'
     frame '{"jsonrpc":"2.0","method":"exit"}'
 } > "$WORKDIR/input.bin"
@@ -57,7 +63,9 @@ check() {
 }
 check '"textDocumentSync":1'
 check '"name":"ebasic-lsp"'
-check '"code":-32601'   # textDocument/hover isn't implemented until LSP-3
+check '"code":-32601'   # textDocument/completion isn't implemented until LSP-6
+check '"error":{"code":-32602'  # malformed hover params -> InvalidParams, not a crash
+check '"id":4'                  # ... and it's the reply to that same request
 check '"id":3'          # the shutdown response
 
 # A client that disconnects without shutdown/exit (a crash, or an editor

@@ -20,6 +20,10 @@ struct SymbolInfo {
     bool isConst = false;
     bool isArray = false;
     bool isDynamicArray = false;
+    /// Where this DIM/CONST/ENUM member was declared - populated purely for
+    /// tooling (the LSP's hover/go-to-definition, via Sema::index()), never
+    /// read by any check in this file itself.
+    SourceLoc declLoc;
 };
 
 /// A SUB/FUNCTION's signature, registered up front (before any body is
@@ -33,6 +37,9 @@ struct ProcedureInfo {
     /// declared Virtual, or Override (an override necessarily participates
     /// in the vtable too). Codegen emits literal `virtual`/`override`.
     bool isVirtual = false;
+    /// Where this SUB/FUNCTION (or method) was declared - see
+    /// SymbolInfo::declLoc's comment; same tooling-only purpose.
+    SourceLoc declLoc;
 };
 
 /// A declared PROPERTY's value type. This version requires every property
@@ -40,6 +47,10 @@ struct ProcedureInfo {
 /// Stmt::isProperty's comment for why.
 struct PropertyInfo {
     Type type;
+    /// Where this PROPERTY's getter was declared (the setter may be
+    /// declared elsewhere, but only one location is worth tracking for
+    /// tooling) - see SymbolInfo::declLoc's comment.
+    SourceLoc declLoc;
 };
 
 /// A declared TYPE's fields and member procedures, registered up front
@@ -74,6 +85,21 @@ struct RecordInfo {
     /// narrow to TYPE - an empty UNION is a degenerate case, not this
     /// feature's target).
     bool isOpaque = false;
+    /// Where this TYPE/UNION was declared - see SymbolInfo::declLoc's
+    /// comment; same tooling-only purpose.
+    SourceLoc declLoc;
+};
+
+/// A read-only snapshot of every top-level name Sema resolved, for tooling
+/// (the LSP) that needs real, resolved symbol/type information after
+/// check() runs - a copy, not a reference into Sema's own (still-private)
+/// maps, so those maps stay free to change shape without disturbing this
+/// contract. See Sema::index().
+struct SemaIndex {
+    std::unordered_map<std::string, SymbolInfo> symbols;
+    std::unordered_map<std::string, ProcedureInfo> procedures;
+    std::unordered_map<std::string, RecordInfo> structs;
+    std::unordered_set<std::string> namespaces;
 };
 
 /// Type-checks and resolves a parsed Module in place - name resolution,
@@ -88,6 +114,14 @@ public:
     /// constructor) accumulates every problem found rather than stopping at
     /// the first one - callers check DiagnosticEngine::hasErrors() after.
     void check(Module& module);
+
+    /// A snapshot of every top-level name resolved so far - meaningful
+    /// even after a check() that reported body-level errors, since
+    /// module-level registration (collectProcedures/collectTypes/...)
+    /// always completes before any statement body is checked. Copies out
+    /// (not a reference) so a caller can hold onto it after this Sema
+    /// object is gone.
+    SemaIndex index() const { return SemaIndex{symbols_, procedures_, structs_, namespaces_}; }
 
 private:
     void collectLabels(std::vector<StmtPtr>& stmts);

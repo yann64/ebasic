@@ -5,6 +5,7 @@ add_executable(ebasic_lsp
     src/server.cpp
     src/uri.cpp
     src/diagnostics.cpp
+    src/symbols.cpp
 )
 target_include_directories(ebasic_lsp PRIVATE
     ${CMAKE_SOURCE_DIR}/compiler/src

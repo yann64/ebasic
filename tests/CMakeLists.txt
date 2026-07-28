@@ -193,3 +193,10 @@ add_test(
     NAME lsp_diagnostics
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/lsp/diagnostics_test.sh $<TARGET_FILE:ebasic_lsp>
 )
+
+# LSP-3: documentSymbol (outline) and hover, backed by Sema's own resolved
+# symbol table (Sema::index()), not a second name-resolution pass.
+add_test(
+    NAME lsp_symbols
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/lsp/symbols_test.sh $<TARGET_FILE:ebasic_lsp>
+)

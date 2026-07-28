@@ -35,10 +35,24 @@ written all at once.
   point per node, not a start/end span), the closest honest approximation
   available today.
 
-Hover, go-to-definition, outline, and completion are later slices (see
-`docs/architecture/roadmap.md`'s "LSP Plan Summary" for the full list). A
-request for an unimplemented method gets a real JSON-RPC `MethodNotFound`
-(`-32601`) error, not silence.
+**LSP-3 (outline + hover):**
+
+- `textDocument/documentSymbol` - one entry per top-level TYPE/UNION/CONST/
+  ENUM/NAMESPACE/free SUB/FUNCTION, in source order.
+- `textDocument/hover` - the resolved signature/type of the symbol under
+  the cursor (a SUB/FUNCTION's real parameter/return types, a TYPE's
+  EXTENDS base, a variable's declared type), sourced from Sema's own
+  resolved symbol table (`Sema::index()`), not a second, potentially
+  drifting name-resolution pass. Available even while a document has a
+  body-level type error elsewhere, since module-level signatures are
+  always fully registered before any statement body is checked.
+
+Go-to-definition, find-references, `ebpm`-awareness, and completion are
+later slices (see `docs/architecture/roadmap.md`'s "LSP Plan Summary" for
+the full list). A request for an unimplemented method gets a real
+JSON-RPC `MethodNotFound` (`-32601`) error, not silence; a malformed
+request for an *implemented* method gets `InvalidParams` (`-32602`), never
+a crash.
 
 ## Trying it in Neovim
 
@@ -59,15 +73,18 @@ vim.api.nvim_create_autocmd('FileType', {
 ```
 
 Open a `.bas` file and check `:LspInfo` shows `ebasic_lsp` attached - you
-should now see real error/warning squiggles from Sema as you type.
+should now see real error/warning squiggles from Sema as you type, an
+outline via `:lua vim.lsp.buf.document_symbol()`, and hover via
+`K`/`vim.lsp.buf.hover()`.
 
 ## Verifying without an editor
 
-`tests/lsp/smoke_test.sh` and `tests/lsp/diagnostics_test.sh` drive the
-server directly over its real stdio transport (the same Content-Length
-JSON-RPC framing any client speaks) and run as part of the normal test
-suite (`ctest -R lsp_`) - useful for confirming the protocol contract works
-without needing an LSP-capable editor on hand.
+`tests/lsp/smoke_test.sh`, `tests/lsp/diagnostics_test.sh`, and
+`tests/lsp/symbols_test.sh` drive the server directly over its real stdio
+transport (the same Content-Length JSON-RPC framing any client speaks) and
+run as part of the normal test suite (`ctest -R lsp_`) - useful for
+confirming the protocol contract works without needing an LSP-capable
+editor on hand.
 
 ## See also
 

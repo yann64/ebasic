@@ -88,6 +88,7 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
         if (it == structs_.end()) continue; // duplicate; already reported above
 
         RecordInfo info;
+        info.declLoc = stmt->loc;
         for (const FieldDecl& field : stmt->fields) {
             std::string fieldKey = canonicalName(field.name);
             bool duplicate = false;
@@ -183,7 +184,7 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
                                                                          : method->params[0].type);
                     auto propIt = info.properties.find(propKey);
                     if (propIt == info.properties.end()) {
-                        info.properties[propKey] = PropertyInfo{thisType};
+                        info.properties[propKey] = PropertyInfo{thisType, method->loc};
                     } else if (!(propIt->second.type.kind == thisType.kind &&
                                  canonicalName(propIt->second.type.typeName) ==
                                      canonicalName(thisType.typeName))) {
@@ -209,6 +210,7 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
                 /// An override necessarily participates in the vtable too,
                 /// whether or not `Virtual` was also explicitly written.
                 procInfo.isVirtual = method->isVirtual || method->isOverride;
+                procInfo.declLoc = method->loc;
                 info.methods[methodKey] = std::move(procInfo);
             }
             /// Every declared property must have BOTH a getter and a setter
@@ -578,6 +580,7 @@ void Sema::collectProcedures(std::vector<StmtPtr>& stmts, const std::string& pre
         info.isFunction = stmt->kind == StmtKind::FunctionDecl;
         info.returnType = stmt->declaredType;
         info.params = stmt->params;
+        info.declLoc = stmt->loc;
         procedures_[key] = std::move(info);
     }
 }
@@ -814,6 +817,7 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
             info.isConst = false;
             info.isArray = stmt.isArray;
             info.isDynamicArray = stmt.isArray && !stmt.arrayUpper;
+            info.declLoc = stmt.loc;
             scope[key] = info;
             return;
         }
@@ -864,7 +868,11 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                              "CONST initializer must be a constant expression (literals and "
                              "other CONST/ENUM names only)");
             }
-            scope[key] = SymbolInfo{constType, /*isConst=*/true, false};
+            SymbolInfo info;
+            info.type = constType;
+            info.isConst = true;
+            info.declLoc = stmt.loc;
+            scope[key] = info;
             return;
         }
         case StmtKind::Enum: {
@@ -881,7 +889,11 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                 if (scope.count(key) || procedures_.count(key) || structs_.count(key)) {
                     diags_.error(member.loc, "'" + member.name + "' is already declared");
                 } else {
-                    scope[key] = SymbolInfo{TypeKind::Integer, /*isConst=*/true, false};
+                    SymbolInfo info;
+                    info.type = Type(TypeKind::Integer);
+                    info.isConst = true;
+                    info.declLoc = member.loc;
+                    scope[key] = info;
                     constIntValues_[key] = value;
                 }
                 next = value + 1;
@@ -1109,7 +1121,10 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                     diags_.error(param.loc, "duplicate parameter name '" + param.name + "'");
                     continue;
                 }
-                locals_[key] = SymbolInfo{param.type, /*isConst=*/false, /*isArray=*/false};
+                SymbolInfo info;
+                info.type = param.type;
+                info.declLoc = param.loc;
+                locals_[key] = info;
             }
 
             loopStack_.push_back(isFunction ? LoopKind::Function : LoopKind::Sub);

@@ -705,6 +705,67 @@ slices don't need to reshape the CMake target).
   writing the permanent test (both matched the test's own expectations
   exactly).
 
+## LSP-3 Implementation Notes (Sema symbol locations, outline, hover, done)
+
+- `Sema` (`compiler/src/sema/sema.hpp`) gains a `declLoc` field on
+  `SymbolInfo`/`ProcedureInfo`/`RecordInfo`/`PropertyInfo`, populated at
+  every existing registration site (`collectProcedures`, `collectTypes`'s
+  TYPE/UNION/method/property registration, the `Dim`/`Const`/`Enum`/
+  parameter handling in `checkStmt`) - purely additive, no behavior change
+  to compilation itself. A new `SemaIndex` struct (a plain copy of
+  `symbols_`/`procedures_`/`structs_`/`namespaces_`) and a public
+  `Sema::index()` accessor expose this to tooling without making Sema's own
+  private maps part of its public surface.
+- `lsp/src/symbols.{hpp,cpp}`: `checkDocument(path, text)` runs the same
+  pipeline as `computeDiagnostics`, but returns the checked `Module` +
+  `SemaIndex` whenever Preprocessor/Lexer/Parser succeed - even if Sema
+  itself found body-level errors, since `collectProcedures`/`collectTypes`
+  (module-level registration) always complete *before* any statement body
+  is checked (confirmed by reading `Sema::check`'s own pass ordering) - so
+  hover/outline stay useful during in-progress edits elsewhere in the file.
+- `documentSymbols(module)` walks the AST with the same switch-over-
+  `stmt.kind` shape as `docgen/src/render.cpp`'s own `collectSections` (not
+  literally shared - it's private to docgen's own translation unit - but
+  deliberately mirrored rather than independently re-derived), emitting LSP
+  `DocumentSymbol` JSON instead of Markdown sections.
+- `identifierAt(text, line, character)`: re-lexes just the requested line
+  in isolation to find the identifier token under the cursor - eBasic's
+  `SourceLoc` is a single point everywhere (confirmed during planning), so
+  there's no stored range to hit-test a position against directly; this
+  sidesteps needing one.
+- `hoverFor(index, rawName)` looks up the identifier's *canonical* form in
+  `SemaIndex` but renders the signature using the identifier's *original*
+  on-screen casing (BASIC is case-insensitive; `ProcedureInfo`/etc. don't
+  store the declared spelling, only the canonical map key) - caught by
+  manual testing showing `FUNCTION square(...)` instead of the real
+  `FUNCTION Square(...)` before this was fixed.
+- **A real crash bug, caught by the existing `lsp_smoke` test breaking**:
+  once `textDocument/hover` was wired up, `lsp_smoke`'s old "unimplemented
+  method" check (which happened to *be* a bare `textDocument/hover` request
+  with empty `params`) now reached the real handler, which did
+  `params.at("textDocument")` with no exception boundary anywhere in
+  `dispatch()` - an uncaught `nlohmann::json::out_of_range` crashed the
+  whole server. Fixed by wrapping `dispatch()`'s method handling in a
+  single `try`/`catch (const json::exception&)`, replying `InvalidParams`
+  (`-32602`) for a malformed *request* rather than dying - one boundary
+  covers every handler instead of repeating it in each. `lsp_smoke` updated
+  to test a genuinely still-unimplemented method
+  (`textDocument/completion`, LSP-6) for `MethodNotFound`, plus a new,
+  permanent check that a malformed `hover` request gets `InvalidParams`,
+  not a crash.
+- `tests/lsp/symbols_test.sh` (new `lsp_symbols` CTest): `documentSymbol`
+  finds a top-level `FUNCTION`; `hover` over a call site and over a
+  variable reference both return the right resolved signature; hovering
+  somewhere with no identifier returns a null result, not an error.
+- A second `-Wall -Wextra` pass caught 3 new `-Wmissing-field-initializers`
+  warnings from aggregate-initializing `SymbolInfo` with only its first 3
+  (of now 5) members at 3 call sites in `sema.cpp` - fixed by switching
+  those to explicit field assignment instead of brace-init.
+- Verified: full e2e suite (31/31, including the new `lsp_symbols`), a
+  clean `-Wall -Wextra` rebuild (after the missing-field-initializer fix
+  above), manual protocol-level `documentSymbol`/`hover` checks before
+  writing the permanent test.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

@@ -1,6 +1,7 @@
 #include "server.hpp"
 #include "diagnostics.hpp"
 #include "rpc.hpp"
+#include "symbols.hpp"
 #include "uri.hpp"
 
 #include "ebasic/version.hpp"
@@ -33,25 +34,41 @@ void Server::dispatch(const json& msg, std::ostream& out) {
     auto idIt = msg.find("id");
     const bool isRequest = idIt != msg.end();
 
-    if (method == "initialize") {
-        if (isRequest) handleInitialize(*idIt, params, out);
-    } else if (method == "initialized") {
-        // Notification only - nothing to do yet (later slices may kick off
-        // workspace-wide ebpm package discovery here).
-    } else if (method == "shutdown") {
-        if (isRequest) handleShutdown(*idIt, out);
-    } else if (method == "exit") {
-        exitRequested_ = true;
-    } else if (method == "textDocument/didOpen") {
-        handleDidOpen(params, out);
-    } else if (method == "textDocument/didChange") {
-        handleDidChange(params, out);
-    } else if (method == "textDocument/didClose") {
-        handleDidClose(params);
-    } else if (isRequest) {
-        // MethodNotFound (-32601) - only requests get (and need) a reply;
-        // an unrecognized notification is simply ignored, per the spec.
-        sendError(out, *idIt, -32601, "method not found: " + method);
+    // A handler reaches into `params` with .at(...)/.get<T>() freely,
+    // trusting a well-formed client - but a malformed or unexpected shape
+    // (a missing field, wrong type) must never take the whole server down.
+    // One json::exception boundary here covers every handler below rather
+    // than repeating a try/catch in each one.
+    try {
+        if (method == "initialize") {
+            if (isRequest) handleInitialize(*idIt, params, out);
+        } else if (method == "initialized") {
+            // Notification only - nothing to do yet (later slices may kick
+            // off workspace-wide ebpm package discovery here).
+        } else if (method == "shutdown") {
+            if (isRequest) handleShutdown(*idIt, out);
+        } else if (method == "exit") {
+            exitRequested_ = true;
+        } else if (method == "textDocument/didOpen") {
+            handleDidOpen(params, out);
+        } else if (method == "textDocument/didChange") {
+            handleDidChange(params, out);
+        } else if (method == "textDocument/didClose") {
+            handleDidClose(params);
+        } else if (method == "textDocument/documentSymbol") {
+            if (isRequest) handleDocumentSymbol(*idIt, params, out);
+        } else if (method == "textDocument/hover") {
+            if (isRequest) handleHover(*idIt, params, out);
+        } else if (isRequest) {
+            // MethodNotFound (-32601) - only requests get (and need) a
+            // reply; an unrecognized notification is simply ignored, per
+            // the spec.
+            sendError(out, *idIt, -32601, "method not found: " + method);
+        }
+    } catch (const json::exception& e) {
+        // InvalidParams (-32602). A malformed notification has no `id` to
+        // reply to - nothing sensible to do but drop it.
+        if (isRequest) sendError(out, *idIt, -32602, std::string("invalid params: ") + e.what());
     }
 }
 
@@ -61,6 +78,8 @@ void Server::handleInitialize(const json& id, const json& /*params*/, std::ostre
             // Full-document sync only (no incremental ranges) - matches
             // documents.hpp's whole-text replace-on-change model.
             {"textDocumentSync", 1},
+            {"documentSymbolProvider", true},
+            {"hoverProvider", true},
         }},
         {"serverInfo", {
             {"name", "ebasic-lsp"},
@@ -122,6 +141,49 @@ void Server::publishDiagnostics(const std::string& uri, std::ostream& out) {
         if (!diagsArr.empty()) newActive.insert(fileUri);
     }
     lastDiagnosticUris_[uri] = std::move(newActive);
+}
+
+void Server::handleDocumentSymbol(const json& id, const json& params, std::ostream& out) {
+    const std::string uri = params.at("textDocument").at("uri").get<std::string>();
+    const std::string* text = documents_.find(uri);
+    if (!text) {
+        sendResult(out, id, json::array());
+        return;
+    }
+    auto checked = checkDocument(uriToPath(uri), *text);
+    if (!checked) {
+        // A syntax error means no Module at all yet - an empty outline,
+        // not an error reply (a request failure would be more disruptive
+        // than useful for something this cosmetic).
+        sendResult(out, id, json::array());
+        return;
+    }
+    sendResult(out, id, documentSymbols(checked->module));
+}
+
+void Server::handleHover(const json& id, const json& params, std::ostream& out) {
+    const std::string uri = params.at("textDocument").at("uri").get<std::string>();
+    const json& position = params.at("position");
+    const int line = position.at("line").get<int>();
+    const int character = position.at("character").get<int>();
+
+    const std::string* text = documents_.find(uri);
+    if (!text) {
+        sendResult(out, id, nullptr);
+        return;
+    }
+    std::optional<std::string> word = identifierAt(*text, line, character);
+    if (!word) {
+        sendResult(out, id, nullptr);
+        return;
+    }
+    auto checked = checkDocument(uriToPath(uri), *text);
+    if (!checked) {
+        sendResult(out, id, nullptr);
+        return;
+    }
+    std::optional<json> result = hoverFor(checked->index, *word);
+    sendResult(out, id, result ? *result : json(nullptr));
 }
 
 void Server::sendResult(std::ostream& out, const json& id, json result) {
