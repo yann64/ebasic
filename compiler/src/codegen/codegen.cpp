@@ -550,6 +550,22 @@ void Codegen::genTypeDecl(const Stmt& stmt) {
         return;
     }
 
+    // M4d: a TYPE with zero fields, zero methods (which also covers
+    // properties/ctor/dtor - all stored in `stmt.methods`), and no EXTENDS is
+    // an opaque external handle (Sema's RecordInfo::isOpaque, recomputed
+    // here directly from the AST since Codegen has no access to Sema's
+    // internal tables). Emit a bare forward declaration only - never a `{
+    // };` body, which would wrongly claim a concrete, empty-but-complete
+    // layout against the real library's actual, unknown one. Only ever legal
+    // via PTR; Sema already rejects by-value DIM/embedding/EXTENDS of it.
+    if (stmt.kind == StmtKind::TypeDecl && stmt.fields.empty() && stmt.methods.empty() &&
+        stmt.baseTypeName.empty()) {
+        typesOut_ << "struct " << mangleName(stmt.name) << ";\n\n";
+        typesBeingEmitted_.erase(key);
+        typesEmitted_.insert(key);
+        return;
+    }
+
     for (const FieldDecl& field : stmt.fields) {
         if (field.type.kind != TypeKind::UserDefined) continue;
         auto it = typeDeclsByName_.find(canonicalName(field.type.typeName));

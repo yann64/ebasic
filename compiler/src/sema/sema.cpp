@@ -222,9 +222,46 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
                 }
             }
         }
+        // M4d: a TYPE with no fields, no methods/properties, no ctor/dtor,
+        // and no EXTENDS is an opaque external handle - computed here since
+        // every field/method/EXTENDS check above has already run for this
+        // TYPE. Deliberately excludes UnionDecl (an empty UNION is a
+        // degenerate case, not this feature's target).
+        info.isOpaque = stmt->kind == StmtKind::TypeDecl && info.fields.empty() && info.methods.empty() &&
+                         info.properties.empty() && !info.hasCtor && !info.hasDtor && info.baseName.empty();
         it->second = std::move(info);
     }
-    // Pass 3: UNION-only "no STRING, directly or nested" restriction. Run
+    // Pass 3: M4d opaque-TYPE restrictions that need every TYPE/UNION's
+    // `isOpaque` fully resolved first (a forward-referenced opaque TYPE
+    // wouldn't have its flag set yet if checked during pass 2 above - same
+    // forward-reference concern as pass 4's UNION/STRING check below).
+    // Opaque types are PTR-only: reject by-value embedding as a field in
+    // another TYPE/UNION, and reject EXTENDS naming an opaque type as the
+    // base (unknown layout - nothing to inherit). Extending an opaque type
+    // is separately rejected because that assignment (`stmt->baseTypeName`)
+    // already forces `info.baseName` non-empty, which makes `isOpaque` false
+    // for the derived TYPE itself - so there's nothing further to check on
+    // that side.
+    for (auto& stmt : stmts) {
+        if (!isRecordDecl(stmt->kind)) continue;
+        for (const FieldDecl& field : stmt->fields) {
+            if (field.type.kind != TypeKind::UserDefined) continue;
+            auto it = structs_.find(canonicalName(field.type.typeName));
+            if (it != structs_.end() && it->second.isOpaque) {
+                diags_.error(field.loc, "field '" + field.name + "' cannot embed opaque external "
+                                         "TYPE '" + field.type.typeName + "' by value (unknown "
+                                         "layout - only legal via PTR)");
+            }
+        }
+        if (stmt->kind == StmtKind::TypeDecl && !stmt->baseTypeName.empty()) {
+            auto it = structs_.find(canonicalName(stmt->baseTypeName));
+            if (it != structs_.end() && it->second.isOpaque) {
+                diags_.error(stmt->loc, "TYPE '" + stmt->name + "' cannot EXTENDS opaque external "
+                                         "TYPE '" + stmt->baseTypeName + "' (unknown layout)");
+            }
+        }
+    }
+    // Pass 4: UNION-only "no STRING, directly or nested" restriction. Run
     // only after every TYPE/UNION's fields are fully resolved above (pass
     // 2), since a UNION declared earlier in the file may embed a TYPE
     // declared later - checking against a not-yet-populated RecordInfo
@@ -240,7 +277,7 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
             }
         }
     }
-    // Pass 4: match each out-of-line method/constructor/destructor
+    // Pass 5: match each out-of-line method/constructor/destructor
     // DEFINITION (a top-level SubDecl/FunctionDecl with `ownerType` set) to
     // its declared prototype, marking it defined. A definition naming an
     // unknown TYPE, an undeclared method, or a duplicate definition, is an
@@ -313,7 +350,7 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
                                          "' has a different parameter count than its declaration");
         }
     }
-    // Pass 5: every declared method/constructor/destructor must have a
+    // Pass 6: every declared method/constructor/destructor must have a
     // matching out-of-line definition - an undefined one would otherwise
     // only surface as a confusing backend "incomplete type"/link error.
     for (auto& stmt : stmts) {
@@ -348,7 +385,7 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
             }
         }
     }
-    // Pass 6: EXTENDS cycle check. Every base-name lookup above only
+    // Pass 7: EXTENDS cycle check. Every base-name lookup above only
     // required the base to *exist*, not that its own chain be acyclic -
     // walk each TYPE's chain now that every baseName is resolved, so a
     // cycle (A extends B, B extends A, ...) is reported once cleanly
@@ -376,7 +413,7 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
             diags_.error(stmt->loc, "circular inheritance involving TYPE '" + stmt->name + "'");
         }
     }
-    // Pass 7: an Override method must match a Virtual method somewhere up
+    // Pass 8: an Override method must match a Virtual method somewhere up
     // the (now fully-resolved and acyclic) base chain - run only after
     // pass 6 confirms no cycles, so this walk is guaranteed to terminate
     // without relying on its own cycle guard. A narrower "is it actually
@@ -749,9 +786,16 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                 diags_.error(stmt.loc, "'" + stmt.name + "' is already declared");
                 return;
             }
-            if (stmt.declaredType.kind == TypeKind::UserDefined &&
-                !structs_.count(canonicalName(stmt.declaredType.typeName))) {
-                diags_.error(stmt.loc, "unknown TYPE '" + stmt.declaredType.typeName + "'");
+            if (stmt.declaredType.kind == TypeKind::UserDefined) {
+                auto typeIt = structs_.find(canonicalName(stmt.declaredType.typeName));
+                if (typeIt == structs_.end()) {
+                    diags_.error(stmt.loc, "unknown TYPE '" + stmt.declaredType.typeName + "'");
+                } else if (typeIt->second.isOpaque) {
+                    diags_.error(stmt.loc, "'" + stmt.name + "' cannot be a by-value DIM of opaque "
+                                 "external TYPE '" + stmt.declaredType.typeName + "' (unknown "
+                                 "layout - declare it as '" + stmt.declaredType.typeName + " PTR' "
+                                 "instead)");
+                }
             }
             if (stmt.isArray) {
                 if (stmt.arrayLower && !isIntegerFamily(checkExpr(*stmt.arrayLower))) {

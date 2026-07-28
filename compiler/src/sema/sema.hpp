@@ -66,6 +66,14 @@ struct RecordInfo {
     std::unordered_map<std::string, PropertyInfo> properties; // canonical property name -> value type
     std::unordered_set<std::string> definedGetters;
     std::unordered_set<std::string> definedSetters;
+    // A TYPE with zero fields, zero methods/properties, no ctor/dtor, and no
+    // EXTENDS (M4d) - an opaque, unknown-layout external handle (e.g. a C
+    // `struct sqlite3;`-style forward-only type). Only ever legal behind a
+    // PTR: no by-value DIM, no by-value embedding as another TYPE/UNION's
+    // field, and no EXTENDS in either direction. Never true for UNION (kept
+    // narrow to TYPE - an empty UNION is a degenerate case, not this
+    // feature's target).
+    bool isOpaque = false;
 };
 
 class Sema {
