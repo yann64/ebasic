@@ -9,6 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_subdirectory(runtime)
 add_subdirectory(compiler)
+add_subdirectory(pkg)
 
 enable_testing()
 add_subdirectory(tests)

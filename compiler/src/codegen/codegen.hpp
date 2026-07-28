@@ -13,13 +13,40 @@ namespace ebasic {
 
 class Codegen {
 public:
-    std::string generate(const Module& module);
+    // `libMode` (M5): when true, the top-level statement stream is never
+    // wrapped in `int main() { ... }` - the caller (ebc's driver) has
+    // already verified the module contains no top-level *executable*
+    // statements (only declarations), since a library's object file must
+    // never define `main` itself (it would collide with the consuming
+    // package's own `main` at final link time).
+    std::string generate(const Module& module, bool libMode = false);
+
+    // M5: renders an auto-generated, real `.bas`-syntax interface file for
+    // a library build - an `Extern "C++" Lib "<libName>" ... End Extern`
+    // block with one `Declare` per public top-level SUB/FUNCTION (each
+    // `Alias`ed to its real, already-`mangleName`d symbol - no change to
+    // ordinary mangling/linkage at all), plus a verbatim copy of any
+    // top-level TYPE/UNION with no methods/ctor/dtor (a plain-data or
+    // opaque record - the only kinds already allowed across an EXTERN
+    // boundary per M4b/M4d's own Sema rules). A dependent package
+    // `#include`s this file and links the archive produced alongside it -
+    // reusing M4's EXTERN/DECLARE/opaque-TYPE machinery entirely on the
+    // consuming side. Only ever meaningful after a `libMode` generate()
+    // call (needs no state from it, but is conceptually paired). Namespaced
+    // members are not walked (deferred - only top-level procs/types are
+    // exported for now).
+    std::string generateLibraryInterface(const Module& module, const std::string& libName);
 
     // Library names to link (`-l<name>`), collected from the module's
     // `Lib "name"` clauses (M4) - valid after generate() returns.
     const std::vector<std::string>& externLibs() const { return externLibs_; }
 
 private:
+    // Renders `type` back into BASIC source syntax (e.g. "INTEGER", "STRING",
+    // "Point PTR") - the inverse of parsing a type, needed only by
+    // generateLibraryInterface to re-emit real `.bas` text. Never used by
+    // ordinary C++ codegen (which goes through cppType instead).
+    static std::string basicTypeName(const Type& type);
     void genStmt(const Stmt& stmt, std::ostringstream& out, int indent);
     void genBlock(const std::vector<StmtPtr>& stmts, std::ostringstream& out, int indent);
     // Emits a SUB/FUNCTION's prototype (into protoOut_) and body (into

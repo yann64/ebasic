@@ -842,7 +842,7 @@ void Codegen::genNamespaceDecl(const Stmt& stmt) {
     if (hasGlobals) globalsOut_ << "} // namespace " << ns << "\n";
 }
 
-std::string Codegen::generate(const Module& module) {
+std::string Codegen::generate(const Module& module, bool libMode) {
     externLibs_ = module.externLibs;
 
     // Top-level DIM/CONST/ENUM become real C++ globals (declared before any
@@ -941,10 +941,110 @@ std::string Codegen::generate(const Module& module) {
     if (!globalsOut_.str().empty()) out << globalsOut_.str() << "\n";
     if (!protoOut_.str().empty()) out << protoOut_.str() << "\n";
     out << procOut_.str();
-    out << "int main() {\n";
-    out << mainOut.str();
-    out << "    return 0;\n";
-    out << "}\n";
+    // M5 library build: no main() at all - the driver has already verified
+    // there are no top-level executable statements to put in one (mainOut
+    // is guaranteed empty here), and a library's object file must never
+    // define `main` itself (it would collide with the consuming package's
+    // own `main` at final link time).
+    if (!libMode) {
+        out << "int main() {\n";
+        out << mainOut.str();
+        out << "    return 0;\n";
+        out << "}\n";
+    }
+    return out.str();
+}
+
+std::string Codegen::basicTypeName(const Type& type) {
+    switch (type.kind) {
+        case TypeKind::Byte: return "BYTE";
+        case TypeKind::UByte: return "UBYTE";
+        case TypeKind::Short: return "SHORT";
+        case TypeKind::UShort: return "USHORT";
+        case TypeKind::Integer: return "INTEGER";
+        case TypeKind::Long: return "LONG";
+        case TypeKind::UInteger: return "UINTEGER";
+        case TypeKind::LongInt: return "LONGINT";
+        case TypeKind::ULongInt: return "ULONGINT";
+        case TypeKind::Single: return "SINGLE";
+        case TypeKind::Double: return "DOUBLE";
+        case TypeKind::Boolean: return "BOOLEAN";
+        case TypeKind::StringT: return "STRING";
+        case TypeKind::ZStringT: return "ZSTRING";
+        case TypeKind::UserDefined: return type.typeName;
+        case TypeKind::Pointer:
+            return (type.pointee ? basicTypeName(*type.pointee) : std::string("ANY")) + " PTR";
+        case TypeKind::Unknown: return "INTEGER"; // unreachable for a resolved signature
+    }
+    return "INTEGER";
+}
+
+std::string Codegen::generateLibraryInterface(const Module& module, const std::string& libName) {
+    std::ostringstream typesText;
+    std::ostringstream declsText;
+    std::ostringstream skippedText;
+
+    for (const auto& stmtPtr : module.stmts) {
+        const Stmt& stmt = *stmtPtr;
+        if ((stmt.kind == StmtKind::TypeDecl || stmt.kind == StmtKind::UnionDecl) &&
+            stmt.methods.empty() && stmt.baseTypeName.empty()) {
+            // A plain-data or opaque record (no methods/ctor/dtor, no
+            // EXTENDS) - safe to duplicate verbatim across translation
+            // units, exactly like a C header's struct definition is. A
+            // record with methods is not (yet) exportable across a
+            // library boundary - skipped here, deferred.
+            typesText << (stmt.kind == StmtKind::UnionDecl ? "UNION " : "TYPE ") << stmt.name << "\n";
+            for (const FieldDecl& field : stmt.fields) {
+                typesText << "    " << field.name << " AS " << basicTypeName(field.type) << "\n";
+            }
+            typesText << (stmt.kind == StmtKind::UnionDecl ? "END UNION" : "END TYPE") << "\n\n";
+        } else if ((stmt.kind == StmtKind::SubDecl || stmt.kind == StmtKind::FunctionDecl) &&
+                   stmt.ownerType.empty() && !stmt.isExtern) {
+            // Only export a signature whose C++ representation is
+            // identical whether declared normally or via Extern/Declare -
+            // true for primitives, ZSTRING, Pointer, and a plain-data/
+            // opaque UserDefined type, but NOT for STRING: an ordinary
+            // FUNCTION/SUB compiles a STRING parameter/return to a real
+            // BString (by BYREF default), while an Extern Declare's
+            // ZSTRING would compile to a bare `const char*` - the same
+            // Alias-matched symbol name would then be called with the
+            // wrong argument representation entirely (not just a pointer
+            // difference - BString is a non-trivial class), a real,
+            // silent ABI mismatch rather than a merely cosmetic one. This
+            // is a deliberate scope cut, not an oversight: exporting a
+            // STRING-using procedure safely would need an auto-generated
+            // ZSTRING<->BString marshaling shim at the boundary, not just
+            // a re-declared prototype.
+            bool hasStringSignature = stmt.declaredType.kind == TypeKind::StringT;
+            for (const Param& p : stmt.params) {
+                if (p.type.kind == TypeKind::StringT) hasStringSignature = true;
+            }
+            if (hasStringSignature) {
+                skippedText << "' (not exported: '" << stmt.name
+                            << "' uses STRING, which needs a marshaling shim not yet implemented)\n";
+                continue;
+            }
+            bool isFunction = stmt.kind == StmtKind::FunctionDecl;
+            declsText << "    Declare " << (isFunction ? "Function " : "Sub ") << stmt.name
+                      << " Alias \"" << mangleName(stmt.name) << "\" (";
+            for (size_t i = 0; i < stmt.params.size(); ++i) {
+                if (i > 0) declsText << ", ";
+                const Param& p = stmt.params[i];
+                declsText << (p.byRef ? "ByRef " : "ByVal ") << p.name << " AS " << basicTypeName(p.type);
+            }
+            declsText << ")";
+            if (isFunction) declsText << " AS " << basicTypeName(stmt.declaredType);
+            declsText << "\n";
+        }
+    }
+
+    std::ostringstream out;
+    out << "' Auto-generated interface for library '" << libName << "' - do not edit by hand.\n\n";
+    out << typesText.str();
+    if (!skippedText.str().empty()) out << skippedText.str() << "\n";
+    out << "Extern \"C++\" Lib \"" << libName << "\"\n";
+    out << declsText.str();
+    out << "End Extern\n";
     return out.str();
 }
 

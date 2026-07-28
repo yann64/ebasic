@@ -104,6 +104,9 @@ struct PPState {
     // Canonical absolute paths currently being expanded (i.e. an ancestor
     // #include is still open), for circular-#include detection.
     std::vector<std::string> activeStack;
+    // M5: extra search paths, consulted in order only after the normal
+    // includer-relative lookup fails - see preprocess()'s doc comment.
+    std::vector<std::string> includeDirs;
 };
 
 void expandSource(PPState& state, const std::string& source, int fileId, const fs::path& dir,
@@ -129,6 +132,21 @@ void handleInclude(PPState& state, const std::string& rawArg, const fs::path& di
 
     std::error_code ec;
     fs::path canonical = fs::canonical(resolved, ec);
+    // M5: only fall back to the -I search list for a relative path whose
+    // includer-relative lookup just failed - an absolute path has nowhere
+    // else to resolve against, and a successful includer-relative lookup
+    // always wins outright (matches a C/C++ compiler's own quote-include
+    // search order: includer's directory first, -I list second).
+    if (ec && !requested.is_absolute()) {
+        for (const std::string& searchDir : state.includeDirs) {
+            fs::path candidate = fs::path(searchDir) / requested;
+            fs::path candidateCanonical = fs::canonical(candidate, ec);
+            if (!ec) {
+                canonical = candidateCanonical;
+                break;
+            }
+        }
+    }
     if (ec) {
         state.diags.error(loc, "cannot open included file '" + pathArg + "'");
         out << "\n";
@@ -255,8 +273,8 @@ void expandSource(PPState& state, const std::string& source, int fileId, const f
 } // namespace
 
 PreprocessResult preprocess(const std::string& mainSource, const std::string& mainPath,
-                            DiagnosticEngine& diags) {
-    PPState state{diags, {}, {}, {}};
+                            DiagnosticEngine& diags, const std::vector<std::string>& includeDirs) {
+    PPState state{diags, {}, {}, {}, includeDirs};
     int fileId = diags.registerFile(mainPath);
 
     std::error_code ec;

@@ -29,6 +29,15 @@ struct Options {
     // has to come from outside the .bas source, exactly like g++'s own
     // -L/-l split.
     std::vector<std::string> libDirs;
+    // M5: build a library (static archive + auto-generated interface file)
+    // instead of an executable - see printUsage for the exact output shape.
+    bool libMode = false;
+    // M5: extra #include search paths (`-I <dir>`, repeatable) - a fallback
+    // only, consulted after the includer-relative lookup fails (see
+    // preprocess()'s doc comment). Lets a package's source #include a
+    // dependency's auto-generated interface file without knowing its exact
+    // relative filesystem path.
+    std::vector<std::string> includeDirs;
 };
 
 bool parseArgs(int argc, char** argv, Options& opts, std::string& err) {
@@ -53,8 +62,16 @@ bool parseArgs(int argc, char** argv, Options& opts, std::string& err) {
                 return false;
             }
             opts.libDirs.push_back(args[++i]);
+        } else if (a == "-I") {
+            if (i + 1 >= args.size()) {
+                err = "-I requires an argument";
+                return false;
+            }
+            opts.includeDirs.push_back(args[++i]);
         } else if (a == "--keep-cpp") {
             opts.keepCpp = true;
+        } else if (a == "--lib") {
+            opts.libMode = true;
         } else if (!a.empty() && a[0] == '-') {
             err = "unknown option: " + a;
             return false;
@@ -74,7 +91,41 @@ bool parseArgs(int argc, char** argv, Options& opts, std::string& err) {
 }
 
 void printUsage(std::ostream& os) {
-    os << "usage: ebc <input.bas> [-o <output>] [-cxx <compiler>] [-L <dir>]... [--keep-cpp]\n";
+    os << "usage: ebc <input.bas> [-o <output>] [-cxx <compiler>] [-L <dir>]... [-I <dir>]...\n";
+    os << "           [--keep-cpp] [--lib]\n";
+    os << "  --lib: build a library instead of an executable - <output> is a bare\n";
+    os << "  name; produces lib<output>.a (a static archive) and <output>.iface.bas\n";
+    os << "  (an auto-generated interface for dependent packages to #include).\n";
+    os << "  -I <dir>: extra #include search path, consulted only after the\n";
+    os << "  includer-relative lookup fails.\n";
+}
+
+// M5 (--lib mode): a library's object file must never define `main` itself
+// (it would collide with the consuming package's own `main` at final link
+// time), so its module may only contain declarations - no top-level
+// executable statement (PRINT, assignment, IF, a loop, ...). Checked
+// structurally here, directly against the parsed module, rather than
+// threading a new mode flag through Sema.
+bool hasOnlyLibDeclarations(const ebasic::Module& module, std::string& err) {
+    for (const auto& stmtPtr : module.stmts) {
+        switch (stmtPtr->kind) {
+            case ebasic::StmtKind::Dim:
+            case ebasic::StmtKind::Const:
+            case ebasic::StmtKind::Enum:
+            case ebasic::StmtKind::SubDecl:
+            case ebasic::StmtKind::FunctionDecl:
+            case ebasic::StmtKind::TypeDecl:
+            case ebasic::StmtKind::UnionDecl:
+            case ebasic::StmtKind::NamespaceDecl:
+                continue;
+            default:
+                err = "line " + std::to_string(stmtPtr->loc.line) +
+                      ": a --lib build may only contain declarations (DIM/CONST/ENUM/SUB/"
+                      "FUNCTION/TYPE/UNION/NAMESPACE) at the top level, not executable code";
+                return false;
+        }
+    }
+    return true;
 }
 
 } // namespace
@@ -100,7 +151,8 @@ int main(int argc, char** argv) {
     ebasic::DiagnosticEngine diags;
     diags.registerFile(opts.inputPath); // fileId 0
 
-    ebasic::PreprocessResult preprocessed = ebasic::preprocess(rawSource, opts.inputPath, diags);
+    ebasic::PreprocessResult preprocessed =
+        ebasic::preprocess(rawSource, opts.inputPath, diags, opts.includeDirs);
     if (diags.hasErrors()) {
         diags.printAll(std::cerr);
         return 1;
@@ -127,8 +179,16 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    if (opts.libMode) {
+        std::string err;
+        if (!hasOnlyLibDeclarations(module, err)) {
+            std::cerr << "ebc: error: " << err << "\n";
+            return 1;
+        }
+    }
+
     ebasic::Codegen codegen;
-    std::string cpp = codegen.generate(module);
+    std::string cpp = codegen.generate(module, opts.libMode);
 
     if (opts.outputPath.empty()) {
         opts.outputPath = fs::path(opts.inputPath).stem().string();
@@ -146,22 +206,50 @@ int main(int argc, char** argv) {
         cxx = envCxx ? envCxx : "g++";
     }
 
-    std::vector<std::string> compileArgs = {
-        cxx, "-std=c++17", "-I", EBASIC_RUNTIME_INCLUDE_DIR, cppPath.string(), "-o", opts.outputPath,
-    };
-    for (const std::string& dir : opts.libDirs) {
-        compileArgs.push_back("-L");
-        compileArgs.push_back(dir);
-    }
-    // Library names from `Lib "name"` clauses (M4) - -l flags must come
-    // after the object/source files on the command line for a
-    // traditional (non-`--start-group`) linker to resolve symbols from
-    // them correctly.
-    for (const std::string& lib : codegen.externLibs()) {
-        compileArgs.push_back("-l" + lib);
-    }
+    int rc = 0;
+    if (opts.libMode) {
+        // M5: compile to an object file only (no main() to link into an
+        // executable - genuinely absent, see Codegen::generate's libMode),
+        // then archive it into a static lib alongside an auto-generated
+        // interface .bas file, exactly mirroring the M4 fixture-library
+        // pattern (transpile -> compile -> ar), just driven by ebc itself.
+        fs::path outDir = fs::path(opts.outputPath).parent_path();
+        std::string libName = fs::path(opts.outputPath).filename().string();
+        fs::path objPath = opts.outputPath + ".o";
+        fs::path archivePath = outDir / ("lib" + libName + ".a");
+        fs::path ifacePath = outDir / (libName + ".iface.bas");
 
-    int rc = ebasic::runProcess(compileArgs);
+        std::vector<std::string> compileArgs = {
+            cxx, "-std=c++17", "-I", EBASIC_RUNTIME_INCLUDE_DIR, "-c", cppPath.string(), "-o",
+            objPath.string(),
+        };
+        rc = ebasic::runProcess(compileArgs);
+        if (rc == 0) {
+            rc = ebasic::runProcess({"ar", "rcs", archivePath.string(), objPath.string()});
+        }
+        if (rc == 0) {
+            std::ofstream ifaceOut(ifacePath);
+            ifaceOut << codegen.generateLibraryInterface(module, libName);
+        }
+        std::error_code ec;
+        fs::remove(objPath, ec);
+    } else {
+        std::vector<std::string> compileArgs = {
+            cxx, "-std=c++17", "-I", EBASIC_RUNTIME_INCLUDE_DIR, cppPath.string(), "-o", opts.outputPath,
+        };
+        for (const std::string& dir : opts.libDirs) {
+            compileArgs.push_back("-L");
+            compileArgs.push_back(dir);
+        }
+        // Library names from `Lib "name"` clauses (M4) - -l flags must come
+        // after the object/source files on the command line for a
+        // traditional (non-`--start-group`) linker to resolve symbols from
+        // them correctly.
+        for (const std::string& lib : codegen.externLibs()) {
+            compileArgs.push_back("-l" + lib);
+        }
+        rc = ebasic::runProcess(compileArgs);
+    }
 
     if (!opts.keepCpp) {
         std::error_code ec;

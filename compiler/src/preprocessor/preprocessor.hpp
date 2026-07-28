@@ -31,7 +31,16 @@ struct PreprocessResult {
 //
 // `mainSource` is the already-read content of `mainPath` (the file main.cpp
 // opened); nested #include targets are read internally as encountered.
+//
+// `includeDirs` (M5): extra search paths consulted, in order, as a fallback
+// only when a quoted #include target can't be found relative to the
+// including file's own directory - never overriding that includer-relative
+// lookup, exactly like a C/C++ compiler's own `-I` list only ever backs up
+// the quote-form's primary, includer-relative search. Lets a package depend
+// on another package's directory (e.g. an auto-generated `.iface.bas`)
+// without needing to know its exact relative filesystem path.
 PreprocessResult preprocess(const std::string& mainSource, const std::string& mainPath,
-                            DiagnosticEngine& diags);
+                            DiagnosticEngine& diags,
+                            const std::vector<std::string>& includeDirs = {});
 
 } // namespace ebasic
