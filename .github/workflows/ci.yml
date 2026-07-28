@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux-gcc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake --preset linux-gcc
+      - name: Build
+        run: cmake --build --preset linux-gcc
+      - name: Test
+        run: ctest --preset linux-gcc
+
+  linux-clang:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang
+        run: sudo apt-get update && sudo apt-get install -y clang
+      - name: Configure
+        run: cmake --preset linux-clang
+      - name: Build
+        run: cmake --build --preset linux-clang
+      - name: Test
+        run: ctest --preset linux-clang
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake --preset macos
+      - name: Build
+        run: cmake --build --preset macos
+      - name: Test
+        run: ctest --preset macos
+
+  windows-mingw:
+    # M8b/M8c: MinGW port - run inside an MSYS2 (mingw64) shell rather than
+    # a native cmd/PowerShell prompt, matching how the "windows-mingw"
+    # CMake preset itself is designed (Unix Makefiles, plain g++/gcc). No
+    # MSVC job yet - deferred, see docs/architecture/roadmap.md's M8 notes.
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git
+            make
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+      - name: Configure
+        run: cmake --preset windows-mingw
+      - name: Build
+        run: cmake --build --preset windows-mingw
+      - name: Test
+        run: ctest --preset windows-mingw
+
+  # Haiku is not part of this matrix - no GitHub-hosted Haiku image exists.
+  # The real path to Haiku CI is registering the SSH-reachable box as a
+  # self-hosted runner once access is established (M8e) - see
+  # docs/architecture/roadmap.md's M8e notes.
