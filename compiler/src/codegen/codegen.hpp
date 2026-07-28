@@ -129,6 +129,13 @@ private:
     std::unordered_set<std::string> namespaces_;
     // See the public externLibs() accessor.
     std::vector<std::string> externLibs_;
+    // Canonical BASIC name -> real external symbol name (the `Alias`, or
+    // the declared name as-is), computed once up front in generate() for
+    // every top-level `isExtern` SubDecl/FunctionDecl (M4). A call site
+    // referencing one of these must emit the real name verbatim - never
+    // through mangleName, which would rename it to something the linker
+    // can't find in the external library at all.
+    std::unordered_map<std::string, std::string> externProcNames_;
     // Canonical TYPE name -> its EXTENDS base's canonical name (empty if
     // none), computed once up front in generate(). Needed to resolve
     // `Base.Method(args)` to a qualified non-virtual call

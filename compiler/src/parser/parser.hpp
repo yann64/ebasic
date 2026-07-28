@@ -57,6 +57,17 @@ private:
     // untouched) if the current token isn't an overloadable operator.
     bool matchBinOpSymbol(BinOp& out);
     StmtPtr parseNamespaceDecl();
+    // `Extern "C"|"C++" [Lib "name"] ... End Extern` (M4) - yields multiple
+    // top-level Stmts (one per Declare line inside), appended directly to
+    // `out` rather than returned singly. Only ever called from
+    // parseModule()'s top-level loop.
+    void parseExternBlock(std::vector<StmtPtr>& out);
+    // One `Declare Sub/Function Name (...) [As type] [Cdecl] [Alias "x"]
+    // [Lib "y"]` line - a bodyless, extern signature (M4). `defaultLinkage`/
+    // `defaultLib` come from the enclosing Extern block (if any); a
+    // standalone (non-block) Declare passes "C" (the only linkage a
+    // standalone Declare can produce in real FreeBASIC too) and "".
+    StmtPtr parseExternDecl(const std::string& defaultLinkage, const std::string& defaultLib);
     std::vector<Param> parseParamList();
 
     // Parses an Identifier's trailing chain of `.field` (Member) and, for
@@ -97,6 +108,9 @@ private:
     // parseAssign recognize `FuncName = value` as a return-value assignment
     // rather than a regular variable assignment.
     std::string currentFunctionName_;
+    // Library names collected from `Lib "name"` clauses (M4), moved into
+    // Module::externLibs once parseModule() finishes.
+    std::vector<std::string> externLibs_;
 };
 
 } // namespace ebasic

@@ -101,3 +101,8 @@ add_test(
     NAME e2e_operators
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/operators
 )
+
+add_test(
+    NAME e2e_extern_c
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/extern_c ${EBASIC_FIXTURE_LIB_DIR}
+)

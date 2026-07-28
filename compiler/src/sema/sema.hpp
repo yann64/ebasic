@@ -97,6 +97,16 @@ private:
     // match on both operand types (no promotion/coercion), per the plan's
     // "keep this narrow" guidance.
     std::string operatorKey(BinOp op, const Type& lhs, const Type& rhs) const;
+    // Rejects a STRING (use ZSTRING instead) or a non-standard-layout
+    // UserDefined TYPE (one with a constructor, destructor, or virtual
+    // method) used as a parameter/return type on an `isExtern` signature
+    // (M4) - both silently break C-ABI compatibility rather than failing
+    // to compile, so this is a Sema diagnostic instead of a bizarre
+    // runtime corruption. Run after collectTypes (needs structs_
+    // populated). A TYPE with no fields/methods at all (M4d's opaque
+    // "handle" types) has no ctor/dtor/virtual method by construction, so
+    // it's already allowed through with no special-casing needed here.
+    void collectExternSignatureChecks(std::vector<StmtPtr>& stmts);
     void checkBlock(std::vector<StmtPtr>& stmts, bool atTopLevel);
     void checkStmt(Stmt& stmt, bool atTopLevel);
     void checkCondition(Expr& expr, const char* what);

@@ -30,6 +30,7 @@ std::string Codegen::cppType(const Type& type) {
         case TypeKind::Double: return "double";
         case TypeKind::Boolean: return "std::int8_t";
         case TypeKind::StringT: return "::ebasic::rt::BString";
+        case TypeKind::ZStringT: return "const char*";
         // A TYPE and a variable can never share a name (Sema shares one
         // namespace for both), so reusing mangleName for the struct's own
         // name can't collide with any variable's mangled name.
@@ -131,7 +132,12 @@ std::string Codegen::genExpr(const Expr& expr) {
                 return mangleName(expr.stringValue) + "[static_cast<std::size_t>((" +
                        genExpr(*expr.args[0]) + ") - " + arrIt->second + ")]";
             }
-            std::string result = mangleName(expr.stringValue) + "(";
+            // An EXTERN/DECLARE-bound procedure (M4) must be called by its
+            // real external name, verbatim - never mangleName.
+            auto externIt = externProcNames_.find(key);
+            std::string calleeName = externIt != externProcNames_.end() ? externIt->second
+                                                                         : mangleName(expr.stringValue);
+            std::string result = calleeName + "(";
             for (size_t i = 0; i < expr.args.size(); ++i) {
                 if (i > 0) result += ", ";
                 result += genExpr(*expr.args[i]);
@@ -480,8 +486,16 @@ void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out, int indent) {
             // call (`eb_base::`), an obj.Method(args) receiver (`.`), or a
             // plain free-function call (no prefix).
             std::string prefix;
-            if (stmt.target) prefix = memberReceiverPrefix(*stmt.target);
-            out << ind(indent) << prefix << mangleName(stmt.name) << "(";
+            std::string calleeName = mangleName(stmt.name);
+            if (stmt.target) {
+                prefix = memberReceiverPrefix(*stmt.target);
+            } else {
+                // An EXTERN/DECLARE-bound procedure (M4) must be called by
+                // its real external name, verbatim - never mangleName.
+                auto externIt = externProcNames_.find(canonicalName(stmt.name));
+                if (externIt != externProcNames_.end()) calleeName = externIt->second;
+            }
+            out << ind(indent) << prefix << calleeName << "(";
             for (size_t i = 0; i < stmt.args.size(); ++i) {
                 if (i > 0) out << ", ";
                 out << genExpr(*stmt.args[i]);
@@ -637,6 +651,25 @@ std::string Codegen::cppOperatorToken(BinOp op) {
 void Codegen::genProcedure(const Stmt& stmt) {
     bool isFunction = stmt.kind == StmtKind::FunctionDecl;
     std::string retType = isFunction ? cppType(stmt.declaredType) : "void";
+
+    if (stmt.isExtern) {
+        // A DECLARE/EXTERN signature (M4): no eBasic-side body at all - the
+        // real definition lives in an external C/C++ library, so only a
+        // prototype is ever emitted, using the real external name
+        // *verbatim* (never mangleName, which would rename it to something
+        // the linker can't find). "C" linkage needs `extern "C"` so the
+        // real symbol isn't C++-mangled; "C++" linkage needs no wrapping at
+        // all - it's already a normal, real C++ declaration, the concrete
+        // payoff of transpiling to real C++ rather than emulating mangling.
+        std::string externName = stmt.externAlias.empty() ? stmt.name : stmt.externAlias;
+        std::string paramList = buildParamList(stmt.params);
+        bool wrapC = stmt.externLinkage == "C";
+        if (wrapC) protoOut_ << "extern \"C\" {\n";
+        protoOut_ << retType << " " << externName << "(" << paramList << ");\n";
+        if (wrapC) protoOut_ << "}\n";
+        return;
+    }
+
     std::string name = stmt.isOperator ? ("operator" + cppOperatorToken(stmt.operatorBinOp))
                                         : mangleName(stmt.name);
     std::string paramList =
@@ -769,6 +802,9 @@ std::string Codegen::generate(const Module& module) {
             }
         } else if (stmtPtr->kind == StmtKind::NamespaceDecl) {
             namespaces_.insert(canonicalName(stmtPtr->name));
+        } else if (stmtPtr->isExtern) {
+            externProcNames_[canonicalName(stmtPtr->name)] =
+                stmtPtr->externAlias.empty() ? stmtPtr->name : stmtPtr->externAlias;
         }
     }
 

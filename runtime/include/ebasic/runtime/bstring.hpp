@@ -12,8 +12,20 @@ namespace ebasic::rt {
 class BString {
 public:
     BString() = default;
-    BString(const char* s) : data_(s) {}
+    // Null-safe: constructing std::string from nullptr is UB, and a null
+    // C string is a real, expected value at an M4 EXTERN/ZSTRING boundary
+    // (e.g. a C function documented to return NULL on failure) - treated
+    // as an empty BASIC string rather than crashing.
+    BString(const char* s) : data_(s ? s : "") {}
     BString(std::string s) : data_(std::move(s)) {}
+
+    // Implicit conversion to a C string, for passing a STRING-typed
+    // argument to a ZSTRING/ZSTRING PTR parameter (M4) - FreeBASIC's own
+    // documented rule is that any string type argument may be passed
+    // directly to a `zstring ptr` parameter. Letting C++'s own
+    // copy-initialization rules perform this conversion at the call site
+    // means Codegen needs no per-argument marshaling logic at all.
+    operator const char*() const { return data_.c_str(); }
 
     BString operator+(const BString& other) const {
         return BString(data_ + other.data_);

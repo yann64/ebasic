@@ -56,6 +56,7 @@ void Sema::check(Module& module) {
     collectProcedures(module.stmts);
     collectTypes(module.stmts);
     collectOperators(module.stmts);
+    collectExternSignatureChecks(module.stmts);
     collectGosubUsage(module.stmts);
     checkBlock(module.stmts, /*atTopLevel=*/true);
 }
@@ -442,6 +443,43 @@ void Sema::collectOperators(std::vector<StmtPtr>& stmts) {
     }
 }
 
+void Sema::collectExternSignatureChecks(std::vector<StmtPtr>& stmts) {
+    auto checkType = [&](const Type& type, SourceLoc loc, const std::string& what) {
+        if (type.kind == TypeKind::StringT) {
+            diags_.error(loc, what + " cannot be STRING in an EXTERN/DECLARE signature - use "
+                               "ZSTRING (or ZSTRING PTR) for a C-compatible string");
+            return;
+        }
+        if (type.kind != TypeKind::UserDefined) return;
+        auto it = structs_.find(canonicalName(type.typeName));
+        if (it == structs_.end()) return; // unknown type; already reported elsewhere
+        bool hasVirtualMethod = false;
+        for (const auto& [methodName, proc] : it->second.methods) {
+            (void)methodName;
+            if (proc.isVirtual) {
+                hasVirtualMethod = true;
+                break;
+            }
+        }
+        if (it->second.hasCtor || it->second.hasDtor || hasVirtualMethod) {
+            diags_.error(loc, what + " TYPE '" + type.typeName + "' has a constructor, "
+                               "destructor, or virtual method and is not C-ABI-compatible - only "
+                               "plain, standard-layout TYPEs (or an opaque TYPE used via PTR) can "
+                               "cross an EXTERN boundary");
+        }
+    };
+
+    for (auto& stmt : stmts) {
+        if (!stmt->isExtern) continue;
+        for (const Param& p : stmt->params) {
+            checkType(p.type, p.loc, "parameter '" + p.name + "'");
+        }
+        if (stmt->kind == StmtKind::FunctionDecl) {
+            checkType(stmt->declaredType, stmt->loc, "the return type");
+        }
+    }
+}
+
 void Sema::collectLabels(std::vector<StmtPtr>& stmts) {
     for (auto& stmt : stmts) {
         if (stmt->kind != StmtKind::Label) continue;
@@ -610,9 +648,17 @@ bool Sema::isAssignCompatible(const Type& targetType, const Type& valueType) con
         return targetIsPtr && isIntegerFamily(valueType.kind);
     }
 
-    bool targetIsString = targetType.kind == TypeKind::StringT;
-    bool valueIsString = valueType.kind == TypeKind::StringT;
-    if (targetIsString != valueIsString) return false;
+    // STRING and ZSTRING are mutually assign-compatible (verified against
+    // FB docs: any string type argument may be passed directly to a
+    // ZSTRING PTR parameter) - the actual marshaling in both directions is
+    // handled entirely by BString's own implicit `const char*` conversion
+    // operator and its `BString(const char*)` constructor in the generated
+    // C++ (M4), so this is purely a type-compatibility rule; Codegen needs
+    // no per-call conversion logic. Neither is compatible with anything
+    // else (numeric, UserDefined, ...).
+    bool targetIsStringLike = targetType.kind == TypeKind::StringT || targetType.kind == TypeKind::ZStringT;
+    bool valueIsStringLike = valueType.kind == TypeKind::StringT || valueType.kind == TypeKind::ZStringT;
+    if (targetIsStringLike || valueIsStringLike) return targetIsStringLike && valueIsStringLike;
 
     bool targetIsUser = targetType.kind == TypeKind::UserDefined;
     bool valueIsUser = valueType.kind == TypeKind::UserDefined;

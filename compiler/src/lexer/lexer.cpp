@@ -163,6 +163,11 @@ Token Lexer::lexIdentifierOrKeyword() {
         {"BASE", TokenKind::KwBase},
         {"PROPERTY", TokenKind::KwProperty},
         {"OPERATOR", TokenKind::KwOperator},
+        {"EXTERN", TokenKind::KwExtern},
+        {"LIB", TokenKind::KwLib},
+        {"ALIAS", TokenKind::KwAlias},
+        {"CDECL", TokenKind::KwCdecl},
+        {"ZSTRING", TokenKind::KwZString},
     };
 
     auto it = keywords.find(upper);

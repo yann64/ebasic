@@ -63,10 +63,20 @@ Module Parser::parseModule() {
     Module module;
     skipNewlines();
     while (!check(TokenKind::End)) {
-        StmtPtr stmt = parseStatement();
-        if (stmt) module.stmts.push_back(std::move(stmt));
+        // An EXTERN block (M4) yields multiple top-level Stmts (one per
+        // Declare line) - handled directly here rather than through
+        // parseStatement()'s one-Stmt-per-call contract, and restricted to
+        // module scope (matches real FreeBASIC - EXTERN is a declarative,
+        // top-level-only construct, not legal inside a SUB/FUNCTION body).
+        if (check(TokenKind::KwExtern)) {
+            parseExternBlock(module.stmts);
+        } else {
+            StmtPtr stmt = parseStatement();
+            if (stmt) module.stmts.push_back(std::move(stmt));
+        }
         skipNewlines();
     }
+    module.externLibs = std::move(externLibs_);
     return module;
 }
 
@@ -85,6 +95,7 @@ Type Parser::parseTypeKeyword() {
     else if (match(TokenKind::KwDouble)) base = TypeKind::Double;
     else if (match(TokenKind::KwBoolean)) base = TypeKind::Boolean;
     else if (match(TokenKind::KwString)) base = TypeKind::StringT;
+    else if (match(TokenKind::KwZString)) base = TypeKind::ZStringT;
     else if (match(TokenKind::KwAny)) {
         // ANY PTR is FB's untyped/void*-equivalent pointer; ANY alone is not
         // a usable type. Represented as Pointer with a null pointee.
@@ -379,6 +390,97 @@ StmtPtr Parser::parseNamespaceDecl() {
     return stmt;
 }
 
+void Parser::parseExternBlock(std::vector<StmtPtr>& out) {
+    advance(); // EXTERN
+    const Token& linkageTok =
+        expect(TokenKind::StringLiteral, "expected \"C\" or \"C++\" after EXTERN");
+    std::string linkage = linkageTok.text;
+    if (linkage != "C" && linkage != "C++") {
+        diags_.error(linkageTok.loc, "EXTERN linkage must be \"C\" or \"C++\"");
+        linkage = "C";
+    }
+
+    std::string lib;
+    if (match(TokenKind::KwLib)) {
+        lib = expect(TokenKind::StringLiteral, "expected a library name string after LIB").text;
+        externLibs_.push_back(lib);
+    }
+    expectStmtEnd();
+    skipNewlines();
+
+    while (!check(TokenKind::KwEnd) && !check(TokenKind::End)) {
+        if (!check(TokenKind::KwDeclare)) {
+            diags_.error(peek().loc, "expected DECLARE inside an EXTERN block");
+            synchronize();
+            continue;
+        }
+        out.push_back(parseExternDecl(linkage, lib));
+        skipNewlines();
+    }
+    expect(TokenKind::KwEnd, "expected END EXTERN");
+    expect(TokenKind::KwExtern, "expected END EXTERN");
+    expectStmtEnd();
+}
+
+StmtPtr Parser::parseExternDecl(const std::string& defaultLinkage, const std::string& defaultLib) {
+    SourceLoc loc = peek().loc;
+    advance(); // DECLARE
+
+    bool isFunction = false;
+    if (match(TokenKind::KwSub)) {
+        isFunction = false;
+    } else if (match(TokenKind::KwFunction)) {
+        isFunction = true;
+    } else {
+        diags_.error(peek().loc, "expected SUB or FUNCTION after DECLARE");
+    }
+
+    const Token& nameTok = expect(TokenKind::Identifier, "expected a name after DECLARE SUB/FUNCTION");
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->kind = isFunction ? StmtKind::FunctionDecl : StmtKind::SubDecl;
+    stmt->loc = loc;
+    stmt->name = nameTok.text;
+    stmt->isExtern = true;
+    stmt->externLinkage = defaultLinkage;
+    stmt->externLib = defaultLib;
+    stmt->externAlias = nameTok.text; // default: the declared name, as-is
+
+    // Verified real FreeBASIC order: Name [Cdecl] [Lib "name"] [Alias
+    // "name"] (params) As type - the calling-convention/Lib/Alias clauses
+    // all come *before* the parameter list, not after (confirmed against
+    // real examples like `Declare Function strcpy CDecl Alias "strcpy"
+    // (...) As ZString Ptr`). Meaningful on the standalone form; harmless
+    // if repeated inside a block (the block's own linkage/lib already
+    // apply, so re-stating Cdecl/Lib here is a no-op, not an error) -
+    // Alias, though, is commonly still needed per-line even inside a
+    // block, since case-sensitivity mismatches are per-function.
+    if (match(TokenKind::KwCdecl)) {
+        // Cdecl ("C" linkage) is the only calling convention this version
+        // supports (Stdcall/Windows is deferred to M8's Windows port) - and
+        // the only one a standalone Declare can produce in real FreeBASIC
+        // too; "C++" linkage is only reachable via an Extern "C++" block.
+        stmt->externLinkage = "C";
+    }
+    if (match(TokenKind::KwLib)) {
+        stmt->externLib =
+            expect(TokenKind::StringLiteral, "expected a library name string after LIB").text;
+        externLibs_.push_back(stmt->externLib);
+    }
+    if (match(TokenKind::KwAlias)) {
+        stmt->externAlias = expect(TokenKind::StringLiteral, "expected a string after ALIAS").text;
+    }
+
+    stmt->params = parseParamList();
+    if (isFunction) {
+        expect(TokenKind::KwAs, "expected AS <return type> after the parameter list");
+        stmt->declaredType = parseTypeKeyword();
+    }
+
+    expectStmtEnd();
+    return stmt;
+}
+
 StmtPtr Parser::parsePrint() {
     SourceLoc loc = peek().loc;
     advance(); // PRINT
@@ -549,6 +651,12 @@ StmtPtr Parser::parseStatement() {
     if (check(TokenKind::KwDestructor)) return parseDestructor();
     if (check(TokenKind::KwProperty)) return parseProperty();
     if (check(TokenKind::KwOperator)) return parseOperatorDecl();
+    // A standalone (non-block) top-level DECLARE - a bodyless EXTERN
+    // signature (M4). Not to be confused with `Declare Sub/Function/
+    // Constructor/Destructor/Property` inside a TYPE body, which is parsed
+    // entirely separately by parseMethodPrototype() from within
+    // parseRecordDecl()'s own loop and never reaches this dispatch.
+    if (check(TokenKind::KwDeclare)) return parseExternDecl("C", "");
     if (check(TokenKind::KwCall)) return parseCallStmt();
     if (check(TokenKind::KwReturn)) return parseReturn();
     if (check(TokenKind::Identifier) && peek(1).kind == TokenKind::Newline &&

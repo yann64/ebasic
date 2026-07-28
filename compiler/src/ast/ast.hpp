@@ -32,6 +32,17 @@ enum class TypeKind {
     Double,
     Boolean,
     StringT,
+    // A C-compatible, null-terminated string (M4): `cppType` maps it
+    // straight to `const char*` (no separate "ZSTRING PTR" indirection
+    // needed for the common case - `ZSTRING PTR` still works too, via the
+    // ordinary Pointer-with-ZStringT-pointee path, meaning "pointer to a
+    // ZSTRING", e.g. a `char**`-shaped parameter). Bidirectionally
+    // assign-compatible with StringT: BString's own implicit `const
+    // char*` conversion operator and its `BString(const char*)`
+    // constructor do the actual marshaling in the generated C++, so
+    // neither Sema nor Codegen needs any per-call conversion logic beyond
+    // allowing the assignment.
+    ZStringT,
     UserDefined, // a TYPE/CLASS instance; see Type::typeName
     Pointer,     // a PTR type; see Type::pointee (not used until M3c)
 };
@@ -426,6 +437,22 @@ struct Stmt {
     // the two params' types, not by name.
     bool isOperator = false;
     BinOp operatorBinOp = BinOp::Add;
+
+    // `Declare Sub/Function ...` at the top level (standalone, or inside an
+    // `Extern ... End Extern` block) - a signature with no eBasic-side
+    // body at all (M4); the real definition lives in an external C/C++
+    // library. Always top-level (`ownerType` empty) - a genuinely
+    // different case from M3e's "declared in TYPE, defined out-of-line in
+    // this same file" methods, which still get a body eventually.
+    bool isExtern = false;
+    std::string externLinkage; // "C" or "C++"
+    // The real external symbol name, exactly as it must appear to the
+    // linker (case preserved, no namespace mangling) - sourced from an
+    // `Alias "name"` clause if given, else `name` itself as written.
+    // Codegen must emit this verbatim (never through mangleName) for both
+    // the prototype and every call site.
+    std::string externAlias;
+    std::string externLib; // a `Lib "name"` clause; empty = none given
 };
 
 struct Module {

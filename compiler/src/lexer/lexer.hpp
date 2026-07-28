@@ -102,6 +102,11 @@ enum class TokenKind {
     KwBase,
     KwProperty,
     KwOperator,
+    KwExtern,
+    KwLib,
+    KwAlias,
+    KwCdecl,
+    KwZString,
 };
 
 struct Token {
