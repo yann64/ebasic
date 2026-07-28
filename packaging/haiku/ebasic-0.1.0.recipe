@@ -1,0 +1,60 @@
+SUMMARY="A from-scratch BASIC-to-C++ transpiler with a package manager"
+DESCRIPTION="eBasic compiles a modern, statically-typed BASIC dialect (with \
+TYPE-based OOP, C/C++ interop, and a Cargo-style package manager, ebpm) down \
+to C++ source, then invokes the system C++ compiler to produce a native \
+executable. Ships three tools: ebc (the compiler driver), ebpm (the package \
+manager), and docgen (doc-comment -> Markdown generator)."
+HOMEPAGE="https://github.com/yann64/ebasic"
+COPYRIGHT="2026 yann64"
+LICENSE="MIT"
+REVISION="1"
+
+# Draft recipe (M8e) - written and dry-run-verified against real Haiku
+# hardware (haikuporter's own recipe-format conventions, cross-checked
+# against app-arch/brotli's real recipe), but not yet submitted upstream.
+# No tagged release exists yet, so SOURCE_URI/CHECKSUM_SHA256 below are
+# placeholders to fill in once v0.1.0 is actually tagged - update both
+# together when that happens, haikuporter refuses to build otherwise.
+SOURCE_URI="https://github.com/yann64/ebasic/archive/refs/tags/v$portVersion.tar.gz"
+CHECKSUM_SHA256="TODO-fill-in-once-v$portVersion-is-tagged"
+SOURCE_FILENAME="ebasic-$portVersion.tar.gz"
+
+ARCHITECTURES="all !x86_gcc2"
+
+PROVIDES="
+	ebasic = $portVersion
+	cmd:ebc = $portVersion
+	cmd:ebpm = $portVersion
+	cmd:docgen = $portVersion
+	"
+REQUIRES="
+	haiku
+	"
+
+BUILD_PREREQUIRES="
+	cmd:cmake
+	cmd:g++
+	cmd:gcc
+	cmd:make
+	"
+
+BUILD()
+{
+	cmake \
+		-B build -S . \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_INSTALL_BINDIR=$binDir \
+		-DCMAKE_INSTALL_DATADIR=data
+
+	make -C build $jobArgs
+}
+
+INSTALL()
+{
+	make -C build install
+}
+
+TEST()
+{
+	ctest --test-dir build --output-on-failure
+}
