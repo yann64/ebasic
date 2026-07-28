@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="console-application">
+  <id>io.github.yann64.ebasic</id>
+  <name>eBasic</name>
+  <summary>BASIC-to-C++ transpiler with package manager and doc generator</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="io.github.yann64">
+    <name>eBasic contributors</name>
+  </developer>
+  <description>
+    <p>
+      eBasic is an extended dialect of the BASIC programming language,
+      transpiled to C++ and compiled with a real backend compiler
+      (g++/clang++). Same syntax as FreeBASIC, reimplemented from scratch,
+      with TYPE-based OOP, C/C++ interop, namespaces, and a Cargo-style
+      package manager.
+    </p>
+    <p>This package provides three tools:</p>
+    <ul>
+      <li>ebc: the compiler driver</li>
+      <li>ebpm: the package manager</li>
+      <li>docgen: doc-comment ('''-marked) to Markdown/HTML generator</li>
+    </ul>
+  </description>
+  <url type="homepage">https://github.com/yann64/ebasic</url>
+  <provides>
+    <binary>ebc</binary>
+    <binary>ebpm</binary>
+    <binary>docgen</binary>
+  </provides>
+  <releases>
+    <release version="0.1.0" date="2026-07-28"/>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>

@@ -18,4 +18,12 @@ int runProcess(const std::vector<std::string>& args);
 /// status.
 int runProcessCaptureOutput(const std::vector<std::string>& args, std::string& output);
 
+/// Wraps `args` with `flatpak-spawn --host` when running inside a Flatpak
+/// sandbox (detected via /.flatpak-info), a no-op everywhere else. Callers
+/// opt into this explicitly for a genuine *host*-side tool (the backend
+/// compiler, `ar`, `git`) - never for a call to one of this project's own
+/// bundled binaries, which must keep running inside the sandbox. See
+/// process.cpp's own doc comment for why this isn't applied automatically.
+std::vector<std::string> hostExecArgs(const std::vector<std::string>& args);
+
 } // namespace ebasic

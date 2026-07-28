@@ -1,5 +1,7 @@
 #include "driver/process.hpp"
 
+#include <filesystem>
+
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -8,6 +10,34 @@
 #endif
 
 namespace ebasic {
+
+/// Real host-execution mechanism for a Flatpak-sandboxed process: file
+/// access alone (--filesystem=host, see
+/// packaging/flatpak/io.github.yann64.ebasic.json) does NOT put host
+/// binaries on the sandboxed process's own PATH - a bare exec of "g++"
+/// fails with "not found" even though the runtime/build image has no
+/// compiler at all. `flatpak-spawn --host` is the real, standard mechanism
+/// Flatpak apps use to run a command on the host instead (needs
+/// --talk-name=org.freedesktop.Flatpak) - confirmed necessary by actually
+/// installing and running the packaged app, not assumed from documentation.
+/// `/.flatpak-info` is the standard marker file every Flatpak sandbox
+/// exposes internally.
+///
+/// Deliberately **not** applied automatically inside runProcess/
+/// runProcessCaptureOutput - it must only wrap calls to a genuine *host*
+/// tool (the backend compiler, `ar`, `git`), never a call to one of this
+/// project's own bundled binaries (`ebpm` invoking its own sandboxed
+/// `ebc`, for instance) - confirmed live: wrapping every call
+/// indiscriminately broke exactly that case (`flatpak-spawn --host ebc`
+/// fails, since `ebc` only exists inside the sandbox, not on the host).
+/// Each call site opts in explicitly, so the meaning of "run this on the
+/// host" stays a per-call decision, not a blanket one.
+std::vector<std::string> hostExecArgs(const std::vector<std::string>& args) {
+    if (!std::filesystem::exists("/.flatpak-info")) return args;
+    std::vector<std::string> withSpawn = {"flatpak-spawn", "--host"};
+    withSpawn.insert(withSpawn.end(), args.begin(), args.end());
+    return withSpawn;
+}
 
 #ifdef _WIN32
 

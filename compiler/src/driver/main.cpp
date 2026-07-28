@@ -173,6 +173,37 @@ fs::path resolveOwnExecutablePath(const std::string& argv0) {
     return p;
 }
 
+/// Flatpak sandbox only: a host-spawned backend compiler (see
+/// ebasic::hostExecArgs in process.cpp, used below when invoking it) runs
+/// in the HOST's own mount namespace, where the sandbox-only /app/... path
+/// passed as -I doesn't exist at all - confirmed live: g++ was found and
+/// invoked correctly via flatpak-spawn, but then failed with a plain "No
+/// such file or directory" on the runtime header, since /app is invisible
+/// outside the sandbox. --filesystem=host already shares $HOME identically
+/// between the sandbox and the host (confirmed live too - a file at
+/// ~/some/path is visible, and readable, on both sides) - so copying the
+/// runtime include/PCH directories into a host-visible cache directory
+/// once, keyed by version (so an app update naturally invalidates a stale
+/// copy), then handing the host compiler *that* path instead, sidesteps
+/// the mismatch entirely. A no-op everywhere else (docker/bare-metal/every
+/// other packaging format never has /.flatpak-info at all).
+fs::path stageRuntimeDirForFlatpak(const fs::path& dir, const std::string& kind) {
+    const char* home = std::getenv("HOME");
+    if (!home) return dir; // no host-visible location known - caller keeps the original path
+    std::string versionKey = ebasic::kProjectVersion;
+    if (ebasic::kGitHash[0] != '\0') {
+        versionKey += "-";
+        versionKey += ebasic::kGitHash;
+    }
+    fs::path cacheDir = fs::path(home) / ".cache" / "ebasic" / ("runtime-" + versionKey) / kind;
+    std::error_code ec;
+    if (!fs::exists(cacheDir, ec)) {
+        fs::create_directories(cacheDir, ec);
+        fs::copy(dir, cacheDir, fs::copy_options::recursive, ec);
+    }
+    return cacheDir;
+}
+
 /// M6/M8e: the runtime's PCH shadow directory and header include dir, added
 /// as extra -I entries (PCH dir first) so a plain
 /// `#include "ebasic/runtime/runtime.hpp"` automatically prefers a
@@ -193,13 +224,22 @@ std::vector<std::string> runtimeIncludeArgs(const std::string& argv0) {
     fs::path installedInclude = installedBase / "include";
     std::error_code ec;
     if (fs::exists(installedInclude / "ebasic" / "runtime" / "runtime.hpp", ec)) {
+        fs::path effectiveInclude = installedInclude;
         fs::path installedPch = installedBase / "pch";
-        if (fs::exists(installedPch / "ebasic" / "runtime" / "runtime.hpp.gch", ec)) {
+        bool hasPch = fs::exists(installedPch / "ebasic" / "runtime" / "runtime.hpp.gch", ec);
+        fs::path effectivePch = installedPch;
+
+        if (fs::exists("/.flatpak-info", ec)) {
+            effectiveInclude = stageRuntimeDirForFlatpak(installedInclude, "include");
+            if (hasPch) effectivePch = stageRuntimeDirForFlatpak(installedPch, "pch");
+        }
+
+        if (hasPch) {
             args.push_back("-I");
-            args.push_back(installedPch.string());
+            args.push_back(effectivePch.string());
         }
         args.push_back("-I");
-        args.push_back(installedInclude.string());
+        args.push_back(effectiveInclude.string());
         return args;
     }
 
@@ -345,9 +385,10 @@ int main(int argc, char** argv) {
         compileArgs.push_back(cppPath.string());
         compileArgs.push_back("-o");
         compileArgs.push_back(objPath.string());
-        rc = ebasic::runProcess(compileArgs);
+        rc = ebasic::runProcess(ebasic::hostExecArgs(compileArgs));
         if (rc == 0) {
-            rc = ebasic::runProcess({"ar", "rcs", archivePath.string(), objPath.string()});
+            rc = ebasic::runProcess(
+                ebasic::hostExecArgs({"ar", "rcs", archivePath.string(), objPath.string()}));
         }
         if (rc == 0) {
             std::ofstream ifaceOut(ifacePath);
@@ -378,7 +419,7 @@ int main(int argc, char** argv) {
         for (const std::string& lib : opts.extraLibNames) {
             compileArgs.push_back("-l" + lib);
         }
-        rc = ebasic::runProcess(compileArgs);
+        rc = ebasic::runProcess(ebasic::hostExecArgs(compileArgs));
     }
 
     if (!opts.keepCpp) {

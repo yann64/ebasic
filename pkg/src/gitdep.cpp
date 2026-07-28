@@ -58,13 +58,15 @@ bool resolveGitDependency(const Dependency& dep, const std::string& pinnedCommit
     bool alreadyCloned = fs::exists(cacheDir / ".git", ec);
     if (!alreadyCloned) {
         std::cerr << "    Cloning " << dep.git << std::endl;
-        if (ebasic::runProcess({"git", "clone", dep.git, cacheDir.string()}) != 0) {
+        if (ebasic::runProcess(ebasic::hostExecArgs({"git", "clone", dep.git, cacheDir.string()})) !=
+            0) {
             err = "failed to clone '" + dep.git + "'";
             return false;
         }
     } else {
         std::cerr << "    Fetching " << dep.git << std::endl;
-        if (ebasic::runProcess({"git", "-C", cacheDir.string(), "fetch"}) != 0) {
+        if (ebasic::runProcess(ebasic::hostExecArgs({"git", "-C", cacheDir.string(), "fetch"})) !=
+            0) {
             err = "failed to fetch '" + dep.git + "'";
             return false;
         }
@@ -95,10 +97,12 @@ bool resolveGitDependency(const Dependency& dep, const std::string& pinnedCommit
         /// attempt before the real, correct checkout below).
         int rc = -1;
         if (isBranch) {
-            rc = ebasic::runProcess({"git", "-C", cacheDir.string(), "checkout", "origin/" + ref});
+            rc = ebasic::runProcess(
+                ebasic::hostExecArgs({"git", "-C", cacheDir.string(), "checkout", "origin/" + ref}));
         }
         if (rc != 0) {
-            rc = ebasic::runProcess({"git", "-C", cacheDir.string(), "checkout", ref});
+            rc = ebasic::runProcess(
+                ebasic::hostExecArgs({"git", "-C", cacheDir.string(), "checkout", ref}));
         }
         if (rc != 0) {
             err = "failed to checkout '" + ref + "' for '" + dep.git + "'";
@@ -107,8 +111,9 @@ bool resolveGitDependency(const Dependency& dep, const std::string& pinnedCommit
     }
 
     std::string output;
-    if (ebasic::runProcessCaptureOutput({"git", "-C", cacheDir.string(), "rev-parse", "HEAD"},
-                                         output) != 0) {
+    if (ebasic::runProcessCaptureOutput(
+            ebasic::hostExecArgs({"git", "-C", cacheDir.string(), "rev-parse", "HEAD"}), output) !=
+        0) {
         err = "failed to resolve the current commit for '" + dep.git + "'";
         return false;
     }

@@ -1,0 +1,27 @@
+{
+    "app-id": "io.github.yann64.ebasic",
+    "runtime": "org.freedesktop.Platform",
+    "runtime-version": "25.08",
+    "sdk": "org.freedesktop.Sdk",
+    "command": "ebc",
+    "finish-args": [
+        "--filesystem=host",
+        "--share=network",
+        "--talk-name=org.freedesktop.Flatpak"
+    ],
+    "modules": [
+        {
+            "name": "ebasic",
+            "buildsystem": "cmake",
+            "config-opts": [
+                "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
+            ],
+            "sources": [
+                {
+                    "type": "dir",
+                    "path": "../.."
+                }
+            ]
+        }
+    ]
+}
