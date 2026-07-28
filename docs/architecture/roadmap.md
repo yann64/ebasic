@@ -922,6 +922,21 @@ also consider libraries included by ebpm". New `lsp/src/pkgaware.{hpp,cpp}`:
 - Verified: full e2e suite (33/33, including the new `lsp_pkgaware`), a
   clean `-Wall -Wextra` rebuild.
 
+## Post-LSP-5 Fix: `lsp_pkgaware`'s Windows CI failure - the same root cause, again
+
+Real Windows CI failed `lsp_pkgaware` (`cannot open included file
+'mathlib.iface.bas'` with **no** hint appended, meaning package detection
+itself silently failed) - the exact same root cause as the earlier
+`lsp_diagnostics` fix (a hand-built `file://$WORKDIR/...` URI embedding
+MSYS2's own POSIX-style path directly, which `findPackageRoot`'s
+`fs::exists` check can't resolve via real Win32 file APIs), just not yet
+applied to this brand-new test file - a real reminder that this fix needs
+to be a standing habit for any future LSP test touching real files, not a
+one-off patch. Fixed the same way: `tests/lsp/pkgaware_test.sh` gained its
+own `to_file_uri` helper (`cd "$dir" && pwd -P` then `cygpath -w` when
+available), applied to `MAIN_URI`. Verified locally (including a real
+symlinked temp dir) before pushing.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

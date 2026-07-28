@@ -36,7 +36,30 @@ check() {
     fi
 }
 
-MAIN_URI="file://$WORKDIR/myapp/src/main.bas"
+# Converts a real, on-disk path to the "file://" URI a real client would
+# send - resolves symlinks (`cd "$dir" && pwd -P`, mirroring fs::canonical)
+# and, on MSYS2/Windows, converts to a real native path via `cygpath -w`
+# first: a plain posix-style path like "/tmp/xyz" isn't something a native
+# (non-msys) Win32 program can resolve via real file APIs at all - package
+# detection (findPackageRoot's own fs::exists check) would otherwise fail
+# silently, exactly as real Windows CI caught (see
+# tests/lsp/diagnostics_test.sh's own roadmap notes for the first time this
+# exact issue was found).
+to_file_uri() {
+    local dir base resolved
+    dir="$(dirname "$1")"
+    base="$(basename "$1")"
+    resolved="$(cd "$dir" && pwd -P)/$base"
+    if command -v cygpath >/dev/null 2>&1; then
+        resolved="$(cygpath -w "$resolved")"
+        resolved="${resolved//\\//}"
+        printf 'file:///%s' "$resolved"
+    else
+        printf 'file://%s' "$resolved"
+    fi
+}
+
+MAIN_URI="$(to_file_uri "$WORKDIR/myapp/src/main.bas")"
 # line 0: #include "mathlib.iface.bas"
 # line 2: PRINT Twice(21)          ("Twice" at columns 6-11)
 MAIN_TEXT='#include \"mathlib.iface.bas\"\n\nPRINT Twice(21)\nPRINT AddOne(41)\n'
