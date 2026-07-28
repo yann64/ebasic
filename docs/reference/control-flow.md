@@ -1,5 +1,21 @@
 # Control Flow
 
+## `:` (statement separator)
+
+A colon separates multiple statements on a single line - anywhere a newline
+would otherwise be required:
+
+```basic
+DIM x AS INTEGER
+DIM y AS INTEGER
+x = 1 : y = 2
+PRINT x     ' 1
+PRINT y     ' 2
+```
+
+(A colon immediately after a bare identifier at the start of a line is
+instead parsed as a [label](#goto-and-labels), e.g. `skip:`.)
+
 ## `IF` / `THEN` / `ELSEIF` / `ELSE` / `END IF`
 
 ```
