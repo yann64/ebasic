@@ -275,6 +275,28 @@ void expandSource(PPState& state, const std::string& source, int fileId, const f
 PreprocessResult preprocess(const std::string& mainSource, const std::string& mainPath,
                             DiagnosticEngine& diags, const std::vector<std::string>& includeDirs) {
     PPState state{diags, {}, {}, {}, includeDirs};
+    /// Auto-defined, real-FreeBASIC-precedent platform macros (confirmed via
+    /// FreeBASIC's own docs: __FB_WIN32__/__FB_LINUX__/__FB_DARWIN__ are
+    /// real, existing macro names - adopted as-is rather than invented, to
+    /// maximize source portability with real FreeBASIC code, the actual
+    /// point of "same syntax as FreeBASIC"). Only the current platform's
+    /// macro is ever defined, mirroring C/C++'s own _WIN32/__linux__/
+    /// __APPLE__ convention - the only design that works anyway, since this
+    /// preprocessor has no #elif/#if <expr>, only defined-or-not testing.
+    /// __FB_HAIKU__ has no real FreeBASIC precedent (Haiku isn't a FreeBASIC
+    /// target) but follows the same naming style for consistency. Mirrors
+    /// the exact #ifdef _WIN32/__APPLE__/__HAIKU__/else pattern already
+    /// established in process.cpp/gitdep.cpp - no new platform-detection
+    /// logic invented here.
+#ifdef _WIN32
+    state.macros["__FB_WIN32__"] = "";
+#elif defined(__APPLE__)
+    state.macros["__FB_DARWIN__"] = "";
+#elif defined(__HAIKU__)
+    state.macros["__FB_HAIKU__"] = "";
+#else
+    state.macros["__FB_LINUX__"] = "";
+#endif
     int fileId = diags.registerFile(mainPath);
 
     std::error_code ec;

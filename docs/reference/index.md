@@ -13,6 +13,7 @@ it's actually documented.
 - [Namespaces, Pointers, and Unions](namespaces-pointers-unions.md)
 - [`EXTERN` / C-C++ Interop](extern-interop.md)
 - [Doc Comments (`'''`)](doc-comments.md)
+- [Preprocessor](preprocessor.md)
 
 ## Symbols
 
@@ -30,6 +31,15 @@ it's actually documented.
 | `=` `<>` `<` `>` `<=` `>=` | comparison | [Operators](operators.md#comparison-operators) |
 | `@` | address-of | [Pointers](namespaces-pointers-unions.md#pointers-ptr--) |
 | `->` | member access through a pointer | [Pointers](namespaces-pointers-unions.md#pointers-ptr--) |
+
+## Preprocessor directives
+
+| Directive | Reference |
+|---|---|
+| `#define` | [Preprocessor](preprocessor.md#define) |
+| `#ifdef` / `#ifndef` / `#else` / `#endif` | [Preprocessor](preprocessor.md#ifdef-ifndef-else-endif) |
+| `#include` / `#include once` | [Preprocessor](preprocessor.md#include-include-once) |
+| `__FB_WIN32__` / `__FB_LINUX__` / `__FB_DARWIN__` / `__FB_HAIKU__` | [Preprocessor: Platform macros](preprocessor.md#platform-macros) |
 
 ## Keywords
 
