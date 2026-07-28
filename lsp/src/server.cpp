@@ -4,6 +4,7 @@
 #include "symbols.hpp"
 #include "uri.hpp"
 
+#include "ast/ast.hpp"
 #include "ebasic/version.hpp"
 
 namespace ebasic::lsp {
@@ -59,6 +60,10 @@ void Server::dispatch(const json& msg, std::ostream& out) {
             if (isRequest) handleDocumentSymbol(*idIt, params, out);
         } else if (method == "textDocument/hover") {
             if (isRequest) handleHover(*idIt, params, out);
+        } else if (method == "textDocument/definition") {
+            if (isRequest) handleDefinition(*idIt, params, out);
+        } else if (method == "textDocument/references") {
+            if (isRequest) handleReferences(*idIt, params, out);
         } else if (isRequest) {
             // MethodNotFound (-32601) - only requests get (and need) a
             // reply; an unrecognized notification is simply ignored, per
@@ -80,6 +85,8 @@ void Server::handleInitialize(const json& id, const json& /*params*/, std::ostre
             {"textDocumentSync", 1},
             {"documentSymbolProvider", true},
             {"hoverProvider", true},
+            {"definitionProvider", true},
+            {"referencesProvider", true},
         }},
         {"serverInfo", {
             {"name", "ebasic-lsp"},
@@ -184,6 +191,93 @@ void Server::handleHover(const json& id, const json& params, std::ostream& out) 
     }
     std::optional<json> result = hoverFor(checked->index, *word);
     sendResult(out, id, result ? *result : json(nullptr));
+}
+
+void Server::handleDefinition(const json& id, const json& params, std::ostream& out) {
+    const std::string uri = params.at("textDocument").at("uri").get<std::string>();
+    const json& position = params.at("position");
+    const int line = position.at("line").get<int>();
+    const int character = position.at("character").get<int>();
+
+    const std::string* text = documents_.find(uri);
+    if (!text) {
+        sendResult(out, id, json::array());
+        return;
+    }
+    std::optional<std::string> word = identifierAt(*text, line, character);
+    if (!word) {
+        sendResult(out, id, json::array());
+        return;
+    }
+    auto checked = checkDocument(uriToPath(uri), *text);
+    if (!checked) {
+        sendResult(out, id, json::array());
+        return;
+    }
+    std::optional<ebasic::SourceLoc> loc = declLocFor(checked->index, *word);
+    if (!loc) {
+        sendResult(out, id, json::array());
+        return;
+    }
+    json location = {{"uri", pathToUri(checked->diags.fileName(loc->fileId))}, {"range", pointRange(*loc)}};
+    sendResult(out, id, location);
+}
+
+void Server::handleReferences(const json& id, const json& params, std::ostream& out) {
+    const std::string uri = params.at("textDocument").at("uri").get<std::string>();
+    const json& position = params.at("position");
+    const int line = position.at("line").get<int>();
+    const int character = position.at("character").get<int>();
+    const bool includeDeclaration = params.value("context", json::object()).value("includeDeclaration", true);
+
+    const std::string* text = documents_.find(uri);
+    if (!text) {
+        sendResult(out, id, json::array());
+        return;
+    }
+    std::optional<std::string> word = identifierAt(*text, line, character);
+    if (!word) {
+        sendResult(out, id, json::array());
+        return;
+    }
+    auto checked = checkDocument(uriToPath(uri), *text);
+    if (!checked) {
+        sendResult(out, id, json::array());
+        return;
+    }
+    const std::string key = ebasic::canonicalName(*word);
+    std::vector<ebasic::SourceLoc> locs = findReferences(checked->module, key);
+    std::optional<ebasic::SourceLoc> declLoc = declLocFor(checked->index, *word);
+
+    // findReferences already reports the declaration site for a variable-
+    // like symbol (Dim/Const/ForNext's own `name` is itself a reference in
+    // the walker's own terms) but never for a SUB/FUNCTION/TYPE (whose
+    // declaring Stmt's `name` isn't a reference site at all) - reconcile
+    // both against includeDeclaration explicitly rather than relying on
+    // the walker to have gotten it right for every symbol kind.
+    auto sameLoc = [](const ebasic::SourceLoc& a, const ebasic::SourceLoc& b) {
+        return a.fileId == b.fileId && a.line == b.line && a.column == b.column;
+    };
+    if (declLoc) {
+        bool alreadyPresent = false;
+        for (auto it = locs.begin(); it != locs.end();) {
+            if (sameLoc(*it, *declLoc)) {
+                if (!includeDeclaration) {
+                    it = locs.erase(it);
+                    continue;
+                }
+                alreadyPresent = true;
+            }
+            ++it;
+        }
+        if (includeDeclaration && !alreadyPresent) locs.push_back(*declLoc);
+    }
+
+    json result = json::array();
+    for (const ebasic::SourceLoc& loc : locs) {
+        result.push_back({{"uri", pathToUri(checked->diags.fileName(loc.fileId))}, {"range", pointRange(loc)}});
+    }
+    sendResult(out, id, result);
 }
 
 void Server::sendResult(std::ostream& out, const json& id, json result) {

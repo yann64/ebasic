@@ -807,7 +807,54 @@ both a wrong assumption baked into the *test*:
   manual protocol conversation confirming the asymmetric canonicalization
   behavior first-hand, before writing the fix.
 - No production code changed - `ebasic_lsp`/the preprocessor's behavior was
-  correct throughout; only the test's own path assumptions were wrong.
+  correct throughout; only the test's own path assumptions were wrong. A
+  follow-up push fixed a second instance of the same root cause: the fix
+  above only converted `lib.bas`'s *expected* URI (the assertion), not
+  `MAIN2_URI` (the URI actually *sent* to the server), which was still the
+  raw MSYS2-style path - so Windows still failed to resolve the `#include`
+  at all until that URI was fixed the same way.
+
+## LSP-4 Implementation Notes (go-to-definition, find-references, done)
+
+- `CheckedDocument` (`lsp/src/symbols.hpp`) now also carries the
+  `DiagnosticEngine` used to check it (moved in, not just its
+  diagnostics) - needed so a `declLoc`'s `fileId` (e.g. one landing inside
+  an `#include`d file) can be mapped back to a real path via
+  `diags.fileName(fileId)`, then to a URI via `pathToUri`.
+- `declLocFor(index, rawName)`: the same procedure/TYPE/variable lookup
+  order as `hoverFor`, returning just the `SourceLoc`. `pointRange` (used
+  by `documentSymbols` since LSP-3) is now a shared, public function in
+  `symbols.hpp` rather than private to `documentSymbols`'s own translation
+  unit, so `definition`/`references` build LSP ranges the same way.
+- `findReferences(module, targetKey)`: a full recursive walk over every
+  `Stmt`/`Expr` field that can hold a nested statement or expression
+  (`If`/`SelectCase`/`ForNext`/`WhileWend`/`DoLoop` bodies and conditions,
+  `CaseArm` matches, `EnumMember` values, `NamespaceDecl`'s body via the
+  shared `body` field, TYPE method prototypes) - collecting every
+  `Ident`/`Call`/`Member` expression matching `targetKey`, **plus** each
+  `Dim`/`Const`/`Assign`/`ForNext`/`Goto`/`Label`/`GoSub` statement's own
+  `name` field, since a plain `x = 5` assignment's target has no `Expr`
+  node of its own at all (it's a bare `Stmt::name`, unlike every other
+  statement kind) - confirmed by reading `ast.hpp`'s full `Stmt`/`Expr`
+  shape before writing the walker, not assumed.
+- `Server::handleReferences` reconciles `findReferences`' own output
+  against `includeDeclaration` explicitly rather than trusting the walker
+  to have gotten every symbol kind's declaration-inclusion right: a
+  variable's own declaration already appears in `findReferences`' results
+  (its `Dim` statement's `name` is itself walked as a reference), but a
+  `SUB`/`FUNCTION`/`TYPE`'s declaring statement is never walked that way -
+  so the handler adds/removes the `declLocFor` result explicitly, comparing
+  by `(fileId, line, column)`.
+- Verified manually against a real fixture (a `FUNCTION` called twice, a
+  variable assigned once and read once) before writing
+  `tests/lsp/definition_references_test.sh` (new `lsp_definition_references`
+  CTest): go-to-definition on a call site lands on the `FUNCTION`'s own
+  declaration; find-references-with-declaration returns both call sites
+  plus the declaration; find-references-without-declaration on the
+  variable returns the assignment target and the read, never the `DIM`.
+- Verified: full e2e suite (32/32, including the new
+  `lsp_definition_references`), a clean `-Wall -Wextra` rebuild, real CI
+  green on all 4 platforms.
 
 ## Testing Strategy
 

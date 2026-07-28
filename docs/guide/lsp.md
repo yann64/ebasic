@@ -47,12 +47,20 @@ written all at once.
   body-level type error elsewhere, since module-level signatures are
   always fully registered before any statement body is checked.
 
-Go-to-definition, find-references, `ebpm`-awareness, and completion are
-later slices (see `docs/architecture/roadmap.md`'s "LSP Plan Summary" for
-the full list). A request for an unimplemented method gets a real
-JSON-RPC `MethodNotFound` (`-32601`) error, not silence; a malformed
-request for an *implemented* method gets `InvalidParams` (`-32602`), never
-a crash.
+**LSP-4 (go-to-definition + find-references):**
+
+- `textDocument/definition` - jumps to where the symbol under the cursor
+  was declared (its real `Sema`-recorded declaration site, not a guess).
+- `textDocument/references` - every use of that symbol in the current
+  compilation unit (including any `#include`d file, since preprocessing
+  flattens them into one `Module` before Sema ever runs), plus the
+  declaration itself when the request's `includeDeclaration` is set.
+
+`ebpm`-awareness and completion are later slices (see
+`docs/architecture/roadmap.md`'s "LSP Plan Summary" for the full list). A
+request for an unimplemented method gets a real JSON-RPC `MethodNotFound`
+(`-32601`) error, not silence; a malformed request for an *implemented*
+method gets `InvalidParams` (`-32602`), never a crash.
 
 ## Trying it in Neovim
 
@@ -79,12 +87,12 @@ outline via `:lua vim.lsp.buf.document_symbol()`, and hover via
 
 ## Verifying without an editor
 
-`tests/lsp/smoke_test.sh`, `tests/lsp/diagnostics_test.sh`, and
-`tests/lsp/symbols_test.sh` drive the server directly over its real stdio
-transport (the same Content-Length JSON-RPC framing any client speaks) and
-run as part of the normal test suite (`ctest -R lsp_`) - useful for
-confirming the protocol contract works without needing an LSP-capable
-editor on hand.
+`tests/lsp/smoke_test.sh`, `tests/lsp/diagnostics_test.sh`,
+`tests/lsp/symbols_test.sh`, and `tests/lsp/definition_references_test.sh`
+drive the server directly over its real stdio transport (the same
+Content-Length JSON-RPC framing any client speaks) and run as part of the
+normal test suite (`ctest -R lsp_`) - useful for confirming the protocol
+contract works without needing an LSP-capable editor on hand.
 
 ## See also
 

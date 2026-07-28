@@ -10,6 +10,15 @@
 
 namespace ebasic::lsp {
 
+nlohmann::json pointRange(const ebasic::SourceLoc& loc) {
+    // One character wide - the closest honest approximation available:
+    // eBasic's AST tracks a single point per node, never a start/end span.
+    return {
+        {"start", {{"line", loc.line - 1}, {"character", loc.column - 1}}},
+        {"end", {{"line", loc.line - 1}, {"character", loc.column}}},
+    };
+}
+
 namespace {
 
 /// Small, self-contained copy of Codegen's/docgen's own basicTypeName - not
@@ -38,15 +47,6 @@ std::string basicTypeName(const ebasic::Type& type) {
         case ebasic::TypeKind::Unknown: return "";
     }
     return "";
-}
-
-nlohmann::json pointRange(const ebasic::SourceLoc& loc) {
-    // One character wide - the closest honest approximation available:
-    // eBasic's AST tracks a single point per node, never a start/end span.
-    return {
-        {"start", {{"line", loc.line - 1}, {"character", loc.column - 1}}},
-        {"end", {{"line", loc.line - 1}, {"character", loc.column}}},
-    };
 }
 
 nlohmann::json makeSymbol(const std::string& name, int kind, const ebasic::SourceLoc& loc) {
@@ -98,7 +98,8 @@ std::optional<CheckedDocument> checkDocument(const std::string& path, const std:
     // Sema's collect* passes (module-level SUB/FUNCTION/TYPE registration)
     // always run to completion before any statement body is checked, so a
     // real, useful SemaIndex exists even if body-level type errors remain.
-    return CheckedDocument{std::move(module), sema.index()};
+    ebasic::SemaIndex index = sema.index();
+    return CheckedDocument{std::move(module), std::move(index), std::move(diags)};
 }
 
 std::optional<std::string> identifierAt(const std::string& text, int line, int character) {
@@ -181,6 +182,88 @@ std::optional<nlohmann::json> hoverFor(const ebasic::SemaIndex& index, const std
         return nlohmann::json{{"contents", {{"kind", "plaintext"}, {"value", sig}}}};
     }
     return std::nullopt;
+}
+
+std::optional<ebasic::SourceLoc> declLocFor(const ebasic::SemaIndex& index, const std::string& rawName) {
+    const std::string key = ebasic::canonicalName(rawName);
+    if (auto it = index.procedures.find(key); it != index.procedures.end()) return it->second.declLoc;
+    if (auto it = index.structs.find(key); it != index.structs.end()) return it->second.declLoc;
+    if (auto it = index.symbols.find(key); it != index.symbols.end()) return it->second.declLoc;
+    return std::nullopt;
+}
+
+namespace {
+
+/// True for the statement kinds whose own `name` field is itself a
+/// reference to (or the declaration of) a symbol - Assign's simple-target
+/// form in particular has no Expr node of its own for its target, unlike
+/// every other statement kind, which only ever names things through Exprs.
+bool statementNameIsReference(ebasic::StmtKind kind) {
+    switch (kind) {
+        case ebasic::StmtKind::Dim:
+        case ebasic::StmtKind::Const:
+        case ebasic::StmtKind::Assign:
+        case ebasic::StmtKind::ForNext:
+        case ebasic::StmtKind::Goto:
+        case ebasic::StmtKind::Label:
+        case ebasic::StmtKind::GoSub:
+            return true;
+        default:
+            return false;
+    }
+}
+
+void walkExpr(const ebasic::Expr* e, const std::string& targetKey, std::vector<ebasic::SourceLoc>& out) {
+    if (!e) return;
+    if ((e->kind == ebasic::ExprKind::Ident || e->kind == ebasic::ExprKind::Call ||
+         e->kind == ebasic::ExprKind::Member) &&
+        ebasic::canonicalName(e->stringValue) == targetKey) {
+        out.push_back(e->loc);
+    }
+    walkExpr(e->lhs.get(), targetKey, out);
+    walkExpr(e->rhs.get(), targetKey, out);
+    for (const auto& arg : e->args) walkExpr(arg.get(), targetKey, out);
+}
+
+void walkStmts(const std::vector<ebasic::StmtPtr>& stmts, const std::string& targetKey,
+               std::vector<ebasic::SourceLoc>& out);
+
+void walkStmt(const ebasic::Stmt& s, const std::string& targetKey, std::vector<ebasic::SourceLoc>& out) {
+    if (statementNameIsReference(s.kind) && ebasic::canonicalName(s.name) == targetKey) {
+        out.push_back(s.loc);
+    }
+    walkExpr(s.expr.get(), targetKey, out);
+    for (const auto& a : s.args) walkExpr(a.get(), targetKey, out);
+    walkExpr(s.arrayLower.get(), targetKey, out);
+    walkExpr(s.arrayUpper.get(), targetKey, out);
+    walkExpr(s.index.get(), targetKey, out);
+    walkExpr(s.target.get(), targetKey, out);
+    for (const auto& c : s.conditions) walkExpr(c.get(), targetKey, out);
+    for (const auto& blk : s.blocks) walkStmts(blk, targetKey, out);
+    for (const auto& arm : s.cases) {
+        for (const auto& m : arm.matches) walkExpr(m.get(), targetKey, out);
+        walkStmts(arm.body, targetKey, out);
+    }
+    walkExpr(s.forEnd.get(), targetKey, out);
+    walkExpr(s.forStep.get(), targetKey, out);
+    walkStmts(s.body, targetKey, out); // ForNext/WhileWend/DoLoop body, and NamespaceDecl's body
+    walkExpr(s.preCond.get(), targetKey, out);
+    walkExpr(s.postCond.get(), targetKey, out);
+    for (const auto& member : s.enumMembers) walkExpr(member.value.get(), targetKey, out);
+    walkStmts(s.methods, targetKey, out); // TYPE method prototypes (declared, not defined, here)
+}
+
+void walkStmts(const std::vector<ebasic::StmtPtr>& stmts, const std::string& targetKey,
+               std::vector<ebasic::SourceLoc>& out) {
+    for (const auto& stmtPtr : stmts) walkStmt(*stmtPtr, targetKey, out);
+}
+
+} // namespace
+
+std::vector<ebasic::SourceLoc> findReferences(const ebasic::Module& module, const std::string& targetKey) {
+    std::vector<ebasic::SourceLoc> result;
+    walkStmts(module.stmts, targetKey, result);
+    return result;
 }
 
 } // namespace ebasic::lsp

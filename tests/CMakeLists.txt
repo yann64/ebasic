@@ -200,3 +200,9 @@ add_test(
     NAME lsp_symbols
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/lsp/symbols_test.sh $<TARGET_FILE:ebasic_lsp>
 )
+
+# LSP-4: go-to-definition + find-references.
+add_test(
+    NAME lsp_definition_references
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/lsp/definition_references_test.sh $<TARGET_FILE:ebasic_lsp>
+)

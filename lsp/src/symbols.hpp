@@ -7,15 +7,21 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace ebasic::lsp {
 
 /// The result of successfully parsing (and, when possible, checking)
 /// `text` - kept together since every AST node `index` might point back
-/// into (declLoc, param/field types, ...) lives inside `module`.
+/// into (declLoc, param/field types, ...) lives inside `module`. `diags`
+/// is kept too (not just its diagnostics, which are discarded) so a
+/// caller can resolve a declLoc's fileId back to a real path via
+/// `diags.fileName(fileId)` - needed for go-to-definition landing in a
+/// different file than the one being edited (an `#include`).
 struct CheckedDocument {
     ebasic::Module module;
     ebasic::SemaIndex index;
+    ebasic::DiagnosticEngine diags;
 };
 
 /// Runs Preprocessor -> Lexer -> Parser -> Sema over `text` as if it were
@@ -49,5 +55,26 @@ nlohmann::json documentSymbols(const ebasic::Module& module);
 /// order. nullopt if `rawName` isn't any known symbol (e.g. a keyword, or
 /// a typo).
 std::optional<nlohmann::json> hoverFor(const ebasic::SemaIndex& index, const std::string& rawName);
+
+/// Where `rawName` (any casing) was declared, for `textDocument/definition`
+/// - same lookup order as hoverFor (procedure, then TYPE/UNION, then
+/// variable/CONST). nullopt if `rawName` isn't any known symbol.
+std::optional<ebasic::SourceLoc> declLocFor(const ebasic::SemaIndex& index, const std::string& rawName);
+
+/// An LSP `Range` covering exactly one character starting at `loc` - the
+/// closest honest approximation available (eBasic's AST tracks a single
+/// point per node, never a start/end span). Shared by documentSymbols,
+/// diagnostics.cpp, and definition/references so every LSP-facing range
+/// this server produces is built the same way.
+nlohmann::json pointRange(const ebasic::SourceLoc& loc);
+
+/// Every `Ident`/`Call`/`Member` expression (plus each `Dim`/`Const`/
+/// `Assign`/`ForNext`/`Goto`/`Label`/`GoSub` statement's own `name`) in
+/// `module` whose canonical form matches `targetKey` (already
+/// canonicalized) - `textDocument/references`' result, single-
+/// compilation-unit scope (an `#include`d file is already part of the same
+/// `Module` after preprocessing, so this covers it; a *dependency*
+/// package's own separate compilation is LSP-5 scope).
+std::vector<ebasic::SourceLoc> findReferences(const ebasic::Module& module, const std::string& targetKey);
 
 } // namespace ebasic::lsp
