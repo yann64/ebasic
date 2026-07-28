@@ -1,6 +1,7 @@
 #include "build.hpp"
 #include "driver/process.hpp"
 #include "manifest.hpp"
+#include "resolve.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -151,13 +152,8 @@ int cmdBuild(const std::vector<std::string>& args) {
         std::cerr << "ebpm: error: 'build' takes no arguments yet\n";
         return 1;
     }
-    ebpm::Manifest manifest;
     std::string err;
-    if (!loadCurrentManifest(manifest, err)) {
-        std::cerr << "ebpm: error: " << err << "\n";
-        return 1;
-    }
-    int rc = ebpm::buildPackage(manifest, ".", {}, {}, err);
+    int rc = ebpm::buildPackageWithDeps(".", err);
     if (!err.empty()) {
         std::cerr << "ebpm: error: " << err << "\n";
         return 1;
@@ -191,10 +187,22 @@ int cmdRun(const std::vector<std::string>& args) {
         return 1;
     }
 
+    // Staleness is checked against every package in the resolved graph, not
+    // just the root's own source - a dependency's source changing must
+    // also trigger a rebuild of whatever depends on it.
+    std::vector<ebpm::ResolvedPackage> order;
+    if (!ebpm::resolveDependencyGraph(".", order, err)) {
+        std::cerr << "ebpm: error: " << err << "\n";
+        return 1;
+    }
     std::string binPath = ebpm::binaryPath(manifest, ".");
-    std::string srcPath = (fs::path(".") / manifest.bin.path).string();
-    if (ebpm::isStale(srcPath, binPath)) {
-        int rc = ebpm::buildPackage(manifest, ".", {}, {}, err);
+    std::vector<std::string> srcPaths;
+    for (const ebpm::ResolvedPackage& pkg : order) {
+        if (pkg.manifest.hasLib) srcPaths.push_back((fs::path(pkg.dir) / pkg.manifest.lib.path).string());
+        if (pkg.manifest.hasBin) srcPaths.push_back((fs::path(pkg.dir) / pkg.manifest.bin.path).string());
+    }
+    if (ebpm::isStale(srcPaths, binPath)) {
+        int rc = ebpm::buildPackageWithDeps(".", err);
         if (!err.empty()) {
             std::cerr << "ebpm: error: " << err << "\n";
             return 1;

@@ -124,3 +124,10 @@ add_test(
     NAME e2e_pkg_simple_bin
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/simple_bin
 )
+
+# The actual M5 milestone bar: a lib + an app depending on it (path
+# dependency), built/run end-to-end via `ebpm build && ebpm run`.
+add_test(
+    NAME e2e_pkg_lib_and_app
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/lib_and_app myapp
+)

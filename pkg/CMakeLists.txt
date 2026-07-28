@@ -9,5 +9,7 @@ add_executable(ebpm
     src/main.cpp
     src/manifest.cpp
     src/build.cpp
+    src/resolve.cpp
+    src/lockfile.cpp
 )
 target_link_libraries(ebpm PRIVATE tomlplusplus ebasic_process)

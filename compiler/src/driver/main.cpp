@@ -29,6 +29,15 @@ struct Options {
     // has to come from outside the .bas source, exactly like g++'s own
     // -L/-l split.
     std::vector<std::string> libDirs;
+    // M5c: extra libraries to link (`-l <name>`, repeatable), forwarded as
+    // `-l<name>` after the auto-derived ones from the module's own `Lib
+    // "name"` clauses. Needed for a *transitive* dependency: if this
+    // module `#include`s only its direct dependency's interface file, its
+    // own `Module::externLibs` has no idea a transitively-needed library
+    // even exists (that library's `Lib` clause lives in a different,
+    // never-`#include`d interface file) - ebpm passes it explicitly here
+    // instead, exactly like it already must pass `-L` for the same reason.
+    std::vector<std::string> extraLibNames;
     // M5: build a library (static archive + auto-generated interface file)
     // instead of an executable - see printUsage for the exact output shape.
     bool libMode = false;
@@ -68,6 +77,12 @@ bool parseArgs(int argc, char** argv, Options& opts, std::string& err) {
                 return false;
             }
             opts.includeDirs.push_back(args[++i]);
+        } else if (a == "-l") {
+            if (i + 1 >= args.size()) {
+                err = "-l requires an argument";
+                return false;
+            }
+            opts.extraLibNames.push_back(args[++i]);
         } else if (a == "--keep-cpp") {
             opts.keepCpp = true;
         } else if (a == "--lib") {
@@ -92,12 +107,14 @@ bool parseArgs(int argc, char** argv, Options& opts, std::string& err) {
 
 void printUsage(std::ostream& os) {
     os << "usage: ebc <input.bas> [-o <output>] [-cxx <compiler>] [-L <dir>]... [-I <dir>]...\n";
-    os << "           [--keep-cpp] [--lib]\n";
+    os << "           [-l <name>]... [--keep-cpp] [--lib]\n";
     os << "  --lib: build a library instead of an executable - <output> is a bare\n";
     os << "  name; produces lib<output>.a (a static archive) and <output>.iface.bas\n";
     os << "  (an auto-generated interface for dependent packages to #include).\n";
     os << "  -I <dir>: extra #include search path, consulted only after the\n";
     os << "  includer-relative lookup fails.\n";
+    os << "  -l <name>: extra library to link, alongside any already named by the\n";
+    os << "  module's own Lib \"name\" clauses.\n";
 }
 
 // M5 (--lib mode): a library's object file must never define `main` itself
@@ -246,6 +263,12 @@ int main(int argc, char** argv) {
         // traditional (non-`--start-group`) linker to resolve symbols from
         // them correctly.
         for (const std::string& lib : codegen.externLibs()) {
+            compileArgs.push_back("-l" + lib);
+        }
+        // M5c: explicit -l names (a transitive dependency's library, whose
+        // own Lib clause never appears in *this* module at all - see
+        // Options::extraLibNames's doc comment).
+        for (const std::string& lib : opts.extraLibNames) {
             compileArgs.push_back("-l" + lib);
         }
         rc = ebasic::runProcess(compileArgs);

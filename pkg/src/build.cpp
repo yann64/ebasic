@@ -1,9 +1,12 @@
 #include "build.hpp"
 #include "driver/process.hpp"
+#include "lockfile.hpp"
 
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace fs = std::filesystem;
 
@@ -26,19 +29,27 @@ std::string interfacePath(const Manifest& manifest, const std::string& packageDi
     return (fs::path(packageDir) / "target" / (manifest.name + ".iface.bas")).string();
 }
 
-bool isStale(const std::string& srcPath, const std::string& outPath) {
+bool isStale(const std::vector<std::string>& srcPaths, const std::string& outPath) {
     std::error_code ec;
     if (!fs::exists(outPath, ec)) return true;
     auto outTime = fs::last_write_time(outPath, ec);
     if (ec) return true;
-    auto srcTime = fs::last_write_time(srcPath, ec);
-    if (ec) return true; // a missing source is a different problem, surfaced by ebc itself
-    return srcTime > outTime;
+    for (const std::string& srcPath : srcPaths) {
+        auto srcTime = fs::last_write_time(srcPath, ec);
+        // A missing source is a different problem (surfaced by ebc itself
+        // once the resulting rebuild attempt runs) - treated as stale here
+        // rather than silently skipped, so it can't mask a real problem
+        // (e.g. a dependency's source deleted out from under an otherwise
+        // still-newer binary) behind a false "nothing changed".
+        if (ec || srcTime > outTime) return true;
+    }
+    return false;
 }
 
 int buildPackage(const Manifest& manifest, const std::string& packageDir,
                   const std::vector<std::string>& extraIncludeDirs,
-                  const std::vector<std::string>& extraLibDirs, std::string& err) {
+                  const std::vector<std::string>& extraLibDirs,
+                  const std::vector<std::string>& extraLibNames, std::string& err) {
     fs::path pkgDir(packageDir);
     fs::path targetDir = pkgDir / "target";
     std::error_code ec;
@@ -77,6 +88,10 @@ int buildPackage(const Manifest& manifest, const std::string& packageDir,
             args.push_back("-L");
             args.push_back(dir);
         }
+        for (const std::string& lib : extraLibNames) {
+            args.push_back("-l");
+            args.push_back(lib);
+        }
         int rc = ebasic::runProcess(args);
         if (rc != 0) return rc;
     }
@@ -96,9 +111,77 @@ int buildPackage(const Manifest& manifest, const std::string& packageDir,
             args.push_back("-L");
             args.push_back(dir);
         }
+        for (const std::string& lib : extraLibNames) {
+            args.push_back("-l");
+            args.push_back(lib);
+        }
         int rc = ebasic::runProcess(args);
         if (rc != 0) return rc;
     }
+    return 0;
+}
+
+namespace {
+
+// Recursively collects every package `pkg` depends on, directly or
+// transitively (deduplicated via `seen`, keyed by canonical dir - so a
+// diamond dependency is only added once). Needed because a dependency's
+// own `Lib "name"` clause only ever appears in *its own* auto-generated
+// interface file - if `pkg` never `#include`s that file directly (only a
+// closer dependency's interface, which itself `#include`s the transitive
+// one), `pkg`'s compiled module has no way to know that library exists at
+// all, so ebpm must name it explicitly rather than relying on the
+// `Lib`-clause auto-derivation `ebc` normally uses.
+void collectTransitiveDeps(const ResolvedPackage& pkg,
+                            const std::unordered_map<std::string, const ResolvedPackage*>& byDir,
+                            std::unordered_set<std::string>& seen,
+                            std::vector<const ResolvedPackage*>& out) {
+    for (const Dependency& dep : pkg.manifest.dependencies) {
+        std::error_code ec;
+        std::string depDir = fs::canonical(fs::path(pkg.dir) / dep.path, ec).string();
+        auto it = byDir.find(depDir);
+        if (it == byDir.end()) continue; // unreachable: already resolved by resolveDependencyGraph
+        if (!seen.insert(depDir).second) continue; // already collected via another path
+        out.push_back(it->second);
+        collectTransitiveDeps(*it->second, byDir, seen, out);
+    }
+}
+
+} // namespace
+
+int buildPackageWithDeps(const std::string& rootDir, std::string& err) {
+    std::vector<ResolvedPackage> order;
+    if (!resolveDependencyGraph(rootDir, order, err)) return 1;
+
+    // canonical package dir -> its resolved entry, consulted by
+    // collectTransitiveDeps to look up each dependency edge's target.
+    std::unordered_map<std::string, const ResolvedPackage*> byDir;
+    for (const ResolvedPackage& pkg : order) byDir[pkg.dir] = &pkg;
+
+    for (const ResolvedPackage& pkg : order) {
+        std::unordered_set<std::string> seen;
+        std::vector<const ResolvedPackage*> transitiveDeps;
+        collectTransitiveDeps(pkg, byDir, seen, transitiveDeps);
+
+        std::vector<std::string> extraIncludeDirs;
+        std::vector<std::string> extraLibDirs;
+        std::vector<std::string> extraLibNames;
+        for (const ResolvedPackage* dep : transitiveDeps) {
+            std::string depTargetDir = (fs::path(dep->dir) / "target").string();
+            extraIncludeDirs.push_back(depTargetDir);
+            extraLibDirs.push_back(depTargetDir);
+            extraLibNames.push_back(dep->name);
+        }
+        int rc = buildPackage(pkg.manifest, pkg.dir, extraIncludeDirs, extraLibDirs, extraLibNames, err);
+        if (rc != 0) return rc;
+    }
+
+    // Written at the root's own *canonical* directory (order's last entry -
+    // see resolveDependencyGraph), not the raw, possibly-relative `rootDir`
+    // argument, so the lockfile always lands next to the manifest that was
+    // actually resolved, regardless of what path the caller happened to
+    // pass in.
+    if (!writeLockfile(order.back().dir, order, err)) return 1;
     return 0;
 }
 
