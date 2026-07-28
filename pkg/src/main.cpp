@@ -3,6 +3,7 @@
 #include "manifest.hpp"
 #include "resolve.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -21,6 +22,8 @@ void printUsage(std::ostream& os) {
     os << "  init [--lib]         scaffold a package in the current directory\n";
     os << "  build                build the package in the current directory\n";
     os << "  run [-- args...]     build (if stale), then run the [bin] target\n";
+    os << "  test                 build+run every tests/*.bas as a standalone\n";
+    os << "                       program; pass = exit code 0\n";
 }
 
 // Loads "ebasic.toml" from the current directory - every command below
@@ -215,6 +218,98 @@ int cmdRun(const std::vector<std::string>& args) {
     return ebasic::runProcess(runArgs);
 }
 
+// M5e: the eBasic *language* has no test/assert syntax yet, so this is
+// deliberately the simplest meaningful interpretation of "a test" - a
+// standalone `.bas` program under tests/, compiled and run as a *consumer*
+// of the package under test (able to #include/link its interface exactly
+// like an external dependent package would - see computeConsumerDirs), and
+// judged purely by its own exit code. No assertion primitives, no
+// golden-output diffing - both would need real language support first, and
+// are easy to layer on top of this once/if that exists.
+int cmdTest(const std::vector<std::string>& args) {
+    if (!args.empty()) {
+        std::cerr << "ebpm: error: 'test' takes no arguments yet\n";
+        return 1;
+    }
+
+    std::string err;
+    // Build the package (and its dependencies) first, so a [lib] package's
+    // own interface/archive already exist for a test file to use.
+    int rc = ebpm::buildPackageWithDeps(".", err);
+    if (!err.empty()) {
+        std::cerr << "ebpm: error: " << err << "\n";
+        return 1;
+    }
+    if (rc != 0) return rc;
+
+    fs::path testsDir = "tests";
+    if (!fs::exists(testsDir) || !fs::is_directory(testsDir)) {
+        std::cout << "no tests/ directory found - nothing to test\n";
+        return 0;
+    }
+
+    std::vector<std::string> includeDirs, libDirs, libNames;
+    if (!ebpm::computeConsumerDirs(".", includeDirs, libDirs, libNames, err)) {
+        std::cerr << "ebpm: error: " << err << "\n";
+        return 1;
+    }
+
+    std::vector<std::string> testFiles;
+    for (const auto& entry : fs::directory_iterator(testsDir)) {
+        if (entry.path().extension() == ".bas") testFiles.push_back(entry.path().string());
+    }
+    std::sort(testFiles.begin(), testFiles.end());
+
+    if (testFiles.empty()) {
+        std::cout << "no tests/*.bas files found - nothing to test\n";
+        return 0;
+    }
+
+    fs::path testOutDir = fs::path("target") / "tests";
+    std::error_code ec;
+    fs::create_directories(testOutDir, ec);
+
+    std::string ebc = ebpm::ebcCommand();
+    int passed = 0;
+    int failed = 0;
+    for (const std::string& testFile : testFiles) {
+        std::string stem = fs::path(testFile).stem().string();
+        std::string outPath = (testOutDir / stem).string();
+
+        std::vector<std::string> compileArgs = {ebc, testFile, "-o", outPath};
+        for (const std::string& dir : includeDirs) {
+            compileArgs.push_back("-I");
+            compileArgs.push_back(dir);
+        }
+        for (const std::string& dir : libDirs) {
+            compileArgs.push_back("-L");
+            compileArgs.push_back(dir);
+        }
+        for (const std::string& lib : libNames) {
+            compileArgs.push_back("-l");
+            compileArgs.push_back(lib);
+        }
+
+        if (ebasic::runProcess(compileArgs) != 0) {
+            std::cout << "test " << stem << " ... FAILED (did not compile)\n";
+            ++failed;
+            continue;
+        }
+        int testRc = ebasic::runProcess({outPath});
+        if (testRc == 0) {
+            std::cout << "test " << stem << " ... ok\n";
+            ++passed;
+        } else {
+            std::cout << "test " << stem << " ... FAILED (exit code " << testRc << ")\n";
+            ++failed;
+        }
+    }
+
+    std::cout << "\ntest result: " << (failed == 0 ? "ok" : "FAILED") << ". " << passed
+              << " passed; " << failed << " failed\n";
+    return failed == 0 ? 0 : 1;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -230,6 +325,7 @@ int main(int argc, char** argv) {
     if (command == "init") return cmdInit(rest);
     if (command == "build") return cmdBuild(rest);
     if (command == "run") return cmdRun(rest);
+    if (command == "test") return cmdTest(rest);
 
     std::cerr << "ebpm: error: unknown command '" << command << "'\n";
     printUsage(std::cerr);

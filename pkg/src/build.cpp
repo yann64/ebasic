@@ -192,4 +192,40 @@ int buildPackageWithDeps(const std::string& rootDir, std::string& err) {
     return 0;
 }
 
+bool computeConsumerDirs(const std::string& rootDir, std::vector<std::string>& includeDirs,
+                          std::vector<std::string>& libDirs, std::vector<std::string>& libNames,
+                          std::string& err) {
+    std::vector<ResolvedPackage> order;
+    if (!resolveDependencyGraph(rootDir, order, err)) return false;
+
+    std::unordered_map<std::string, const ResolvedPackage*> byName;
+    for (const ResolvedPackage& pkg : order) byName[pkg.name] = &pkg;
+
+    // resolveDependencyGraph's own doc comment guarantees the root is
+    // always last.
+    const ResolvedPackage& root = order.back();
+    std::unordered_set<std::string> seen;
+    std::vector<const ResolvedPackage*> transitiveDeps;
+    collectTransitiveDeps(root, byName, seen, transitiveDeps);
+
+    for (const ResolvedPackage* dep : transitiveDeps) {
+        std::string depTargetDir = (fs::path(dep->dir) / "target").string();
+        includeDirs.push_back(depTargetDir);
+        libDirs.push_back(depTargetDir);
+        libNames.push_back(dep->name);
+    }
+    // The root's *own* target dir/name too - unlike buildPackageWithDeps's
+    // per-package loop (which never needs a package to see its own output
+    // while building itself), a *consumer* of the root package (a test
+    // file) needs exactly what an external dependent package would: the
+    // root's interface file to #include and its archive to link.
+    if (root.manifest.hasLib) {
+        std::string rootTargetDir = (fs::path(root.dir) / "target").string();
+        includeDirs.push_back(rootTargetDir);
+        libDirs.push_back(rootTargetDir);
+        libNames.push_back(root.name);
+    }
+    return true;
+}
+
 } // namespace ebpm

@@ -48,6 +48,20 @@ int buildPackage(const Manifest& manifest, const std::string& packageDir,
 // M5d).
 int buildPackageWithDeps(const std::string& rootDir, std::string& err);
 
+// Computes the `-I`/`-L`/`-l` a *consumer* of the root package would need -
+// its entire transitive dependency closure (same as buildPackageWithDeps
+// gives the root itself), plus, if the root has a [lib] target, the root's
+// *own* target directory/name too (so a consumer can `#include` and link
+// the root's own interface, exactly like an external dependent package
+// would). Used by `ebpm test` (M5e): each `tests/*.bas` file is compiled as
+// a *consumer* of the package under test, not as another build target of
+// the package itself. Does not build anything - call buildPackageWithDeps
+// first if the package/its dependencies aren't already built. `err` is set
+// for a resolution failure (same causes as resolveDependencyGraph).
+bool computeConsumerDirs(const std::string& rootDir, std::vector<std::string>& includeDirs,
+                          std::vector<std::string>& libDirs, std::vector<std::string>& libNames,
+                          std::string& err);
+
 // Path to the package's built executable (`<packageDir>/target/<bin.name>`)
 // - only meaningful when `manifest.hasBin`.
 std::string binaryPath(const Manifest& manifest, const std::string& packageDir);

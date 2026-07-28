@@ -139,3 +139,9 @@ add_test(
     NAME e2e_pkg_lib_and_app_git
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_git_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/lib_and_app_git
 )
+
+# M5e: `ebpm test` on a [lib] package with one passing tests/*.bas file.
+add_test(
+    NAME e2e_pkg_lib_with_tests
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/lib_with_tests . test
+)
