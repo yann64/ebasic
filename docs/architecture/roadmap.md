@@ -472,6 +472,13 @@ A six-slice plan (Doc-1 through Doc-6), following the exact same slice-per-miles
 - Verified: `docs` Doxygen target unaffected; full e2e suite still 26/26.
 - Next: `README.md` refactor + a final full link-check pass (Doc-6).
 
+## Doc-6 Implementation Notes (README refactor + final link-check pass, done - documentation plan complete)
+
+- `README.md` rewritten as a short, accurate front door: fixed the stale status line (was still "M0 through M7 are complete... M8 is in progress" - both M8 and the post-M8 CLI-ergonomics work have been done for a while), fixed three pre-existing typos noticed while touching the file ("extented", "programmming", "sythax" x2), and replaced most of the inline detail with links to the five new documentation surfaces (developer docs, language reference, end-user guide, examples, Doxygen API docs) plus this roadmap log - a good README points to detailed docs rather than containing all of it inline.
+- **Final link-check pass**: the link-checker script (built in Doc-4, extended through Doc-5) run across the entire project (`README.md` plus all of `docs/**/*.md`) - 17 markdown files, every relative link and `#anchor` verified to resolve to a real file/heading. Zero real breaks found; the only two remaining "broken" reports are a limitation of the checker itself (it only checks files, not directories) against two legitimate links to the `examples/` directory.
+- Verified: `docs` Doxygen target unaffected; full e2e suite still 26/26.
+- **The documentation plan (Doc-1 through Doc-6) is now complete**: `docs/developer/` (current-state architecture), `docs/reference/` (8 files - exhaustive, dictionary-style keyword reference plus an alphabetical index), `docs/guide/` (getting-started + one page per tool), `examples/` (9 runnable programs, one per feature area), and a refactored `README.md`. Every single code example across the entire effort was compiled and run rather than written from memory - this caught a genuine handful of real bugs/gaps along the way (documented in each slice's own notes above) that would otherwise have shipped as wrong documentation.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

@@ -1,31 +1,30 @@
 # eBasic
 
-The eBasic compiler is an extented version of the BASIC programmming language that uses g++/clang++ as an intermediate compiler.
+eBasic is an extended dialect of the BASIC programming language, transpiled
+to C++ and compiled with a real backend compiler (g++/clang++).
 
 ## Features
 
-- Open sources (MIT)
-- Same sythax as FreeBASIC, but fully reimplemented from scratch.
-- Precompiled standard libs for faster compilation.
-- Allow re-use of C/C++ headers/libs (will need to extend FreeBASIC synthax/keywords)
-- Module management similar to cargo (rust).
-- Support for Namespaces.
-- Support for classes.
-- Automated documentation generation support.
+- Open source (MIT)
+- Same syntax as FreeBASIC, but fully reimplemented from scratch
+- Precompiled runtime header for faster compilation
+- Reuse of real C/C++ headers/libraries (`EXTERN`/`DECLARE`)
+- Cargo-like package management (`ebpm`)
+- Namespaces, TYPE-based OOP (fields, inheritance, properties, operator overloading)
+- Automated documentation generation (`docgen`)
 
 ## OS Support
 
-- Linux
-- Windows
-- macOS
-- Haiku
+Linux, Windows, macOS, Haiku - all four verified in CI (Linux/macOS/Windows)
+and live on real hardware (Haiku).
 
 ## Status
 
-eBasic is under active development. See `docs/architecture/` for the compiler
-architecture and phased roadmap - M0 through M7 are complete (full core language,
-C/C++ interop, the `ebpm` package manager, a precompiled runtime header, and
-`docgen`); M8 (Windows/macOS/Haiku ports) is in progress.
+`0.1.0`. All phased milestones (M0-M8: core language, C/C++ interop, `ebpm`,
+precompiled runtime header, `docgen`, four-platform ports) are complete,
+along with post-M8 CLI ergonomics (`-v`/`--version`, `-h`/`--help`). See
+[`docs/architecture/roadmap.md`](docs/architecture/roadmap.md) for the full
+history and design decisions behind each milestone.
 
 ## Building
 
@@ -35,22 +34,8 @@ cmake --build --preset linux-gcc
 ctest --preset linux-gcc
 ```
 
-Other presets (see `CMakePresets.json`): `linux-clang`, `windows-mingw` (MinGW,
-run from an MSYS2 shell), `macos`, `haiku` - the latter three are new in M8 and
-verified primarily through CI rather than on this development machine (see
-`docs/architecture/roadmap.md`'s M8 notes).
-
-## Documentation
-
-API documentation for the compiler's own C++ source is generated with
-[Doxygen](https://www.doxygen.nl/) (config at `docs/Doxyfile`):
-
-```sh
-cmake --build build/linux-gcc --target docs
-```
-
-Output lands in `build/docs/html/index.html` (requires `doxygen`; `dot`
-from Graphviz is used for class/include graphs if present).
+Other presets (see `CMakePresets.json`): `linux-clang`, `windows-mingw`
+(MinGW, run from an MSYS2 shell), `macos`, `haiku`.
 
 ## Usage
 
@@ -58,3 +43,13 @@ from Graphviz is used for class/include graphs if present).
 ./build/linux-gcc/compiler/ebc examples/hello.bas -o hello
 ./hello
 ```
+
+## Documentation
+
+- **[Getting Started](docs/guide/getting-started.md)** - build, first program, first package
+- **[Language Reference](docs/reference/index.md)** - every keyword, dictionary-style
+- **End-user guide**: [`ebc`](docs/guide/ebc.md), [`ebpm`](docs/guide/ebpm.md), [`docgen`](docs/guide/docgen.md)
+- **[`examples/`](examples/)** - one small, runnable program per language feature area
+- **[Developer Documentation](docs/developer/architecture.md)** - compile pipeline, module map, for anyone extending the compiler itself
+- **API docs** - generated with [Doxygen](https://www.doxygen.nl/) (`cmake --build build/linux-gcc --target docs`, output at `build/docs/html/index.html`)
+- **[`docs/architecture/roadmap.md`](docs/architecture/roadmap.md)** - the historical design/decision log, one section per milestone
