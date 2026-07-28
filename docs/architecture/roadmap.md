@@ -423,6 +423,18 @@ A standalone CLI-ergonomics addition (not part of the phased roadmap table above
 - **Per the user's explicit request, verified on real Haiku hardware for this change too, not just Linux**: `scripts/haiku_verify.sh` ran 26/26 passing on the real box. One thing specifically worth checking live rather than assuming: `scripts/haiku_verify.sh` deploys via `git archive HEAD | ssh haiku tar -x`, whose extracted tree has no `.git` directory at all - confirmed live that this degrades gracefully exactly as designed: the generated `version.hpp` on the Haiku box has an empty `kGitHash`, and `ebc --version` there correctly prints `ebc 0.1.0` with no parenthetical, rather than failing or fabricating a hash.
 - Full existing e2e suite (26/26, `linux-gcc`) passing and a clean `-Wall -Wextra` rebuild, zero warnings.
 
+## Documentation Plan Summary (developer/reference/guide/README, in progress)
+
+A six-slice plan (Doc-1 through Doc-6), following the exact same slice-per-milestone workflow as every prior phase. Prompted by the project being functionally complete (M0-M8 plus post-M8 CLI ergonomics) while documentation stayed thin: `README.md` was stale (claimed M8 still in progress), `docs/` had only this chronological planning log plus Doxygen config (no narrative developer overview, no language reference, no end-user guide), and `examples/` had only 2 files. **Confirmed with the user**: the language reference is an exhaustive, dictionary-style per-keyword entry (not a lighter topic-only narrative) - chosen for completeness at the cost of more writing/upkeep. Scope: `docs/developer/` (current-state architecture, linking to Doxygen rather than duplicating it - this log stays as the historical record, untouched), `docs/reference/` (one file per feature area, each a dictionary of that area's keywords, plus an alphabetical keyword index), `docs/guide/` (getting-started + one page per tool + substantially expanded `examples/`), and a refactored `README.md`. Every reference/guide code example is actually compiled and run while being written, not written from memory.
+
+## Doc-1 Implementation Notes (developer docs, done)
+
+- New `docs/developer/architecture.md`: the compile pipeline (Preprocessor -> Lexer -> Parser -> Sema -> Codegen -> backend), a directory/component map, why `ebasic_process`/`ebasic_frontend` exist as shared static libs (reused by `ebpm`/`docgen` respectively, avoiding duplicated subprocess-handling/parsing code), the M6 PCH mechanism (GCC-only `.gch`, PCH-shadow `-I` trick, graceful Clang/mismatch fallback), the M8e relocatable-install design (`resolveOwnExecutablePath`/`runtimeIncludeArgs`, `EBASIC_RUNTIME_INSTALL_RELDIR`, Haiku's `CMAKE_INSTALL_DATADIR` override), and how `ebpm` reuses `ebc --lib` mode rather than a separate cross-package pipeline.
+- Every factual claim (file paths, function names, exact CMake variable names) checked directly against the current source (`compiler/CMakeLists.txt`, `runtime/CMakeLists.txt`, `pkg/src/build.cpp`) rather than written from memory of earlier milestones' notes, which could have drifted.
+- Deliberately does not duplicate per-symbol API detail - links to the Doxygen `docs` target instead (`cmake --build build/linux-gcc --target docs`), and to this roadmap log for historical/decision context.
+- Verified: `docs` Doxygen target still builds clean (unaffected, as expected for a pure Markdown addition); full e2e suite still 26/26.
+- Next: `docs/reference/` - types/literals, operators, control-flow (Doc-2).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
