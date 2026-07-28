@@ -72,6 +72,19 @@ std::optional<ebasic::SourceLoc> declLocFor(const ebasic::SemaIndex& index, cons
 /// this server produces is built the same way.
 nlohmann::json pointRange(const ebasic::SourceLoc& loc);
 
+/// `textDocument/completion` result: every reserved keyword, plus every
+/// name in `index` (locals/globals/procedures/TYPEs) and each entry of
+/// `dependencyIndexes` (a package's own resolved dependencies' interfaces,
+/// from `PackageContext::dependencies`) - not context-sensitive (no
+/// attempt to filter by grammatical position, e.g. offering a TYPE name
+/// where only a statement keyword would be valid), a deliberate simplicity
+/// choice for this first version. Labels for symbols (not keywords) are
+/// their *canonical* (lowercased) form - `SemaIndex` doesn't retain a
+/// declaration's original casing, unlike hover/go-to-definition, which
+/// have the cursor's own on-screen token to borrow casing from.
+nlohmann::json completionItems(const ebasic::SemaIndex& index,
+                                const std::vector<const ebasic::SemaIndex*>& dependencyIndexes);
+
 /// Every `Ident`/`Call`/`Member` expression (plus each `Dim`/`Const`/
 /// `Assign`/`ForNext`/`Goto`/`Label`/`GoSub` statement's own `name`) in
 /// `module` whose canonical form matches `targetKey` (already

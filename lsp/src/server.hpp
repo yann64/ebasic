@@ -36,6 +36,7 @@ private:
     void handleDefinition(const nlohmann::json& id, const nlohmann::json& params, std::ostream& out);
     void handleReferences(const nlohmann::json& id, const nlohmann::json& params, std::ostream& out);
     void handleDidChangeWatchedFiles(const nlohmann::json& params);
+    void handleCompletion(const nlohmann::json& id, const nlohmann::json& params, std::ostream& out);
 
     /// The `ebpm` package context for `uri`'s enclosing package, if any -
     /// resolved (a real dependency-graph walk, cloning/fetching a git
@@ -69,6 +70,12 @@ private:
     std::unordered_map<std::string, std::unordered_set<std::string>> lastDiagnosticUris_;
     /// Keyed by package root directory (see packageContextFor).
     std::unordered_map<std::string, PackageContext> packageCache_;
+    /// Keyed by document URI: the most recent SemaIndex a *successful*
+    /// checkDocument produced for it - textDocument/completion falls back
+    /// to this when the document's current text has a syntax error (no
+    /// Module at all to check), so completion doesn't just go blank while
+    /// mid-edit.
+    std::unordered_map<std::string, ebasic::SemaIndex> lastGoodIndex_;
 };
 
 } // namespace ebasic::lsp

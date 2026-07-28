@@ -68,6 +68,8 @@ void Server::dispatch(const json& msg, std::ostream& out) {
             if (isRequest) handleReferences(*idIt, params, out);
         } else if (method == "workspace/didChangeWatchedFiles") {
             handleDidChangeWatchedFiles(params);
+        } else if (method == "textDocument/completion") {
+            if (isRequest) handleCompletion(*idIt, params, out);
         } else if (isRequest) {
             // MethodNotFound (-32601) - only requests get (and need) a
             // reply; an unrecognized notification is simply ignored, per
@@ -91,6 +93,7 @@ void Server::handleInitialize(const json& id, const json& /*params*/, std::ostre
             {"hoverProvider", true},
             {"definitionProvider", true},
             {"referencesProvider", true},
+            {"completionProvider", json::object()},
         }},
         {"serverInfo", {
             {"name", "ebasic-lsp"},
@@ -139,6 +142,14 @@ void Server::publishDiagnostics(const std::string& uri, std::ostream& out) {
     const PackageContext& pkg = packageContextFor(uri, /*forceRefresh=*/false);
     std::unordered_map<std::string, json> byUri =
         computeDiagnostics(uriToPath(uri), *text, pkg.includeDirs, pkg.missingInterfaces);
+
+    // Keep textDocument/completion's own fallback up to date - cheap
+    // relative to computeDiagnostics's own pipeline run above, and means
+    // completion never needs to re-derive "the last version that actually
+    // parsed" itself.
+    if (auto checked = checkDocument(uriToPath(uri), *text, pkg.includeDirs)) {
+        lastGoodIndex_[uri] = std::move(checked->index);
+    }
     if (byUri.find(uri) == byUri.end()) {
         byUri[uri] = json::array(); // always publish for the edited doc, to clear a stale set
     }
@@ -319,6 +330,35 @@ void Server::handleReferences(const json& id, const json& params, std::ostream& 
         result.push_back({{"uri", pathToUri(checked->diags.fileName(loc.fileId))}, {"range", pointRange(loc)}});
     }
     sendResult(out, id, result);
+}
+
+void Server::handleCompletion(const json& id, const json& params, std::ostream& out) {
+    const std::string uri = params.at("textDocument").at("uri").get<std::string>();
+    const std::string* text = documents_.find(uri);
+    if (!text) {
+        sendResult(out, id, json::array());
+        return;
+    }
+    const PackageContext& pkg = packageContextFor(uri, /*forceRefresh=*/false);
+    auto checked = checkDocument(uriToPath(uri), *text, pkg.includeDirs);
+
+    static const ebasic::SemaIndex emptyIndex;
+    const ebasic::SemaIndex* index = &emptyIndex;
+    if (checked) {
+        index = &checked->index;
+    } else if (auto it = lastGoodIndex_.find(uri); it != lastGoodIndex_.end()) {
+        // The current text doesn't even parse (mid-edit) - fall back to
+        // the last version that did, rather than offering nothing.
+        index = &it->second;
+    }
+
+    std::vector<const ebasic::SemaIndex*> depIndexes;
+    depIndexes.reserve(pkg.dependencies.size());
+    for (const auto& [depName, dep] : pkg.dependencies) {
+        (void)depName;
+        depIndexes.push_back(&dep.index);
+    }
+    sendResult(out, id, completionItems(*index, depIndexes));
 }
 
 void Server::handleDidChangeWatchedFiles(const json& params) {

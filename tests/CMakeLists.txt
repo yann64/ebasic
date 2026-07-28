@@ -214,3 +214,10 @@ add_test(
     NAME lsp_pkgaware
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/lsp/pkgaware_test.sh $<TARGET_FILE:ebasic_lsp> $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc>
 )
+
+# LSP-6: completion (keywords + in-scope symbols), including the "last
+# good parse" fallback when the current text has a syntax error.
+add_test(
+    NAME lsp_completion
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/lsp/completion_test.sh $<TARGET_FILE:ebasic_lsp>
+)

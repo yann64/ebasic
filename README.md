@@ -16,6 +16,10 @@ to C++ and compiled with a real backend compiler (g++/clang++).
   conditional compilation in `.bas` source itself
 - Namespaces, TYPE-based OOP (fields, inheritance, properties, operator overloading)
 - Automated documentation generation (`docgen`)
+- `ebpm`-aware Language Server (`ebasic_lsp`): real-time diagnostics,
+  hover, go-to-definition, find-references, outline, and completion,
+  resolving `#include`d `ebpm` dependency interfaces the same way a real
+  `ebpm build` would
 
 ## OS Support
 
@@ -67,7 +71,7 @@ actually installed, so this works unmodified regardless of prefix.
 
 - **[Getting Started](docs/guide/getting-started.md)** - build, first program, first package
 - **[Language Reference](docs/reference/index.md)** - every keyword, dictionary-style
-- **End-user guide**: [`ebc`](docs/guide/ebc.md), [`ebpm`](docs/guide/ebpm.md), [`docgen`](docs/guide/docgen.md), [`ebasic_lsp`](docs/guide/lsp.md) (work in progress)
+- **End-user guide**: [`ebc`](docs/guide/ebc.md), [`ebpm`](docs/guide/ebpm.md), [`docgen`](docs/guide/docgen.md), [`ebasic_lsp`](docs/guide/lsp.md)
 - **[`examples/`](examples/)** - one small, runnable program per language feature area
 - **[Developer Documentation](docs/developer/architecture.md)** - compile pipeline, module map, for anyone extending the compiler itself
 - **API docs** - generated with [Doxygen](https://www.doxygen.nl/) (`cmake --build build/linux-gcc --target docs`, output at `build/docs/html/index.html`)

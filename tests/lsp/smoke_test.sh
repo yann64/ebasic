@@ -33,8 +33,10 @@ frame() {
     frame '{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///tmp/hello.bas","languageId":"ebasic","version":1,"text":"PRINT \"hi\"\n"}}}'
     frame '{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file:///tmp/hello.bas","version":2},"contentChanges":[{"text":"PRINT \"hi again\"\n"}]}}'
     frame '{"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":"file:///tmp/hello.bas"}}}'
-    # textDocument/completion isn't implemented until LSP-6.
-    frame '{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{}}'
+    # A made-up, never-real method name - all six real LSP slices (LSP-1
+    # through LSP-6) are implemented now, so this deliberately isn't a real
+    # LSP method at all, just to exercise MethodNotFound.
+    frame '{"jsonrpc":"2.0","id":2,"method":"textDocument/notARealMethod","params":{}}'
     # A malformed request for an *implemented* method (missing the required
     # textDocument field) must get InvalidParams, not crash the server - a
     # real bug once hover started doing params.at("textDocument") with no
@@ -63,7 +65,7 @@ check() {
 }
 check '"textDocumentSync":1'
 check '"name":"ebasic-lsp"'
-check '"code":-32601'   # textDocument/completion isn't implemented until LSP-6
+check '"code":-32601'   # an unrecognized method name
 check '"error":{"code":-32602'  # malformed hover params -> InvalidParams, not a crash
 check '"id":4'                  # ... and it's the reply to that same request
 check '"id":3'          # the shutdown response

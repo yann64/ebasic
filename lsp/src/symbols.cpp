@@ -195,6 +195,60 @@ std::optional<ebasic::SourceLoc> declLocFor(const ebasic::SemaIndex& index, cons
 
 namespace {
 
+// Every reserved keyword the lexer recognizes (lexer.cpp's own `keywords`
+// table, kept in sync by hand - a small, presentation-only duplication:
+// unlike parsing/name-resolution logic, a completion list is just data,
+// the same reasoning docgen's own basicTypeName copy already relies on).
+const std::vector<std::string>& reservedKeywords() {
+    static const std::vector<std::string> keywords = {
+        "DIM", "AS", "PRINT", "BYTE", "UBYTE", "SHORT", "USHORT", "INTEGER", "LONG", "UINTEGER",
+        "LONGINT", "ULONGINT", "SINGLE", "DOUBLE", "BOOLEAN", "STRING", "TRUE", "FALSE", "MOD", "AND",
+        "OR", "XOR", "NOT", "SHL", "SHR", "IF", "THEN", "ELSEIF", "ELSE", "END", "SELECT", "CASE",
+        "FOR", "TO", "STEP", "NEXT", "DO", "LOOP", "WHILE", "WEND", "UNTIL", "GOTO", "EXIT", "CONST",
+        "ENUM", "SUB", "FUNCTION", "BYVAL", "BYREF", "RETURN", "CALL", "REDIM", "PRESERVE", "GOSUB",
+        "TYPE", "NAMESPACE", "PTR", "ANY", "UNION", "DECLARE", "CONSTRUCTOR", "DESTRUCTOR", "THIS",
+        "EXTENDS", "VIRTUAL", "OVERRIDE", "BASE", "PROPERTY", "OPERATOR", "EXTERN", "LIB", "ALIAS",
+        "CDECL", "ZSTRING",
+    };
+    return keywords;
+}
+
+// LSP CompletionItemKind values (see the spec's own enum) relevant here.
+constexpr int kCompletionKindKeyword = 14;
+constexpr int kCompletionKindFunction = 3;
+constexpr int kCompletionKindClass = 7;
+constexpr int kCompletionKindVariable = 6;
+
+void addFromIndex(const ebasic::SemaIndex& index, nlohmann::json& items) {
+    for (const auto& [name, info] : index.procedures) {
+        (void)info;
+        items.push_back({{"label", name}, {"kind", kCompletionKindFunction}});
+    }
+    for (const auto& [name, info] : index.structs) {
+        (void)info;
+        items.push_back({{"label", name}, {"kind", kCompletionKindClass}});
+    }
+    for (const auto& [name, info] : index.symbols) {
+        (void)info;
+        items.push_back({{"label", name}, {"kind", kCompletionKindVariable}});
+    }
+}
+
+} // namespace
+
+nlohmann::json completionItems(const ebasic::SemaIndex& index,
+                                const std::vector<const ebasic::SemaIndex*>& dependencyIndexes) {
+    nlohmann::json items = nlohmann::json::array();
+    for (const std::string& kw : reservedKeywords()) {
+        items.push_back({{"label", kw}, {"kind", kCompletionKindKeyword}});
+    }
+    addFromIndex(index, items);
+    for (const ebasic::SemaIndex* dep : dependencyIndexes) addFromIndex(*dep, items);
+    return items;
+}
+
+namespace {
+
 /// True for the statement kinds whose own `name` field is itself a
 /// reference to (or the declaration of) a symbol - Assign's simple-target
 /// form in particular has no Expr node of its own for its target, unlike

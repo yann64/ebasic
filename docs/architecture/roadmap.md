@@ -581,7 +581,7 @@ The user asked for a plan to "implement compilation using clang++". **Direct ins
 - **Explicitly out of scope, as decided in the plan**: extending M6's PCH speedup to Clang's own `-include-pch` mechanism (a distinct performance feature, not required for correctness - M6's original GCC-only decision stands) and a MinGW+Clang toolchain on Windows (a materially bigger, more novel addition than reusing an already-available compiler on an already-supported platform).
 - Verified: full e2e suite (28/28) with both the default `g++` backend and `CXX=clang++`; a clean `-Wall -Wextra` rebuild of eBasic's own compiler under Clang.
 
-## LSP Plan Summary (in progress)
+## LSP Plan Summary (complete - see the per-slice Implementation Notes below)
 
 The user asked for a detailed plan to implement a Language Server Protocol
 server for eBasic, explicitly required to be aware of `ebpm` dependencies
@@ -936,6 +936,49 @@ one-off patch. Fixed the same way: `tests/lsp/pkgaware_test.sh` gained its
 own `to_file_uri` helper (`cd "$dir" && pwd -P` then `cygpath -w` when
 available), applied to `MAIN_URI`. Verified locally (including a real
 symlinked temp dir) before pushing.
+
+## LSP-6 Implementation Notes (completion, done - all six LSP slices now complete)
+
+- `completionItems(index, dependencyIndexes)` (`lsp/src/symbols.cpp`):
+  every reserved keyword (a small, hand-maintained copy of `lexer.cpp`'s
+  own keyword table - presentation-only data, not parsing/resolution
+  logic, the same reasoning `docgen`'s own `basicTypeName` copy already
+  relies on) plus every name in the current document's own `SemaIndex`
+  and each of the package's resolved dependencies' own indexes
+  (`PackageContext::dependencies`, already built by LSP-5). Not
+  context-sensitive (no attempt to filter by grammatical position) -
+  labels for symbols are their canonical (lowercased) form, since
+  `SemaIndex` doesn't retain a declaration's original casing and
+  completion (unlike hover/go-to-definition) has no specific on-screen
+  token to borrow casing from.
+- **The "last good parse" fallback** (`Server::lastGoodIndex_`, keyed by
+  document URI): `publishDiagnostics` (already run on every `didOpen`/
+  `didChange`) now also runs `checkDocument` and caches its `SemaIndex`
+  whenever it succeeds. `handleCompletion` uses the *current* text's own
+  `checkDocument` result when available, falling back to this cache when
+  the current text has a syntax error (mid-edit) - so completion doesn't
+  go blank while still typing, per the plan's own explicit design.
+- Verified manually first (a real fixture, a genuinely broken mid-edit
+  version, confirming completion still returned the same 76 items -
+  keywords + `Square`/`total` - after the syntax error), then as
+  `tests/lsp/completion_test.sh` (new `lsp_completion` CTest).
+- **`lsp_smoke` needed a second fix** (the same class of self-inflicted
+  staleness as LSP-3's "hover became real, breaking the MethodNotFound
+  test that happened to send a bare hover request"): its own
+  "unimplemented method" check used `textDocument/completion` - now a
+  *real* method, so the check started asserting `-32601` against a
+  request that now legitimately succeeds. Fixed by switching to a
+  deliberately-fake, never-real method name
+  (`textDocument/notARealMethod`) instead of borrowing whichever real
+  method happened to be unimplemented *this slice* - a test that won't go
+  stale again the next time a new capability lands.
+- Verified: full e2e suite (34/34, including the new `lsp_completion`), a
+  clean `-Wall -Wextra` rebuild.
+
+All six planned LSP slices (transport/sync, diagnostics, symbols/hover,
+go-to-definition/references, `ebpm`-awareness, completion) are now
+complete and CI-green on all 4 platforms. `docs/guide/lsp.md` updated to
+reflect this (no longer "work in progress").
 
 ## Testing Strategy
 

@@ -8,11 +8,11 @@ package's auto-generated `<name>.iface.bas`). Speaks the real protocol
 (`Content-Length`-framed JSON-RPC over stdio) - any LSP client can launch
 it, not just the one documented below.
 
-**Status: work in progress, built up in slices.** This page describes
-what's implemented so far; it grows with each slice rather than being
-written all at once.
+**Status: all six planned slices implemented** (built up incrementally -
+see `docs/architecture/roadmap.md`'s "LSP Plan Summary" and per-slice
+Implementation Notes for how each one was verified).
 
-## What's implemented so far
+## What's implemented
 
 **LSP-1 (transport + document sync):**
 
@@ -83,11 +83,25 @@ written all at once.
   restart the server) to pick up the fresh interface - a real, honest gap,
   not a silent one.
 
-Completion is a later slice (see `docs/architecture/roadmap.md`'s "LSP
-Plan Summary" for the full list). A request for an unimplemented method
-gets a real JSON-RPC `MethodNotFound` (`-32601`) error, not silence; a
-malformed request for an *implemented* method gets `InvalidParams`
-(`-32602`), never a crash.
+**LSP-6 (completion):**
+
+- `textDocument/completion` offers every reserved keyword, every in-scope
+  local/global/procedure/`TYPE` name, and every name exposed by the
+  package's own resolved dependencies - not context-sensitive (no attempt
+  to filter by grammatical position). A symbol's completion label is its
+  *canonical* (lowercased) form, unlike hover/go-to-definition - `SemaIndex`
+  doesn't retain a declaration's original casing, and completion has no
+  on-screen token to borrow casing from the way a hover/go-to-definition
+  request does.
+- If the document's current text has a syntax error (mid-edit), completion
+  falls back to the last version that parsed successfully, rather than
+  going blank while you're still typing.
+
+This completes all six planned slices (see `docs/architecture/roadmap.md`'s
+"LSP Plan Summary"). A request for an unrecognized method still gets a
+real JSON-RPC `MethodNotFound` (`-32601`) error, not silence; a malformed
+request for an *implemented* method gets `InvalidParams` (`-32602`), never
+a crash.
 
 ## Trying it in Neovim
 
@@ -115,9 +129,10 @@ outline via `:lua vim.lsp.buf.document_symbol()`, and hover via
 ## Verifying without an editor
 
 `tests/lsp/smoke_test.sh`, `tests/lsp/diagnostics_test.sh`,
-`tests/lsp/symbols_test.sh`, `tests/lsp/definition_references_test.sh`, and
-`tests/lsp/pkgaware_test.sh` drive the server directly over its real stdio
-transport (the same Content-Length JSON-RPC framing any client speaks) and
+`tests/lsp/symbols_test.sh`, `tests/lsp/definition_references_test.sh`,
+`tests/lsp/pkgaware_test.sh`, and `tests/lsp/completion_test.sh` drive the
+server directly over its real stdio transport (the same Content-Length
+JSON-RPC framing any client speaks) and
 run as part of the normal test suite (`ctest -R lsp_`) - useful for
 confirming the protocol contract works without needing an LSP-capable
 editor on hand. `pkgaware_test.sh` in particular runs a real `ebpm build`
