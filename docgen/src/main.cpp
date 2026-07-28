@@ -5,29 +5,85 @@
 #include "parser/parser.hpp"
 #include "preprocessor/preprocessor.hpp"
 
+#include "ebasic/version.hpp"
+
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <string>
+#include <vector>
 
 namespace fs = std::filesystem;
 
 namespace {
 
+struct Options {
+    std::string inputPath;
+    std::string outputDir;
+    bool showVersion = false;
+    bool showHelp = false;
+};
+
 void printUsage(std::ostream& os) {
     os << "usage: docgen <input.bas> -o <output-dir>\n";
+    os << "       docgen [-v | --version] [-h | --help]\n";
     os << "  produces <output-dir>/index.md and <output-dir>/index.html\n";
+}
+
+bool parseArgs(int argc, char** argv, Options& opts, std::string& err) {
+    std::vector<std::string> args(argv + 1, argv + argc);
+    for (size_t i = 0; i < args.size(); ++i) {
+        const std::string& a = args[i];
+        if (a == "-o") {
+            if (i + 1 >= args.size()) {
+                err = "-o requires an argument";
+                return false;
+            }
+            opts.outputDir = args[++i];
+        } else if (a == "-v" || a == "--version") {
+            opts.showVersion = true;
+        } else if (a == "-h" || a == "--help") {
+            opts.showHelp = true;
+        } else if (!a.empty() && a[0] == '-') {
+            err = "unknown option: " + a;
+            return false;
+        } else {
+            if (!opts.inputPath.empty()) {
+                err = "multiple input files are not supported";
+                return false;
+            }
+            opts.inputPath = a;
+        }
+    }
+    if (!opts.showVersion && !opts.showHelp && (opts.inputPath.empty() || opts.outputDir.empty())) {
+        err = "expected <input.bas> -o <output-dir>";
+        return false;
+    }
+    return true;
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 4 || std::string(argv[2]) != "-o") {
+    Options opts;
+    std::string err;
+    if (!parseArgs(argc, argv, opts, err)) {
+        std::cerr << "docgen: error: " << err << "\n";
         printUsage(std::cerr);
         return 1;
     }
-    std::string inputPath = argv[1];
-    std::string outputDir = argv[3];
+    if (opts.showVersion) {
+        std::cout << "docgen " << ebasic::versionString() << "\n";
+        return 0;
+    }
+    if (opts.showHelp) {
+        printUsage(std::cout);
+        return 0;
+    }
+
+    std::string inputPath = opts.inputPath;
+    std::string outputDir = opts.outputDir;
 
     std::ifstream in(inputPath);
     if (!in) {

@@ -1,0 +1,17 @@
+#pragma once
+#include <string>
+
+namespace ebasic {
+inline constexpr const char* kProjectVersion = "@PROJECT_VERSION@";
+inline constexpr const char* kGitHash = "@EBASIC_GIT_HASH@";
+
+inline std::string versionString() {
+    std::string s = kProjectVersion;
+    if (kGitHash[0] != '\0') {
+        s += " (";
+        s += kGitHash;
+        s += ")";
+    }
+    return s;
+}
+} // namespace ebasic

@@ -3,6 +3,8 @@
 #include "manifest.hpp"
 #include "resolve.hpp"
 
+#include "ebasic/version.hpp"
+
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -17,6 +19,7 @@ namespace {
 
 void printUsage(std::ostream& os) {
     os << "usage: ebpm <command> [args]\n";
+    os << "       ebpm [-v | --version] [-h | --help]\n";
     os << "commands:\n";
     os << "  new <name> [--lib]   scaffold a new package directory <name>/\n";
     os << "  init [--lib]         scaffold a package in the current directory\n";
@@ -319,6 +322,18 @@ int main(int argc, char** argv) {
         return 1;
     }
     std::string command = args[0];
+    // -v/--version and -h/--help are checked on the leading token only, not
+    // scanned for anywhere in argv - "run" forwards everything after "--"
+    // to the user's own program (e.g. `ebpm run -- --help`), which must
+    // reach that program untouched, not be swallowed by ebpm itself.
+    if (command == "-v" || command == "--version") {
+        std::cout << "ebpm " << ebasic::versionString() << "\n";
+        return 0;
+    }
+    if (command == "-h" || command == "--help") {
+        printUsage(std::cout);
+        return 0;
+    }
     std::vector<std::string> rest(args.begin() + 1, args.end());
 
     if (command == "new") return cmdNew(rest);

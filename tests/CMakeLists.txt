@@ -154,3 +154,9 @@ add_test(
     NAME e2e_docgen_simple
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_docgen/run_case.sh $<TARGET_FILE:docgen> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_docgen/simple
 )
+
+# Version reporting + --help: -v/--version/-h/--help on all three binaries.
+add_test(
+    NAME cli_version_help
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/cli/version_help.sh $<TARGET_FILE:ebc> $<TARGET_FILE:ebpm> $<TARGET_FILE:docgen>
+)

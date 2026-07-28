@@ -27,7 +27,7 @@ add_executable(ebc
     src/codegen/codegen.cpp
 )
 
-target_include_directories(ebc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(ebc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/generated)
 target_link_libraries(ebc PRIVATE ebasic_process ebasic_frontend)
 
 target_compile_definitions(ebc PRIVATE

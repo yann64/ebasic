@@ -6,6 +6,8 @@
 #include "preprocessor/preprocessor.hpp"
 #include "sema/sema.hpp"
 
+#include "ebasic/version.hpp"
+
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -47,6 +49,12 @@ struct Options {
     // dependency's auto-generated interface file without knowing its exact
     // relative filesystem path.
     std::vector<std::string> includeDirs;
+    // -v/--version and -h/--help short-circuit everything else in main() -
+    // parseArgs still returns true with these set even if no input file was
+    // given, since printing the version/usage is a valid, complete
+    // invocation on its own.
+    bool showVersion = false;
+    bool showHelp = false;
 };
 
 bool parseArgs(int argc, char** argv, Options& opts, std::string& err) {
@@ -87,6 +95,10 @@ bool parseArgs(int argc, char** argv, Options& opts, std::string& err) {
             opts.keepCpp = true;
         } else if (a == "--lib") {
             opts.libMode = true;
+        } else if (a == "-v" || a == "--version") {
+            opts.showVersion = true;
+        } else if (a == "-h" || a == "--help") {
+            opts.showHelp = true;
         } else if (!a.empty() && a[0] == '-') {
             err = "unknown option: " + a;
             return false;
@@ -98,7 +110,7 @@ bool parseArgs(int argc, char** argv, Options& opts, std::string& err) {
             opts.inputPath = a;
         }
     }
-    if (opts.inputPath.empty()) {
+    if (opts.inputPath.empty() && !opts.showVersion && !opts.showHelp) {
         err = "no input file";
         return false;
     }
@@ -108,6 +120,7 @@ bool parseArgs(int argc, char** argv, Options& opts, std::string& err) {
 void printUsage(std::ostream& os) {
     os << "usage: ebc <input.bas> [-o <output>] [-cxx <compiler>] [-L <dir>]... [-I <dir>]...\n";
     os << "           [-l <name>]... [--keep-cpp] [--lib]\n";
+    os << "       ebc [-v | --version] [-h | --help]\n";
     os << "  --lib: build a library instead of an executable - <output> is a bare\n";
     os << "  name; produces lib<output>.a (a static archive) and <output>.iface.bas\n";
     os << "  (an auto-generated interface for dependent packages to #include).\n";
@@ -236,6 +249,14 @@ int main(int argc, char** argv) {
         std::cerr << "ebc: error: " << err << "\n";
         printUsage(std::cerr);
         return 1;
+    }
+    if (opts.showVersion) {
+        std::cout << "ebc " << ebasic::versionString() << "\n";
+        return 0;
+    }
+    if (opts.showHelp) {
+        printUsage(std::cout);
+        return 0;
     }
 
     std::ifstream in(opts.inputPath);
