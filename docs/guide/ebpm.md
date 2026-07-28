@@ -154,6 +154,12 @@ dependency order - each package receives the `-I`/`-L`/`-l` flags for its
 binary even though `app`'s own source never `#include`s `base`'s interface
 directly).
 
+`ebpm` has no `-cxx` flag of its own - it invokes `ebc` as a child process,
+which inherits the `CXX` environment variable directly, so `CXX=clang++
+ebpm build` (or `run`/`test`) selects `clang++` as the backend compiler for
+every package in the graph, exactly like passing `-cxx clang++` to `ebc`
+directly (see [`ebc`](ebc.md)) - verified with a real multi-package build.
+
 ## `ebpm run`
 
 ```sh

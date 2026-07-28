@@ -28,6 +28,15 @@ jobs:
         run: cmake --build --preset linux-clang
       - name: Test
         run: ctest --preset linux-clang
+      - name: Test (clang++ as the generated-code backend, not just ebc's own build compiler)
+        # These are two independent choices - which compiler builds ebc
+        # itself (set by the linux-clang preset above) vs. which compiler
+        # ebc invokes to compile *generated* C++ (ebc's own -cxx/CXX,
+        # otherwise defaulting to plain g++ regardless of how ebc itself
+        # was built) - until now nothing in CI exercised the second choice
+        # with clang++ at all. ebpm needs no flag of its own: it inherits
+        # CXX from the environment when it shells out to ebc.
+        run: CXX=clang++ ctest --preset linux-clang
 
   macos:
     runs-on: macos-latest

@@ -15,7 +15,14 @@ produce a native executable (or, with `--lib`, a static library).
   (`hello.bas` -> `hello`) if omitted.
 - **`-cxx <compiler>`** - which backend compiler to invoke. Defaults to the
   `CXX` environment variable if set, else the bare name `g++` (resolved via
-  `PATH`).
+  `PATH`). `clang++` is a real, tested alternative (`-cxx clang++` or
+  `CXX=clang++`) - verified to compile and run the entire language test
+  suite, including `--lib` mode and `EXTERN` interop, and verified that a
+  library built with one of `g++`/`clang++` links correctly against a
+  program built with the other. This is independent of which compiler built
+  `ebc` itself (see [Developer Documentation](../developer/architecture.md)
+  if you're building eBasic from source) - `ebc` always uses whatever
+  `-cxx`/`CXX` says, regardless.
 - **`-L <dir>`** (repeatable) - extra library search path, forwarded to the
   backend as `-L <dir>`.
 - **`-I <dir>`** (repeatable) - extra `#include` search path for `.bas`
