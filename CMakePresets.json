@@ -43,12 +43,13 @@
     },
     {
       "name": "haiku",
-      "description": "Haiku's traditional system compiler is GCC, same shape as linux-gcc. Unverified locally (M8) - no live Haiku access yet, see docs/architecture/roadmap.md's M8e notes.",
+      "description": "Haiku's traditional system compiler is GCC, same shape as linux-gcc. Live-verified on real Haiku hardware (M8e). CMAKE_INSTALL_DATADIR overrides GNUInstallDirs's generic 'share' default: Haiku's own real data directory is 'data' (confirmed via cmake --system-information's CMAKE_ROOT; /boot/system/share exists but is empty), and GNUInstallDirs itself has no Haiku-specific handling at all.",
       "generator": "Unix Makefiles",
       "binaryDir": "${sourceDir}/build/haiku",
       "cacheVariables": {
         "CMAKE_CXX_COMPILER": "g++",
-        "CMAKE_BUILD_TYPE": "Debug"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_INSTALL_DATADIR": "data"
       }
     }
   ],

@@ -31,12 +31,23 @@ target_include_directories(ebc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(ebc PRIVATE ebasic_process ebasic_frontend)
 
 target_compile_definitions(ebc PRIVATE
+    # M8e: two candidate locations for the runtime headers/PCH are baked
+    # in - the build-tree path (used unconditionally until now) as a
+    # fallback, and a path *relative to ebc's own executable* for the
+    # installed case (see main.cpp's resolveRuntimeDirs) - a real package
+    # (Haiku or otherwise) can't rely on the build tree still existing.
     EBASIC_RUNTIME_INCLUDE_DIR="${CMAKE_SOURCE_DIR}/runtime/include"
-    # M6: the runtime PCH shadow directory (see runtime/CMakeLists.txt) -
-    # empty string if no system g++ was found to build one; main.cpp only
-    # adds the extra -I when this is non-empty.
     EBASIC_RUNTIME_PCH_DIR="${EBASIC_RUNTIME_PCH_DIR}"
+    # Relative path from the installed executable's own directory
+    # (${CMAKE_INSTALL_BINDIR}) to the installed runtime headers'
+    # directory - computed from GNUInstallDirs so it stays correct
+    # regardless of a platform's own bin/data-directory-naming convention
+    # (Haiku's own "data" vs the generic "share" - see the top-level
+    # CMakeLists.txt's comment).
+    EBASIC_RUNTIME_INSTALL_RELDIR="../${CMAKE_INSTALL_DATADIR}/ebasic/runtime"
 )
 if(TARGET ebasic_runtime_pch)
     add_dependencies(ebc ebasic_runtime_pch)
 endif()
+
+install(TARGETS ebc RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

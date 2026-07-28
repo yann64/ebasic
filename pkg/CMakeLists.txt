@@ -14,3 +14,5 @@ add_executable(ebpm
     src/gitdep.cpp
 )
 target_link_libraries(ebpm PRIVATE tomlplusplus ebasic_process)
+
+install(TARGETS ebpm RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

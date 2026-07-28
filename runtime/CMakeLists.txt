@@ -43,3 +43,13 @@ else()
     # an empty/missing -I directory is already a harmless no-op.
     set(EBASIC_RUNTIME_PCH_DIR "" CACHE INTERNAL "")
 endif()
+
+# M8e: installs the headers (and the PCH, if one was built) under the same
+# "ebasic/runtime/{include,pch}" substructure ebc's own
+# EBASIC_RUNTIME_INSTALL_RELDIR (compiler/CMakeLists.txt) expects to find
+# relative to wherever it's actually installed - see main.cpp's
+# resolveRuntimeDirs for the runtime-side lookup this pairs with.
+install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_DATADIR}/ebasic/runtime/include)
+if(GXX_EXECUTABLE)
+    install(DIRECTORY ${EBASIC_RUNTIME_PCH_DIR}/ DESTINATION ${CMAKE_INSTALL_DATADIR}/ebasic/runtime/pch)
+endif()

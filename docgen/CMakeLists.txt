@@ -4,3 +4,5 @@ add_executable(docgen
 )
 target_include_directories(docgen PRIVATE ${CMAKE_SOURCE_DIR}/compiler/src)
 target_link_libraries(docgen PRIVATE ebasic_frontend)
+
+install(TARGETS docgen RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

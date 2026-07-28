@@ -117,18 +117,79 @@ void printUsage(std::ostream& os) {
     os << "  module's own Lib \"name\" clauses.\n";
 }
 
-// M6: the runtime's PCH shadow directory (built by runtime/CMakeLists.txt,
-// GCC only), added as an extra -I *before* the real runtime include dir so
-// a plain `#include "ebasic/runtime/runtime.hpp"` automatically prefers the
+// M8e: resolves ebc's own on-disk location from argv[0], so
+// runtimeIncludeArgs (below) can look for an *installed* runtime sitting
+// alongside this executable before falling back to the build-tree path
+// baked in at compile time - a real install (Haiku package or otherwise)
+// can't rely on the build tree it was built in still existing.
+fs::path resolveOwnExecutablePath(const std::string& argv0) {
+    fs::path p(argv0);
+    std::error_code ec;
+    if (p.has_parent_path()) {
+        fs::path resolved = fs::absolute(p, ec);
+        if (ec) return p;
+        fs::path canonical = fs::canonical(resolved, ec);
+        return ec ? resolved : canonical;
+    }
+    // A bare name (e.g. just "ebc", found via a PATH lookup by whatever
+    // launched us) - search PATH ourselves the same way, since argv[0]
+    // alone doesn't tell us where we actually live.
+    const char* pathEnv = std::getenv("PATH");
+    if (pathEnv) {
+#ifdef _WIN32
+        const char sep = ';';
+#else
+        const char sep = ':';
+#endif
+        std::string pathStr = pathEnv;
+        size_t start = 0;
+        while (start <= pathStr.size()) {
+            size_t end = pathStr.find(sep, start);
+            std::string dir = pathStr.substr(start, end == std::string::npos ? std::string::npos : end - start);
+            if (!dir.empty()) {
+                fs::path candidate = fs::path(dir) / p;
+                if (fs::exists(candidate, ec)) {
+                    fs::path canonical = fs::canonical(candidate, ec);
+                    return ec ? candidate : canonical;
+                }
+            }
+            if (end == std::string::npos) break;
+            start = end + 1;
+        }
+    }
+    return p;
+}
+
+// M6/M8e: the runtime's PCH shadow directory and header include dir, added
+// as extra -I entries (PCH dir first) so a plain
+// `#include "ebasic/runtime/runtime.hpp"` automatically prefers a
 // precompiled .gch sitting there - no other change to the compile
 // invocation is needed (verified empirically: GCC's own automatic PCH
 // lookup, and its own graceful fallback when the .gch doesn't match, both
-// require no special flags at all). Empty when no system g++ was found to
-// build one (CMake defines the macro either way) - appending nothing in
-// that case, rather than passing a bogus `-I ""`, which could otherwise
-// resolve to searching the current directory.
-std::vector<std::string> runtimeIncludeArgs() {
+// require no special flags at all). Tries the installed layout relative to
+// ebc's own executable path first (EBASIC_RUNTIME_INSTALL_RELDIR, see
+// compiler/CMakeLists.txt and runtime/CMakeLists.txt's install() rules),
+// falling back to the build-tree paths baked in at compile time - which is
+// what every existing dev/test workflow (running ebc straight from the
+// build tree) still gets, unchanged.
+std::vector<std::string> runtimeIncludeArgs(const std::string& argv0) {
     std::vector<std::string> args;
+
+    fs::path exeDir = resolveOwnExecutablePath(argv0).parent_path();
+    fs::path installedBase = exeDir / EBASIC_RUNTIME_INSTALL_RELDIR;
+    fs::path installedInclude = installedBase / "include";
+    std::error_code ec;
+    if (fs::exists(installedInclude / "ebasic" / "runtime" / "runtime.hpp", ec)) {
+        fs::path installedPch = installedBase / "pch";
+        if (fs::exists(installedPch / "ebasic" / "runtime" / "runtime.hpp.gch", ec)) {
+            args.push_back("-I");
+            args.push_back(installedPch.string());
+        }
+        args.push_back("-I");
+        args.push_back(installedInclude.string());
+        return args;
+    }
+
     if (std::string pchDir = EBASIC_RUNTIME_PCH_DIR; !pchDir.empty()) {
         args.push_back("-I");
         args.push_back(pchDir);
@@ -258,7 +319,7 @@ int main(int argc, char** argv) {
         fs::path ifacePath = outDir / (libName + ".iface.bas");
 
         std::vector<std::string> compileArgs = {cxx, "-std=c++17"};
-        for (const std::string& a : runtimeIncludeArgs()) compileArgs.push_back(a);
+        for (const std::string& a : runtimeIncludeArgs(argv[0])) compileArgs.push_back(a);
         compileArgs.push_back("-c");
         compileArgs.push_back(cppPath.string());
         compileArgs.push_back("-o");
@@ -275,7 +336,7 @@ int main(int argc, char** argv) {
         fs::remove(objPath, ec);
     } else {
         std::vector<std::string> compileArgs = {cxx, "-std=c++17"};
-        for (const std::string& a : runtimeIncludeArgs()) compileArgs.push_back(a);
+        for (const std::string& a : runtimeIncludeArgs(argv[0])) compileArgs.push_back(a);
         compileArgs.push_back(cppPath.string());
         compileArgs.push_back("-o");
         compileArgs.push_back(opts.outputPath);

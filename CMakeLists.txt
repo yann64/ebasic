@@ -7,6 +7,16 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# M8e: standard install-directory conventions (bin/, share/, ...) - used by
+# every install() rule below. Haiku's own convention deviates from the
+# generic GNU default (its real data directory is "data", not "share" -
+# confirmed on real Haiku hardware: /boot/system/share exists but is empty,
+# while /boot/system/data holds every other installed package's own data,
+# e.g. CMake's own CMAKE_ROOT lands there - CMakePresets.json's "haiku"
+# preset overrides CMAKE_INSTALL_DATADIR accordingly, since GNUInstallDirs
+# itself has no Haiku-specific handling at all).
+include(GNUInstallDirs)
+
 add_subdirectory(runtime)
 add_subdirectory(compiler)
 add_subdirectory(pkg)
