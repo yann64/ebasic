@@ -1,6 +1,7 @@
 #pragma once
 
 #include "documents.hpp"
+#include "pkgaware.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -34,6 +35,18 @@ private:
     void handleHover(const nlohmann::json& id, const nlohmann::json& params, std::ostream& out);
     void handleDefinition(const nlohmann::json& id, const nlohmann::json& params, std::ostream& out);
     void handleReferences(const nlohmann::json& id, const nlohmann::json& params, std::ostream& out);
+    void handleDidChangeWatchedFiles(const nlohmann::json& params);
+
+    /// The `ebpm` package context for `uri`'s enclosing package, if any -
+    /// resolved (a real dependency-graph walk, cloning/fetching a git
+    /// dependency exactly like `ebpm build` would) and cached by package
+    /// root directory. `forceRefresh` re-resolves even if already cached -
+    /// only ever set from `didOpen` (and `didChangeWatchedFiles`
+    /// invalidation): re-resolving on every `didChange` keystroke would
+    /// mean a real `git fetch` per keystroke for a git dependency. Returns
+    /// a shared, empty `PackageContext` (never null) for a document with
+    /// no enclosing `ebasic.toml` at all.
+    const PackageContext& packageContextFor(const std::string& uri, bool forceRefresh);
 
     /// Re-runs the compile pipeline over `uri`'s current text and publishes
     /// one `textDocument/publishDiagnostics` per affected file (the edited
@@ -54,6 +67,8 @@ private:
     /// lets the next run know which of those to clear if they're no longer
     /// affected (e.g. an #include that stopped failing).
     std::unordered_map<std::string, std::unordered_set<std::string>> lastDiagnosticUris_;
+    /// Keyed by package root directory (see packageContextFor).
+    std::unordered_map<std::string, PackageContext> packageCache_;
 };
 
 } // namespace ebasic::lsp

@@ -56,11 +56,38 @@ written all at once.
   flattens them into one `Module` before Sema ever runs), plus the
   declaration itself when the request's `includeDeclaration` is set.
 
-`ebpm`-awareness and completion are later slices (see
-`docs/architecture/roadmap.md`'s "LSP Plan Summary" for the full list). A
-request for an unimplemented method gets a real JSON-RPC `MethodNotFound`
-(`-32601`) error, not silence; a malformed request for an *implemented*
-method gets `InvalidParams` (`-32602`), never a crash.
+**LSP-5 (`ebpm`-awareness):**
+
+- A document belonging to an `ebpm` package (walked up from its own
+  directory looking for `ebasic.toml`, the same way `ebpm` itself finds
+  "the package rooted at the current directory") gets its dependencies'
+  `-I` search path computed the exact same way a real `ebpm build` would
+  (`ebasic_pkg`'s own `resolveDependencyGraph`/`computeConsumerDirs`,
+  reused in-process) - so `#include "dep.iface.bas"` resolves correctly.
+- If a dependency hasn't been built yet (its `target/<name>.iface.bas`
+  doesn't exist), the resulting diagnostic gets an actionable hint
+  appended: *"...- dependency 'mathlib' hasn't been built yet; run `ebpm
+  build`"* - instead of a bare, confusing file-not-found error.
+- Hover and go-to-definition fall back to a dependency's own parsed
+  interface when a symbol isn't found in the current document - landing a
+  go-to-definition in the dependency's real, on-disk generated interface
+  file, the same convention many language servers use for vendored/
+  pre-built dependencies.
+- **Known limitation**: dependency resolution (which can run a real `git
+  fetch` for a `git` dependency) is deliberately only ever re-run on
+  `didOpen`, never per-keystroke on `didChange` - a `workspace/
+  didChangeWatchedFiles` handler exists to invalidate a package's cached
+  resolution, but this server doesn't yet dynamically register interest in
+  it (`client/registerCapability`), so most editors won't send it
+  unprompted today. After running `ebpm build`, reopen the file (or
+  restart the server) to pick up the fresh interface - a real, honest gap,
+  not a silent one.
+
+Completion is a later slice (see `docs/architecture/roadmap.md`'s "LSP
+Plan Summary" for the full list). A request for an unimplemented method
+gets a real JSON-RPC `MethodNotFound` (`-32601`) error, not silence; a
+malformed request for an *implemented* method gets `InvalidParams`
+(`-32602`), never a crash.
 
 ## Trying it in Neovim
 
@@ -88,11 +115,15 @@ outline via `:lua vim.lsp.buf.document_symbol()`, and hover via
 ## Verifying without an editor
 
 `tests/lsp/smoke_test.sh`, `tests/lsp/diagnostics_test.sh`,
-`tests/lsp/symbols_test.sh`, and `tests/lsp/definition_references_test.sh`
-drive the server directly over its real stdio transport (the same
-Content-Length JSON-RPC framing any client speaks) and run as part of the
-normal test suite (`ctest -R lsp_`) - useful for confirming the protocol
-contract works without needing an LSP-capable editor on hand.
+`tests/lsp/symbols_test.sh`, `tests/lsp/definition_references_test.sh`, and
+`tests/lsp/pkgaware_test.sh` drive the server directly over its real stdio
+transport (the same Content-Length JSON-RPC framing any client speaks) and
+run as part of the normal test suite (`ctest -R lsp_`) - useful for
+confirming the protocol contract works without needing an LSP-capable
+editor on hand. `pkgaware_test.sh` in particular runs a real `ebpm build`
+against the `tests/e2e_pkg/lib_and_app` fixture to verify both the
+"dependency not built yet" hint and the real, correct cross-package
+diagnostics/hover/go-to-definition once it is built.
 
 ## See also
 

@@ -25,14 +25,18 @@ struct CheckedDocument {
 };
 
 /// Runs Preprocessor -> Lexer -> Parser -> Sema over `text` as if it were
-/// `path`'s current content (mirrors computeDiagnostics's own pipeline).
-/// Returns nullopt only if Preprocessor/Lexer/Parser themselves failed (no
-/// usable Module at all) - if Sema finds body-level errors, this still
-/// returns the Module and whatever SemaIndex Sema built, since
-/// collectProcedures/collectTypes (module-level signatures) always run to
-/// completion before any body is checked, so real symbol information is
-/// available even for a document with in-progress edits elsewhere in it.
-std::optional<CheckedDocument> checkDocument(const std::string& path, const std::string& text);
+/// `path`'s current content (mirrors computeDiagnostics's own pipeline,
+/// including `includeDirs` - an `ebpm` package's own dependency target
+/// directories, from `resolvePackageContext`; empty for a document with no
+/// enclosing package). Returns nullopt only if Preprocessor/Lexer/Parser
+/// themselves failed (no usable Module at all) - if Sema finds body-level
+/// errors, this still returns the Module and whatever SemaIndex Sema
+/// built, since collectProcedures/collectTypes (module-level signatures)
+/// always run to completion before any body is checked, so real symbol
+/// information is available even for a document with in-progress edits
+/// elsewhere in it.
+std::optional<CheckedDocument> checkDocument(const std::string& path, const std::string& text,
+                                              const std::vector<std::string>& includeDirs = {});
 
 /// Finds the identifier token, if any, spanning 0-based `line`/`character`
 /// in `text` - re-lexes just that one line in isolation. eBasic's AST

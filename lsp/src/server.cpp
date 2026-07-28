@@ -7,6 +7,8 @@
 #include "ast/ast.hpp"
 #include "ebasic/version.hpp"
 
+#include <filesystem>
+
 namespace ebasic::lsp {
 
 using json = nlohmann::json;
@@ -64,6 +66,8 @@ void Server::dispatch(const json& msg, std::ostream& out) {
             if (isRequest) handleDefinition(*idIt, params, out);
         } else if (method == "textDocument/references") {
             if (isRequest) handleReferences(*idIt, params, out);
+        } else if (method == "workspace/didChangeWatchedFiles") {
+            handleDidChangeWatchedFiles(params);
         } else if (isRequest) {
             // MethodNotFound (-32601) - only requests get (and need) a
             // reply; an unrecognized notification is simply ignored, per
@@ -105,6 +109,11 @@ void Server::handleDidOpen(const json& params, std::ostream& out) {
     const json& doc = params.at("textDocument");
     const std::string uri = doc.at("uri").get<std::string>();
     documents_.open(uri, doc.at("text").get<std::string>());
+    // Resolve (or re-resolve) this document's enclosing ebpm package now,
+    // not lazily inside publishDiagnostics - didOpen is the one point
+    // where a real re-resolution (a git fetch, for a git dependency) is
+    // worth paying for; didChange must never trigger one per keystroke.
+    packageContextFor(uri, /*forceRefresh=*/true);
     publishDiagnostics(uri, out);
 }
 
@@ -127,7 +136,9 @@ void Server::publishDiagnostics(const std::string& uri, std::ostream& out) {
     const std::string* text = documents_.find(uri);
     if (!text) return;
 
-    std::unordered_map<std::string, json> byUri = computeDiagnostics(uriToPath(uri), *text);
+    const PackageContext& pkg = packageContextFor(uri, /*forceRefresh=*/false);
+    std::unordered_map<std::string, json> byUri =
+        computeDiagnostics(uriToPath(uri), *text, pkg.includeDirs, pkg.missingInterfaces);
     if (byUri.find(uri) == byUri.end()) {
         byUri[uri] = json::array(); // always publish for the edited doc, to clear a stale set
     }
@@ -157,7 +168,8 @@ void Server::handleDocumentSymbol(const json& id, const json& params, std::ostre
         sendResult(out, id, json::array());
         return;
     }
-    auto checked = checkDocument(uriToPath(uri), *text);
+    const PackageContext& pkg = packageContextFor(uri, /*forceRefresh=*/false);
+    auto checked = checkDocument(uriToPath(uri), *text, pkg.includeDirs);
     if (!checked) {
         // A syntax error means no Module at all yet - an empty outline,
         // not an error reply (a request failure would be more disruptive
@@ -184,12 +196,23 @@ void Server::handleHover(const json& id, const json& params, std::ostream& out) 
         sendResult(out, id, nullptr);
         return;
     }
-    auto checked = checkDocument(uriToPath(uri), *text);
+    const PackageContext& pkg = packageContextFor(uri, /*forceRefresh=*/false);
+    auto checked = checkDocument(uriToPath(uri), *text, pkg.includeDirs);
     if (!checked) {
         sendResult(out, id, nullptr);
         return;
     }
     std::optional<json> result = hoverFor(checked->index, *word);
+    if (!result) {
+        // Not found in this document's own symbols - try each of the
+        // package's own dependencies' parsed interfaces next, in
+        // resolution order, before giving up.
+        for (const auto& [depName, dep] : pkg.dependencies) {
+            (void)depName;
+            result = hoverFor(dep.index, *word);
+            if (result) break;
+        }
+    }
     sendResult(out, id, result ? *result : json(nullptr));
 }
 
@@ -209,18 +232,35 @@ void Server::handleDefinition(const json& id, const json& params, std::ostream& 
         sendResult(out, id, json::array());
         return;
     }
-    auto checked = checkDocument(uriToPath(uri), *text);
+    const PackageContext& pkg = packageContextFor(uri, /*forceRefresh=*/false);
+    auto checked = checkDocument(uriToPath(uri), *text, pkg.includeDirs);
     if (!checked) {
         sendResult(out, id, json::array());
         return;
     }
     std::optional<ebasic::SourceLoc> loc = declLocFor(checked->index, *word);
-    if (!loc) {
-        sendResult(out, id, json::array());
+    if (loc) {
+        json location = {{"uri", pathToUri(checked->diags.fileName(loc->fileId))}, {"range", pointRange(*loc)}};
+        sendResult(out, id, location);
         return;
     }
-    json location = {{"uri", pathToUri(checked->diags.fileName(loc->fileId))}, {"range", pointRange(*loc)}};
-    sendResult(out, id, location);
+    // Not found in this document's own symbols - try each of the
+    // package's own dependencies' parsed interfaces next: a
+    // go-to-definition landing in one lands in its generated interface
+    // file (its real, on-disk contract), the same UX convention many
+    // language servers use for pre-built/vendored dependencies.
+    for (const auto& [depName, dep] : pkg.dependencies) {
+        (void)depName;
+        std::optional<ebasic::SourceLoc> depLoc = declLocFor(dep.index, *word);
+        if (depLoc) {
+            // .iface.bas is always flat (auto-generated, no #include of
+            // its own), so its only fileId is the file itself.
+            json location = {{"uri", pathToUri(dep.path)}, {"range", pointRange(*depLoc)}};
+            sendResult(out, id, location);
+            return;
+        }
+    }
+    sendResult(out, id, json::array());
 }
 
 void Server::handleReferences(const json& id, const json& params, std::ostream& out) {
@@ -240,7 +280,8 @@ void Server::handleReferences(const json& id, const json& params, std::ostream& 
         sendResult(out, id, json::array());
         return;
     }
-    auto checked = checkDocument(uriToPath(uri), *text);
+    const PackageContext& pkg = packageContextFor(uri, /*forceRefresh=*/false);
+    auto checked = checkDocument(uriToPath(uri), *text, pkg.includeDirs);
     if (!checked) {
         sendResult(out, id, json::array());
         return;
@@ -278,6 +319,42 @@ void Server::handleReferences(const json& id, const json& params, std::ostream& 
         result.push_back({{"uri", pathToUri(checked->diags.fileName(loc.fileId))}, {"range", pointRange(loc)}});
     }
     sendResult(out, id, result);
+}
+
+void Server::handleDidChangeWatchedFiles(const json& params) {
+    // Each changed file's own directory might be (or be under) a package
+    // root already cached - rather than recomputing every affected
+    // package's own root exactly, just drop any cache entry whose root is
+    // an ancestor of the changed path, so the next packageContextFor call
+    // for a document in that package re-resolves instead of reusing stale
+    // data. NOTE: this handler only ever fires if the client actually
+    // sends this notification - this server doesn't yet dynamically
+    // register interest in it (client/registerCapability), so most
+    // clients won't send it unprompted; reopening the document (or
+    // restarting the server) is the reliable fallback today. See
+    // docs/guide/lsp.md.
+    for (const auto& change : params.value("changes", json::array())) {
+        std::string changedPath = uriToPath(change.value("uri", std::string()));
+        for (auto it = packageCache_.begin(); it != packageCache_.end();) {
+            const std::string& root = it->first;
+            if (changedPath.compare(0, root.size(), root) == 0) {
+                it = packageCache_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+}
+
+const PackageContext& Server::packageContextFor(const std::string& uri, bool forceRefresh) {
+    static const PackageContext empty;
+    std::string dir = std::filesystem::path(uriToPath(uri)).parent_path().string();
+    std::optional<std::string> root = findPackageRoot(dir);
+    if (!root) return empty;
+    if (forceRefresh || packageCache_.find(*root) == packageCache_.end()) {
+        packageCache_[*root] = resolvePackageContext(*root);
+    }
+    return packageCache_[*root];
 }
 
 void Server::sendResult(std::ostream& out, const json& id, json result) {

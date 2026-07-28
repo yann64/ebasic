@@ -856,6 +856,72 @@ both a wrong assumption baked into the *test*:
   `lsp_definition_references`), a clean `-Wall -Wextra` rebuild, real CI
   green on all 4 platforms.
 
+## LSP-5 Implementation Notes (`ebpm`-awareness, done)
+
+The user's explicit requirement for this whole LSP effort - "the LSP must
+also consider libraries included by ebpm". New `lsp/src/pkgaware.{hpp,cpp}`:
+
+- `findPackageRoot(startDir)`: walks up from a document's own directory
+  looking for `ebasic.toml`, mirroring how `ebpm` itself finds "the package
+  rooted at the current directory" - just anchored at the file's directory
+  instead of a process's CWD.
+- `resolvePackageContext(packageDir)`: calls `ebasic_pkg`'s real
+  `computeConsumerDirs` (for the `-I` set) and `resolveDependencyGraph`
+  (to check each dependency's own `interfacePath()` existence, and parse
+  every *existing* one via `checkDocument` into its own `SemaIndex`) -
+  reusing the real dependency-graph resolution rather than a second,
+  potentially-drifting implementation, exactly per the plan.
+- **A real, deliberate design constraint, confirmed by reading
+  `gitdep.cpp` before writing any caching logic**: `resolveDependencyGraph`
+  runs a genuine `git clone`/`git fetch` for every `git` dependency edge,
+  every single call, with no "skip if recently resolved" caching of its
+  own. Recomputing this on every `didChange` keystroke would mean a
+  network fetch per keystroke - a correctness/performance problem, not
+  just a slowness one. `Server::packageContextFor` therefore caches by
+  package root directory (`packageCache_`) and only force-refreshes from
+  `didOpen` (`handleDidOpen` calls it with `forceRefresh=true` before
+  `publishDiagnostics`); every other call site (`didChange`'s own
+  `publishDiagnostics`, `documentSymbol`, `hover`, `definition`,
+  `references`) reuses whatever's cached.
+- `computeDiagnostics`/`checkDocument` both gained an `includeDirs`
+  parameter (default empty, so every pre-existing call site/test is
+  unaffected), threaded through to `preprocess()` so `#include
+  "dep.iface.bas"` resolves via the package's own dependency target
+  directories, exactly like a real `ebc -I ...` invocation.
+- **Graceful degradation for an unbuilt dependency**: `computeDiagnostics`
+  gained `missingInterfaces` (dependency names whose own
+  `target/<name>.iface.bas` doesn't exist yet) and a small
+  `annotateMissingInterface` rewrite - a raw preprocessor "cannot open
+  included file 'mathlib.iface.bas'" becomes "...- dependency 'mathlib'
+  hasn't been built yet; run `ebpm build`" whenever the missing file's
+  name matches a real, known-but-unbuilt dependency (an unrelated/
+  misspelled `#include` target still gets the honest, unannotated error).
+- **Cross-package hover/go-to-definition**: `handleHover`/`handleDefinition`
+  fall back to each of the package's resolved dependencies' own parsed
+  `SemaIndex` (`PackageContext::dependencies`) when a symbol isn't found in
+  the current document's own index - a go-to-definition landing in a
+  dependency lands in its real, on-disk generated `.iface.bas` (assumed to
+  be the interface's only file, since an auto-generated interface never
+  itself contains an `#include` - true by construction, not just
+  observed).
+- **`workspace/didChangeWatchedFiles`**: a handler exists
+  (`handleDidChangeWatchedFiles`, dropping any cached package whose root is
+  an ancestor of a changed file's path) but this server doesn't yet
+  dynamically register interest in it (`client/registerCapability` - a
+  server-initiated request/response exchange this server has no
+  infrastructure for yet, a real, deliberate scope cut rather than a silent
+  gap) - documented honestly in `docs/guide/lsp.md` as a known limitation:
+  reopening the file (or restarting the server) after `ebpm build` is
+  today's reliable path to fresh dependency info.
+- Verified against a real fixture, not just unit-style checks: reused
+  `tests/e2e_pkg/lib_and_app` (a real `[lib]` + `[bin]` pair) - manually
+  first (confirmed the exact "not built yet" hint, then a real `ebpm
+  build`, then real hover/go-to-definition results), then as the new
+  `tests/lsp/pkgaware_test.sh` (`lsp_pkgaware` CTest), which runs a real
+  `ebpm build` itself rather than pre-building the fixture.
+- Verified: full e2e suite (33/33, including the new `lsp_pkgaware`), a
+  clean `-Wall -Wextra` rebuild.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

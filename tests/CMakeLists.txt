@@ -206,3 +206,11 @@ add_test(
     NAME lsp_definition_references
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/lsp/definition_references_test.sh $<TARGET_FILE:ebasic_lsp>
 )
+
+# LSP-5: ebpm-awareness - the "dependency not built yet" hint, then real
+# cross-package diagnostics/hover/go-to-definition once a real `ebpm build`
+# has produced the dependency's interface.
+add_test(
+    NAME lsp_pkgaware
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/lsp/pkgaware_test.sh $<TARGET_FILE:ebasic_lsp> $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc>
+)

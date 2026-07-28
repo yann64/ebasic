@@ -12,12 +12,41 @@
 
 namespace ebasic::lsp {
 
-std::unordered_map<std::string, nlohmann::json> computeDiagnostics(const std::string& path,
-                                                                     const std::string& text) {
+namespace {
+
+/// Rewrites a raw "cannot open included file '<name>.iface.bas'" message
+/// (preprocessor.cpp's own wording) into an actionable hint when `<name>`
+/// is a known dependency that just hasn't been built yet - `message`
+/// unchanged otherwise (a genuinely missing/misspelled #include target, or
+/// one naming a dependency this package doesn't even have, still gets the
+/// original, honest error).
+std::string annotateMissingInterface(const std::string& message,
+                                      const std::vector<std::string>& missingInterfaces) {
+    const std::string prefix = "cannot open included file '";
+    if (message.compare(0, prefix.size(), prefix) != 0 || message.back() != '\'') return message;
+    std::string quoted = message.substr(prefix.size(), message.size() - prefix.size() - 1);
+    const std::string suffix = ".iface.bas";
+    if (quoted.size() <= suffix.size() || quoted.compare(quoted.size() - suffix.size(), suffix.size(), suffix) != 0) {
+        return message;
+    }
+    std::string depName = quoted.substr(0, quoted.size() - suffix.size());
+    for (const std::string& missing : missingInterfaces) {
+        if (missing == depName) {
+            return message + " - dependency '" + depName + "' hasn't been built yet; run `ebpm build`";
+        }
+    }
+    return message;
+}
+
+} // namespace
+
+std::unordered_map<std::string, nlohmann::json> computeDiagnostics(
+    const std::string& path, const std::string& text, const std::vector<std::string>& includeDirs,
+    const std::vector<std::string>& missingInterfaces) {
     ebasic::DiagnosticEngine diags;
     diags.registerFile(path); // fileId 0, mirroring ebc's own main.cpp
 
-    ebasic::PreprocessResult pre = ebasic::preprocess(text, path, diags, {});
+    ebasic::PreprocessResult pre = ebasic::preprocess(text, path, diags, includeDirs);
     if (!diags.hasErrors()) {
         ebasic::Lexer lexer(pre.source, pre.lineMap, diags);
         std::vector<ebasic::Token> tokens = lexer.tokenize();
@@ -53,7 +82,7 @@ std::unordered_map<std::string, nlohmann::json> computeDiagnostics(const std::st
                     {"end", {{"line", d->loc.line - 1}, {"character", d->loc.column}}},
                 }},
                 {"severity", d->severity == ebasic::Severity::Error ? 1 : 2},
-                {"message", d->message},
+                {"message", annotateMissingInterface(d->message, missingInterfaces)},
                 {"source", "ebasic"},
             });
         }

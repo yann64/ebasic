@@ -78,11 +78,12 @@ std::string renderProcSignature(bool isFunction, const std::string& name,
 
 } // namespace
 
-std::optional<CheckedDocument> checkDocument(const std::string& path, const std::string& text) {
+std::optional<CheckedDocument> checkDocument(const std::string& path, const std::string& text,
+                                              const std::vector<std::string>& includeDirs) {
     ebasic::DiagnosticEngine diags;
     diags.registerFile(path);
 
-    ebasic::PreprocessResult pre = ebasic::preprocess(text, path, diags, {});
+    ebasic::PreprocessResult pre = ebasic::preprocess(text, path, diags, includeDirs);
     if (diags.hasErrors()) return std::nullopt;
 
     ebasic::Lexer lexer(pre.source, pre.lineMap, diags);

@@ -6,6 +6,7 @@ add_executable(ebasic_lsp
     src/uri.cpp
     src/diagnostics.cpp
     src/symbols.cpp
+    src/pkgaware.cpp
 )
 target_include_directories(ebasic_lsp PRIVATE
     ${CMAKE_SOURCE_DIR}/compiler/src
