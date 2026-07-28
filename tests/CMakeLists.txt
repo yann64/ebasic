@@ -19,102 +19,102 @@ set_target_properties(ebasic_fixture_cpp PROPERTIES
 
 add_test(
     NAME e2e_hello_world
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/hello_world
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/hello_world
 )
 
 add_test(
     NAME e2e_arithmetic
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/arithmetic
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/arithmetic
 )
 
 add_test(
     NAME e2e_types_and_operators
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/types_and_operators
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/types_and_operators
 )
 
 add_test(
     NAME e2e_control_flow
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/control_flow
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/control_flow
 )
 
 add_test(
     NAME e2e_const_enum_arrays_preprocessor
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/const_enum_arrays_preprocessor
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/const_enum_arrays_preprocessor
 )
 
 add_test(
     NAME e2e_sub_function
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/sub_function
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/sub_function
 )
 
 add_test(
     NAME e2e_redim
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/redim
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/redim
 )
 
 add_test(
     NAME e2e_gosub
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/gosub
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/gosub
 )
 
 add_test(
     NAME e2e_include
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/include
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/include
 )
 
 add_test(
     NAME e2e_type_records
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/type_records
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/type_records
 )
 
 add_test(
     NAME e2e_namespace
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/namespace
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/namespace
 )
 
 add_test(
     NAME e2e_pointers
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/pointers
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/pointers
 )
 
 add_test(
     NAME e2e_unions
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/unions
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/unions
 )
 
 add_test(
     NAME e2e_classes
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/classes
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/classes
 )
 
 add_test(
     NAME e2e_inheritance
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/inheritance
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/inheritance
 )
 
 add_test(
     NAME e2e_properties
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/properties
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/properties
 )
 
 add_test(
     NAME e2e_operators
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/operators
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/operators
 )
 
 add_test(
     NAME e2e_extern_c
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/extern_c ${EBASIC_FIXTURE_LIB_DIR}
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/extern_c ${EBASIC_FIXTURE_LIB_DIR}
 )
 
 add_test(
     NAME e2e_extern_cpp
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/extern_cpp ${EBASIC_FIXTURE_LIB_DIR}
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/extern_cpp ${EBASIC_FIXTURE_LIB_DIR}
 )
 
 add_test(
     NAME e2e_extern_handle
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/extern_handle ${EBASIC_FIXTURE_LIB_DIR}
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/extern_handle ${EBASIC_FIXTURE_LIB_DIR}
 )
 
 # M5: a parallel golden-test harness (tests/e2e_pkg/) driving ebpm rather
@@ -122,14 +122,14 @@ add_test(
 # + src/) plus an expected.stdout, round-tripped through `ebpm run`.
 add_test(
     NAME e2e_pkg_simple_bin
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/simple_bin
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/simple_bin
 )
 
 # The actual M5 milestone bar: a lib + an app depending on it (path
 # dependency), built/run end-to-end via `ebpm build && ebpm run`.
 add_test(
     NAME e2e_pkg_lib_and_app
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/lib_and_app myapp
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/lib_and_app myapp
 )
 
 # M5d: a git dependency, resolved against a real local bare repo the test
@@ -137,13 +137,13 @@ add_test(
 # clone/fetch/checkout code path with no real-network dependency.
 add_test(
     NAME e2e_pkg_lib_and_app_git
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_git_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/lib_and_app_git
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_git_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/lib_and_app_git
 )
 
 # M5e: `ebpm test` on a [lib] package with one passing tests/*.bas file.
 add_test(
     NAME e2e_pkg_lib_with_tests
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/lib_with_tests . test
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/lib_with_tests . test
 )
 
 # M7b: docgen against a small fixture with a documented CONST/FUNCTION, an
@@ -152,5 +152,5 @@ add_test(
 # verified instead, per the M7 plan).
 add_test(
     NAME e2e_docgen_simple
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e_docgen/run_case.sh $<TARGET_FILE:docgen> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_docgen/simple
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_docgen/run_case.sh $<TARGET_FILE:docgen> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_docgen/simple
 )
