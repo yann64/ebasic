@@ -9,14 +9,16 @@ COPYRIGHT="2026 yann64"
 LICENSE="MIT"
 REVISION="1"
 
-# Draft recipe (M8e) - written and dry-run-verified against real Haiku
-# hardware (haikuporter's own recipe-format conventions, cross-checked
-# against app-arch/brotli's real recipe), but not yet submitted upstream.
-# No tagged release exists yet, so SOURCE_URI/CHECKSUM_SHA256 below are
-# placeholders to fill in once v0.1.0 is actually tagged - update both
-# together when that happens, haikuporter refuses to build otherwise.
+# First tagged release (v1.0.0) - SOURCE_URI/CHECKSUM_SHA256 below now point
+# at the real, published tag, verified by actually downloading it
+# (https://github.com/yann64/ebasic/archive/refs/tags/v1.0.0.tar.gz) and
+# computing its real sha256, rather than a placeholder (see the earlier
+# ebasic-0.1.0.recipe draft, written before any tag existed). Still not yet
+# submitted upstream to haikuports - haikuporter's own recipe-format
+# conventions were dry-run-verified against real Haiku hardware (M8e),
+# cross-checked against app-arch/brotli's real recipe.
 SOURCE_URI="https://github.com/yann64/ebasic/archive/refs/tags/v$portVersion.tar.gz"
-CHECKSUM_SHA256="TODO-fill-in-once-v$portVersion-is-tagged"
+CHECKSUM_SHA256="2c0366a815ce40d043ad398a6062517d31c8cf519e374e7164e48dd1c06768ff"
 SOURCE_FILENAME="ebasic-$portVersion.tar.gz"
 
 ARCHITECTURES="all !x86_gcc2"
@@ -31,6 +33,9 @@ REQUIRES="
 	haiku
 	"
 
+BUILD_REQUIRES="
+	haiku_devel
+	"
 BUILD_PREREQUIRES="
 	cmd:cmake
 	cmd:g++
@@ -43,6 +48,7 @@ BUILD()
 	cmake \
 		-B build -S . \
 		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_INSTALL_PREFIX=$prefix \
 		-DCMAKE_INSTALL_BINDIR=$binDir \
 		-DCMAKE_INSTALL_DATADIR=data
 
