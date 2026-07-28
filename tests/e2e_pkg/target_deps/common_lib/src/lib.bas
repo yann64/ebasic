@@ -1,0 +1,3 @@
+FUNCTION Doubled(n AS INTEGER) AS INTEGER
+    Doubled = n * 2
+END FUNCTION

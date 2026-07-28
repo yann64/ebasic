@@ -55,7 +55,7 @@ bool resolveDependencyGraph(const std::string& rootDir, std::vector<ResolvedPack
         if (!loadManifest(manifestPath, manifest, err)) return false;
 
         visiting.push_back(key);
-        for (const Dependency& dep : manifest.dependencies) {
+        for (const Dependency& dep : effectiveDependencies(manifest)) {
             std::string depDir;
             std::string depGitCommit;
             if (!dep.path.empty()) {

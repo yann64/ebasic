@@ -1,0 +1,22 @@
+[package]
+name = "target_deps_app"
+version = "0.1.0"
+
+[bin]
+name = "target_deps_app"
+path = "src/main.bas"
+
+[dependencies]
+common_lib = { path = "../common_lib" }
+
+[target.windows.dependencies]
+windows_lib = { path = "../windows_lib" }
+
+[target.linux.dependencies]
+linux_lib = { path = "../linux_lib" }
+
+[target.macos.dependencies]
+macos_lib = { path = "../macos_lib" }
+
+[target.haiku.dependencies]
+haiku_lib = { path = "../haiku_lib" }

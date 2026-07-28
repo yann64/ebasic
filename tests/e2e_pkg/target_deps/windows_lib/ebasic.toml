@@ -1,0 +1,6 @@
+[package]
+name = "windows_lib"
+version = "0.1.0"
+
+[lib]
+path = "src/lib.bas"

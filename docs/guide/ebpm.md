@@ -81,6 +81,45 @@ A git dependency may additionally name **at most one** of `branch`, `tag`,
 or `rev` (defaults to the repository's own default branch if none is
 given).
 
+### Platform-specific dependencies
+
+```toml
+[dependencies]
+common_lib = { path = "../common_lib" }        # built on every platform
+
+[target.windows.dependencies]
+win32_bindings = { path = "../win32_bindings" }
+
+[target.linux.dependencies]
+gtk4_bindings = { path = "../gtk4_bindings" }
+
+[target.macos.dependencies]
+cocoa_bindings = { path = "../cocoa_bindings" }
+
+[target.haiku.dependencies]
+haiku_bindings = { path = "../haiku_bindings" }
+```
+
+A `[target.<os>.dependencies]` section (`<os>` is one of `windows`, `linux`,
+`macos`, or `haiku` - an unrecognized name is a build error, not a silent
+no-op) is only built when `<os>` matches the platform `ebpm` itself is
+running on - `ebpm` never cross-compiles, so "the current target" always
+means "whatever OS this `ebpm` binary is". Combined with an unconditional
+`[dependencies]` entry (built everywhere) and each `.bas` file's own
+[auto-defined platform macros](../reference/preprocessor.md#platform-macros)
+to conditionally `#include` the right interface, this is how a program
+calls into a genuinely different platform API per OS - e.g. Win32 on
+Windows, GTK4 on Linux:
+
+```basic
+#ifdef __FB_WIN32__
+    #include "win32_bindings.iface.bas"
+#endif
+#ifdef __FB_LINUX__
+    #include "gtk4_bindings.iface.bas"
+#endif
+```
+
 ### The lockfile: `ebasic.lock`
 
 Auto-generated/updated by `ebpm build` (and `run`/`test`, which build first

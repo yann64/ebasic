@@ -145,7 +145,7 @@ void collectTransitiveDeps(const ResolvedPackage& pkg,
                             const std::unordered_map<std::string, const ResolvedPackage*>& byName,
                             std::unordered_set<std::string>& seen,
                             std::vector<const ResolvedPackage*>& out) {
-    for (const Dependency& dep : pkg.manifest.dependencies) {
+    for (const Dependency& dep : effectiveDependencies(pkg.manifest)) {
         auto it = byName.find(dep.name);
         if (it == byName.end()) continue; // unreachable: already resolved by resolveDependencyGraph
         if (!seen.insert(it->second->dir).second) continue; // already collected via another path

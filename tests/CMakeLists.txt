@@ -137,6 +137,17 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/lib_and_app myapp
 )
 
+# OS-conditional dependencies: [target.<os>.dependencies] resolves only the
+# current platform's own section (proven by only its lib actually getting
+# built - see collectTransitiveDeps/effectiveDependencies in build.cpp/
+# manifest.cpp) alongside the always-built [dependencies]. Deliberately
+# platform-independent expected output (see app/src/main.bas) so this same
+# fixture passes unchanged on all four CI platforms.
+add_test(
+    NAME e2e_pkg_target_deps
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/target_deps app
+)
+
 # M5d: a git dependency, resolved against a real local bare repo the test
 # itself creates (git init --bare + one commit) - exercises the real
 # clone/fetch/checkout code path with no real-network dependency.

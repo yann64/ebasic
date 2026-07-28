@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace ebpm {
@@ -44,13 +45,39 @@ struct Manifest {
     bool hasBin = false;
     BinTarget bin;
     std::vector<Dependency> dependencies;
+    /// `[target.<os>.dependencies]` entries, keyed by the exact platform name
+    /// used throughout this project's own CMakePresets.json/CI (`"windows"`/
+    /// `"linux"`/`"macos"`/`"haiku"`) - not FreeBASIC's own macro spelling
+    /// (`__FB_WIN32__`/...), a deliberate, separate vocabulary: this is a
+    /// human-typed TOML key, not source-level FreeBASIC-compatibility text.
+    /// Only the current platform's own entry (if any) is ever built - see
+    /// effectiveDependencies() and currentTargetOS().
+    std::unordered_map<std::string, std::vector<Dependency>> targetDependencies;
 };
+
+/// The exact platform name `[target.<os>.dependencies]` sections are keyed
+/// by for *this* build of ebpm - one of `"windows"`/`"linux"`/`"macos"`/
+/// `"haiku"`, computed the same way at compile time as every other
+/// platform-detection call site in this project (`process.cpp`,
+/// `gitdep.cpp`). ebpm never cross-compiles - "the current target" always
+/// means "whatever OS this ebpm binary itself is running on."
+std::string currentTargetOS();
+
+/// `manifest.dependencies` (built on every platform) plus
+/// `manifest.targetDependencies[currentTargetOS()]` (built only on this
+/// platform, empty if the manifest has no matching `[target.*]` section) -
+/// the single, shared merge every real dependency-walking call site
+/// (`resolveDependencyGraph` in resolve.cpp, `collectTransitiveDeps` in
+/// build.cpp) uses, so "which dependencies actually apply" is computed in
+/// exactly one place.
+std::vector<Dependency> effectiveDependencies(const Manifest& manifest);
 
 /// Parses and validates `manifestPath` (usually "<dir>/ebasic.toml") into
 /// `out`, applying every field default described above. Returns false (with
 /// a human-readable message in `err`) on a missing file, malformed TOML, a
-/// missing required field, or a `[dependencies]` entry naming neither `path`
-/// nor `git` (or both).
+/// missing required field, a `[dependencies]` (or `[target.*.dependencies]`)
+/// entry naming neither `path` nor `git` (or both), or a `[target.X...]`
+/// section whose `X` isn't one of `windows`/`linux`/`macos`/`haiku`.
 bool loadManifest(const std::string& manifestPath, Manifest& out, std::string& err);
 
 } // namespace ebpm
