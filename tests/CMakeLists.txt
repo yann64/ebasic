@@ -1,3 +1,22 @@
+# Tiny fixture libraries for the M4 (C/C++ interop) e2e tests - real,
+# separately-compiled static libs to link against, not just calls into
+# ebc's own runtime. Placed in a fixed subdirectory of the build tree so
+# run_case.sh can point ebc at it via -L without guessing CMake's default
+# archive output location.
+set(EBASIC_FIXTURE_LIB_DIR ${CMAKE_CURRENT_BINARY_DIR}/fixtures)
+
+add_library(ebasic_fixture_c STATIC fixtures/c/fixture.c)
+set_target_properties(ebasic_fixture_c PROPERTIES
+    OUTPUT_NAME ebfixturec
+    ARCHIVE_OUTPUT_DIRECTORY ${EBASIC_FIXTURE_LIB_DIR}
+)
+
+add_library(ebasic_fixture_cpp STATIC fixtures/cpp/fixture.cpp)
+set_target_properties(ebasic_fixture_cpp PROPERTIES
+    OUTPUT_NAME ebfixturecpp
+    ARCHIVE_OUTPUT_DIRECTORY ${EBASIC_FIXTURE_LIB_DIR}
+)
+
 add_test(
     NAME e2e_hello_world
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/hello_world

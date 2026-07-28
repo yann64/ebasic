@@ -744,6 +744,8 @@ void Codegen::genNamespaceDecl(const Stmt& stmt) {
 }
 
 std::string Codegen::generate(const Module& module) {
+    externLibs_ = module.externLibs;
+
     // Top-level DIM/CONST/ENUM become real C++ globals (declared before any
     // function bodies) so SUB/FUNCTION can see them; SUB/FUNCTION become
     // separate C++ functions (prototype + body); everything else still runs

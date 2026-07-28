@@ -23,6 +23,12 @@ struct Options {
     std::string outputPath;
     std::string cxx;
     bool keepCpp = false;
+    // Extra library search paths (`-L <dir>`, repeatable), forwarded as-is
+    // to the backend compiler. A `Lib "name"` clause (M4) only names a
+    // library, not a path to it - the path (e.g. a test's build directory)
+    // has to come from outside the .bas source, exactly like g++'s own
+    // -L/-l split.
+    std::vector<std::string> libDirs;
 };
 
 bool parseArgs(int argc, char** argv, Options& opts, std::string& err) {
@@ -41,6 +47,12 @@ bool parseArgs(int argc, char** argv, Options& opts, std::string& err) {
                 return false;
             }
             opts.cxx = args[++i];
+        } else if (a == "-L") {
+            if (i + 1 >= args.size()) {
+                err = "-L requires an argument";
+                return false;
+            }
+            opts.libDirs.push_back(args[++i]);
         } else if (a == "--keep-cpp") {
             opts.keepCpp = true;
         } else if (!a.empty() && a[0] == '-') {
@@ -62,7 +74,7 @@ bool parseArgs(int argc, char** argv, Options& opts, std::string& err) {
 }
 
 void printUsage(std::ostream& os) {
-    os << "usage: ebc <input.bas> [-o <output>] [-cxx <compiler>] [--keep-cpp]\n";
+    os << "usage: ebc <input.bas> [-o <output>] [-cxx <compiler>] [-L <dir>]... [--keep-cpp]\n";
 }
 
 } // namespace
@@ -137,6 +149,17 @@ int main(int argc, char** argv) {
     std::vector<std::string> compileArgs = {
         cxx, "-std=c++17", "-I", EBASIC_RUNTIME_INCLUDE_DIR, cppPath.string(), "-o", opts.outputPath,
     };
+    for (const std::string& dir : opts.libDirs) {
+        compileArgs.push_back("-L");
+        compileArgs.push_back(dir);
+    }
+    // Library names from `Lib "name"` clauses (M4) - -l flags must come
+    // after the object/source files on the command line for a
+    // traditional (non-`--start-group`) linker to resolve symbols from
+    // them correctly.
+    for (const std::string& lib : codegen.externLibs()) {
+        compileArgs.push_back("-l" + lib);
+    }
 
     int rc = ebasic::runProcess(compileArgs);
 

@@ -430,6 +430,11 @@ struct Stmt {
 
 struct Module {
     std::vector<StmtPtr> stmts;
+    // Library names named in a `Lib "name"` clause on an EXTERN/DECLARE
+    // (M4), collected directly by the parser (a static string needs no
+    // type-checking) and passed straight through Codegen to the driver,
+    // which appends one `-l<name>` per entry to the backend invocation.
+    std::vector<std::string> externLibs;
 };
 
 } // namespace ebasic
