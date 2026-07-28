@@ -31,6 +31,30 @@ check() {
     fi
 }
 
+# Converts a real, on-disk path to the "file://" URI eBasic's own
+# preprocessor would resolve it to for an #include target: it runs
+# fs::canonical() on any #include'd file (compiler/src/preprocessor/
+# preprocessor.cpp - deliberate, for circular-#include detection), which
+# resolves symlinks (real on macOS: /var is itself a symlink to
+# /private/var, and $(mktemp -d) lands under /var/folders/...) - `cd "$dir"
+# && pwd -P` mirrors that resolution portably. On MSYS2/Windows, a plain
+# posix-style path like "/tmp/xyz" isn't a real path a native (non-msys)
+# Win32 program can open at all - `cygpath -w` gives the real
+# "C:/Users/..." form a genuine Windows LSP client would send anyway.
+to_file_uri() {
+    local dir base resolved
+    dir="$(dirname "$1")"
+    base="$(basename "$1")"
+    resolved="$(cd "$dir" && pwd -P)/$base"
+    if command -v cygpath >/dev/null 2>&1; then
+        resolved="$(cygpath -w "$resolved")"
+        resolved="${resolved//\\//}"
+        printf 'file:///%s' "$resolved"
+    else
+        printf 'file://%s' "$resolved"
+    fi
+}
+
 # --- Scenario 1: a real Sema error, then a didChange that fixes it --------
 MAIN_URI="file://$WORKDIR/bad.bas"
 {
@@ -53,7 +77,7 @@ FUNCTION Bad() AS INTEGER
     RETURN "oops"
 END FUNCTION
 EOF
-LIB_URI="file://$WORKDIR/lib.bas"
+LIB_URI="$(to_file_uri "$WORKDIR/lib.bas")"
 MAIN2_URI="file://$WORKDIR/main.bas"
 {
     frame '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'

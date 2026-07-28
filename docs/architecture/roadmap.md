@@ -766,6 +766,49 @@ slices don't need to reshape the CMake target).
   above), manual protocol-level `documentSymbol`/`hover` checks before
   writing the permanent test.
 
+## Post-LSP-3 Fix: `lsp_diagnostics`'s cross-file scenario, caught by real CI on macOS and Windows
+
+Real CI (not caught locally - Linux's `/tmp` isn't a symlink, and this
+sandbox has no Windows/macOS to test on directly) found `lsp_diagnostics`'s
+`#include` scenario failing on **both** other platforms, for two distinct,
+genuine reasons - neither a defect in `ebasic_lsp`/the preprocessor itself,
+both a wrong assumption baked into the *test*:
+
+- **macOS**: the test expected `lib.bas`'s diagnostic to be published
+  against `file://$WORKDIR/lib.bas` (the raw `mktemp -d` path), but got
+  `file:///private/var/folders/.../lib.bas` instead. Traced to
+  `preprocessor.cpp`'s own, pre-existing, deliberate `fs::canonical()` call
+  on every `#include` target (needed for circular-`#include` detection to
+  recognize two different relative paths to the same real file) -
+  `fs::canonical` resolves symlinks, and macOS's `/var` is itself a symlink
+  to `/private/var`, so any `mktemp -d` result canonicalizes to a different
+  string. The *including* document (never written to disk - its content
+  only ever exists as the didOpen "text") keeps whatever raw path
+  string was registered for it, since canonicalizing a path that doesn't
+  exist on disk fails and falls back to the plain string - only a real,
+  on-disk `#include` *target* goes through the full canonicalization.
+  Confirmed by reproducing the exact asymmetry locally via a real symlinked
+  temp directory (`ln -sfn`) before touching the test.
+- **Windows**: the test's hand-built `file://$WORKDIR/...` URI embedded
+  MSYS2's own POSIX-style temp path (e.g. `/tmp/tmp.XXXX` or
+  `/d/a/_temp/...`) directly - a form `ebasic_lsp` (a plain, non-msys-
+  runtime-aware native `mingw-w64-x86_64-toolchain` build) cannot resolve
+  via real Win32 file APIs, so `fs::canonical()` on the `#include` target
+  failed outright ("cannot open included file"). A real Windows LSP client
+  would never send such a URI - it sends a real `file:///C:/Users/...`
+  path.
+- **Fix, in the test only** (`tests/lsp/diagnostics_test.sh`): a new
+  `to_file_uri` helper resolves symlinks via `cd "$dir" && pwd -P` (mirrors
+  `fs::canonical`'s own resolution) and, when `cygpath` is available
+  (MSYS2/Windows), converts to the real native path first - matching
+  exactly what the production pipeline actually does/expects, rather than
+  loosening the check. Verified locally by reproducing both failure modes
+  directly: a real symlinked temp dir (macOS's exact scenario) and a raw
+  manual protocol conversation confirming the asymmetric canonicalization
+  behavior first-hand, before writing the fix.
+- No production code changed - `ebasic_lsp`/the preprocessor's behavior was
+  correct throughout; only the test's own path assumptions were wrong.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
