@@ -55,6 +55,7 @@ void Sema::check(Module& module) {
     collectLabels(module.stmts);
     collectProcedures(module.stmts);
     collectTypes(module.stmts);
+    collectOperators(module.stmts);
     collectGosubUsage(module.stmts);
     checkBlock(module.stmts, /*atTopLevel=*/true);
 }
@@ -402,6 +403,45 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
     }
 }
 
+std::string Sema::operatorKey(BinOp op, const Type& lhs, const Type& rhs) const {
+    auto typeKey = [](const Type& t) -> std::string {
+        if (t.kind == TypeKind::UserDefined) return "U:" + canonicalName(t.typeName);
+        return "K:" + std::to_string(static_cast<int>(t.kind));
+    };
+    return std::to_string(static_cast<int>(op)) + "|" + typeKey(lhs) + "|" + typeKey(rhs);
+}
+
+void Sema::collectOperators(std::vector<StmtPtr>& stmts) {
+    for (auto& stmt : stmts) {
+        if (stmt->kind != StmtKind::FunctionDecl || !stmt->isOperator) continue;
+        if (stmt->params.size() != 2) continue; // already reported by the parser
+
+        const Type& lhsType = stmt->params[0].type;
+        const Type& rhsType = stmt->params[1].type;
+        bool lhsIsUser = lhsType.kind == TypeKind::UserDefined;
+        bool rhsIsUser = rhsType.kind == TypeKind::UserDefined;
+        if (!lhsIsUser && !rhsIsUser) {
+            diags_.error(stmt->loc, "at least one operand of an 'Operator " + stmt->name +
+                                         "' overload must be a user-defined TYPE");
+            continue;
+        }
+        if (lhsIsUser && !structs_.count(canonicalName(lhsType.typeName))) {
+            diags_.error(stmt->loc, "unknown TYPE '" + lhsType.typeName + "'");
+            continue;
+        }
+        if (rhsIsUser && !structs_.count(canonicalName(rhsType.typeName))) {
+            diags_.error(stmt->loc, "unknown TYPE '" + rhsType.typeName + "'");
+            continue;
+        }
+
+        std::string key = operatorKey(stmt->operatorBinOp, lhsType, rhsType);
+        if (!operatorOverloads_.emplace(key, stmt->declaredType).second) {
+            diags_.error(stmt->loc, "operator '" + stmt->name + "' is already overloaded for "
+                                     "these operand types");
+        }
+    }
+}
+
 void Sema::collectLabels(std::vector<StmtPtr>& stmts) {
     for (auto& stmt : stmts) {
         if (stmt->kind != StmtKind::Label) continue;
@@ -446,6 +486,10 @@ void Sema::collectProcedures(std::vector<StmtPtr>& stmts, const std::string& pre
         // method sharing a name with an unrelated free function, must not
         // collide here).
         if (!stmt->ownerType.empty()) continue;
+        // An operator overload - registered into operatorOverloads_ by
+        // collectOperators, keyed by (BinOp, lhs type, rhs type), never by
+        // name (its `name` is just the symbol text, for diagnostics only).
+        if (stmt->isOperator) continue;
         std::string key = prefix.empty() ? canonicalName(stmt->name) : prefix + "::" + canonicalName(stmt->name);
         if (symbols_.count(key) || procedures_.count(key)) {
             diags_.error(stmt->loc, "'" + stmt->name + "' is already declared");
@@ -1386,6 +1430,22 @@ Type Sema::checkExpr(Expr& expr) {
         case ExprKind::Binary: {
             Type lt = checkExpr(*expr.lhs);
             Type rt = checkExpr(*expr.rhs);
+
+            // A user-defined operand always resolves through the operator
+            // overload table instead of the built-in rules below -
+            // deliberately an exact (BinOp, lhsType, rhsType) match, no
+            // promotion, to keep this first real overload-resolution
+            // mechanism narrow.
+            if (lt.kind == TypeKind::UserDefined || rt.kind == TypeKind::UserDefined) {
+                auto it = operatorOverloads_.find(operatorKey(expr.binOp, lt, rt));
+                if (it == operatorOverloads_.end()) {
+                    diags_.error(expr.loc, "no matching 'Operator' overload for these operand types");
+                    expr.type = TypeKind::Unknown;
+                    return expr.type;
+                }
+                expr.type = it->second;
+                return expr.type;
+            }
 
             switch (expr.binOp) {
                 case BinOp::Concat:

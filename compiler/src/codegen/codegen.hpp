@@ -66,6 +66,21 @@ private:
     // shared by a free SUB/FUNCTION's prototype+definition and a TYPE
     // method's declaration+out-of-line definition.
     static std::string buildParamList(const std::vector<Param>& params);
+    // Same, but for an Operator overload's parameter list specifically: a
+    // UserDefined-typed parameter is always rendered `const T&` regardless
+    // of the source's BYVAL/BYREF (a plain mutable `T&`, this codebase's
+    // normal BYREF rendering, can't bind a temporary - and a chained
+    // expression like `a + b + c` passes the `a + b` temporary as an
+    // operand, so this would otherwise fail to compile the moment any
+    // operator overload is used in a chain). A primitive-typed parameter
+    // is rendered by plain value, same as always.
+    static std::string buildOperatorParamList(const std::vector<Param>& params);
+    // The literal C++ operator token for a BinOp, used both to name an
+    // Operator overload's own C++ function and, in genExpr's Binary case,
+    // to render a UserDefined operand's expression when the built-in
+    // special-cased forms (forced real division, std::pow, ...) must be
+    // skipped in favor of plain operator-overload resolution.
+    static std::string cppOperatorToken(BinOp op);
     static std::string escapeStringLiteral(const std::string& s);
     // Name of the synthesized parameterless void function a GOSUB-target
     // label's code is hoisted into. Distinct prefix from mangleName's "eb_"

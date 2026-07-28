@@ -87,6 +87,16 @@ private:
     // types (built-in trivially valid; UserDefined must name an already-
     // registered TYPE) now that every name is known.
     void collectTypes(std::vector<StmtPtr>& stmts);
+    // Registers free-standing (global) operator overloads, keyed by
+    // (BinOp, lhs type, rhs type) - run after collectTypes so a TYPE-named
+    // parameter can be validated regardless of declaration order. Requires
+    // at least one operand to be a UserDefined TYPE (matches FB's own
+    // restriction).
+    void collectOperators(std::vector<StmtPtr>& stmts);
+    // Composite lookup key for operatorOverloads_ - deliberately an exact
+    // match on both operand types (no promotion/coercion), per the plan's
+    // "keep this narrow" guidance.
+    std::string operatorKey(BinOp op, const Type& lhs, const Type& rhs) const;
     void checkBlock(std::vector<StmtPtr>& stmts, bool atTopLevel);
     void checkStmt(Stmt& stmt, bool atTopLevel);
     void checkCondition(Expr& expr, const char* what);
@@ -158,6 +168,9 @@ private:
     Type currentFunctionReturnType_; // valid while insideProcedure_ and it's a FUNCTION
     std::unordered_map<std::string, ProcedureInfo> procedures_;
     std::unordered_map<std::string, RecordInfo> structs_; // canonical TYPE name -> its fields (never namespace-qualified; TYPE stays global-only for now)
+    // operatorKey(op, lhsType, rhsType) -> the overload's return type. See
+    // collectOperators.
+    std::unordered_map<std::string, Type> operatorOverloads_;
     std::unordered_set<std::string> namespaces_; // canonical NAMESPACE names, for qualified-access resolution
     // Canonical name of the NAMESPACE currently being checked, or empty.
     // Only one level deep - nested NAMESPACEs aren't supported yet.

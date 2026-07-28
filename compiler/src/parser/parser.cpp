@@ -548,6 +548,7 @@ StmtPtr Parser::parseStatement() {
     if (check(TokenKind::KwConstructor)) return parseConstructor();
     if (check(TokenKind::KwDestructor)) return parseDestructor();
     if (check(TokenKind::KwProperty)) return parseProperty();
+    if (check(TokenKind::KwOperator)) return parseOperatorDecl();
     if (check(TokenKind::KwCall)) return parseCallStmt();
     if (check(TokenKind::KwReturn)) return parseReturn();
     if (check(TokenKind::Identifier) && peek(1).kind == TokenKind::Newline &&
@@ -968,6 +969,93 @@ StmtPtr Parser::parseProperty() {
     if (isGetter) currentFunctionName_ = outerFunction;
     expect(TokenKind::KwEnd, "expected END PROPERTY");
     expect(TokenKind::KwProperty, "expected END PROPERTY");
+    expectStmtEnd();
+    return stmt;
+}
+
+bool Parser::matchBinOpSymbol(BinOp& out) {
+    if (match(TokenKind::Plus)) { out = BinOp::Add; return true; }
+    if (match(TokenKind::Minus)) { out = BinOp::Sub; return true; }
+    if (match(TokenKind::Star)) { out = BinOp::Mul; return true; }
+    if (match(TokenKind::Slash)) { out = BinOp::Div; return true; }
+    if (match(TokenKind::Backslash)) { out = BinOp::IDiv; return true; }
+    if (match(TokenKind::Caret)) { out = BinOp::Pow; return true; }
+    if (match(TokenKind::Amp)) { out = BinOp::Concat; return true; }
+    if (match(TokenKind::Equals)) { out = BinOp::Eq; return true; }
+    if (match(TokenKind::NotEq)) { out = BinOp::Ne; return true; }
+    if (match(TokenKind::LessEq)) { out = BinOp::Le; return true; }
+    if (match(TokenKind::GreaterEq)) { out = BinOp::Ge; return true; }
+    if (match(TokenKind::Less)) { out = BinOp::Lt; return true; }
+    if (match(TokenKind::Greater)) { out = BinOp::Gt; return true; }
+    if (match(TokenKind::KwMod)) { out = BinOp::Mod; return true; }
+    if (match(TokenKind::KwShl)) { out = BinOp::Shl; return true; }
+    if (match(TokenKind::KwShr)) { out = BinOp::Shr; return true; }
+    if (match(TokenKind::KwAnd)) { out = BinOp::And; return true; }
+    if (match(TokenKind::KwOr)) { out = BinOp::Or; return true; }
+    if (match(TokenKind::KwXor)) { out = BinOp::Xor; return true; }
+    return false;
+}
+
+namespace {
+// For diagnostics/Stmt::name only - lookup itself is keyed by the BinOp
+// enum value plus operand types, never by this text.
+const char* binOpSymbolText(BinOp op) {
+    switch (op) {
+        case BinOp::Add: return "+";
+        case BinOp::Sub: return "-";
+        case BinOp::Mul: return "*";
+        case BinOp::Div: return "/";
+        case BinOp::IDiv: return "\\";
+        case BinOp::Pow: return "^";
+        case BinOp::Concat: return "&";
+        case BinOp::Eq: return "=";
+        case BinOp::Ne: return "<>";
+        case BinOp::Lt: return "<";
+        case BinOp::Le: return "<=";
+        case BinOp::Gt: return ">";
+        case BinOp::Ge: return ">=";
+        case BinOp::Mod: return "MOD";
+        case BinOp::Shl: return "SHL";
+        case BinOp::Shr: return "SHR";
+        case BinOp::And: return "AND";
+        case BinOp::Or: return "OR";
+        case BinOp::Xor: return "XOR";
+    }
+    return "?";
+}
+} // namespace
+
+/// `Operator SYMBOL(lhs, rhs) As type ... End Operator` - a free-standing
+/// (global) binary operator overload. Member-declared operators (inside a
+/// TYPE, matching real FreeBASIC's other "declared within, defined
+/// outside" member procedures) are a deliberately separate, out-of-scope
+/// form this slice - see the roadmap notes.
+StmtPtr Parser::parseOperatorDecl() {
+    SourceLoc loc = peek().loc;
+    advance(); // OPERATOR
+
+    BinOp op = BinOp::Add;
+    if (!matchBinOpSymbol(op)) {
+        diags_.error(peek().loc, "expected an overloadable operator symbol after OPERATOR");
+    }
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->kind = StmtKind::FunctionDecl;
+    stmt->loc = loc;
+    stmt->isOperator = true;
+    stmt->operatorBinOp = op;
+    stmt->name = binOpSymbolText(op);
+    stmt->params = parseParamList();
+    if (stmt->params.size() != 2) {
+        diags_.error(loc, "an operator overload must take exactly two parameters (lhs, rhs)");
+    }
+    expect(TokenKind::KwAs, "expected AS <return type> after the operator's parameter list");
+    stmt->declaredType = parseTypeKeyword();
+    expectStmtEnd();
+
+    stmt->body = parseBlockUntil({TokenKind::KwEnd});
+    expect(TokenKind::KwEnd, "expected END OPERATOR");
+    expect(TokenKind::KwOperator, "expected END OPERATOR");
     expectStmtEnd();
     return stmt;
 }

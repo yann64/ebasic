@@ -162,6 +162,7 @@ Token Lexer::lexIdentifierOrKeyword() {
         {"OVERRIDE", TokenKind::KwOverride},
         {"BASE", TokenKind::KwBase},
         {"PROPERTY", TokenKind::KwProperty},
+        {"OPERATOR", TokenKind::KwOperator},
     };
 
     auto it = keywords.find(upper);

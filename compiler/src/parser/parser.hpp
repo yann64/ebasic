@@ -51,6 +51,11 @@ private:
     StmtPtr parseConstructor();
     StmtPtr parseDestructor();
     StmtPtr parseProperty();
+    StmtPtr parseOperatorDecl();
+    // Matches one overloadable binary-operator token (e.g. `+`, `=`,
+    // `Mod`) and returns the corresponding BinOp. False (leaving `out`
+    // untouched) if the current token isn't an overloadable operator.
+    bool matchBinOpSymbol(BinOp& out);
     StmtPtr parseNamespaceDecl();
     std::vector<Param> parseParamList();
 

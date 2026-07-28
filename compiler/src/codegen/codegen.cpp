@@ -171,14 +171,22 @@ std::string Codegen::genExpr(const Expr& expr) {
         case ExprKind::Binary: {
             const std::string lhs = genExpr(*expr.lhs);
             const std::string rhs = genExpr(*expr.rhs);
+            // A user-defined operand always means a real Operator overload
+            // resolved it (Sema already validated this) - the built-in
+            // special-cased forms below (forced real division, std::pow)
+            // don't apply; a plain textual operator (falling through to the
+            // generic switch) correctly resolves to the user's own
+            // overloaded C++ operator instead.
+            bool involvesUserDefined =
+                expr.lhs->type.kind == TypeKind::UserDefined || expr.rhs->type.kind == TypeKind::UserDefined;
 
-            if (expr.binOp == BinOp::Div && !isFloatFamily(expr.lhs->type) &&
+            if (expr.binOp == BinOp::Div && !involvesUserDefined && !isFloatFamily(expr.lhs->type) &&
                 !isFloatFamily(expr.rhs->type)) {
                 // FreeBASIC's '/' is always real division; force it since two
                 // C++ integers would otherwise truncate.
                 return "(static_cast<double>(" + lhs + ") / static_cast<double>(" + rhs + "))";
             }
-            if (expr.binOp == BinOp::Pow) {
+            if (expr.binOp == BinOp::Pow && !involvesUserDefined) {
                 return "std::pow(static_cast<double>(" + lhs + "), static_cast<double>(" + rhs +
                        "))";
             }
@@ -211,6 +219,7 @@ std::string Codegen::genExpr(const Expr& expr) {
                 case BinOp::And: op = "&"; break;
                 case BinOp::Or: op = "|"; break;
                 case BinOp::Xor: op = "^"; break;
+                case BinOp::Pow: op = "^"; break; // only reached for a UserDefined operand's own overload
                 default: break;
             }
             return "(" + lhs + " " + op + " " + rhs + ")";
@@ -585,11 +594,53 @@ std::string Codegen::buildParamList(const std::vector<Param>& params) {
     return paramList;
 }
 
+std::string Codegen::buildOperatorParamList(const std::vector<Param>& params) {
+    std::string paramList;
+    for (size_t i = 0; i < params.size(); ++i) {
+        if (i > 0) paramList += ", ";
+        const Param& p = params[i];
+        if (p.type.kind == TypeKind::UserDefined) {
+            paramList += "const " + cppType(p.type) + "& ";
+        } else {
+            paramList += cppType(p.type) + " ";
+        }
+        paramList += mangleName(p.name);
+    }
+    return paramList;
+}
+
+std::string Codegen::cppOperatorToken(BinOp op) {
+    switch (op) {
+        case BinOp::Add: return "+";
+        case BinOp::Sub: return "-";
+        case BinOp::Mul: return "*";
+        case BinOp::Div: return "/";
+        case BinOp::IDiv: return "/";
+        case BinOp::Mod: return "%";
+        case BinOp::Pow: return "^";
+        case BinOp::Shl: return "<<";
+        case BinOp::Shr: return ">>";
+        case BinOp::Concat: return "+";
+        case BinOp::Eq: return "==";
+        case BinOp::Ne: return "!=";
+        case BinOp::Lt: return "<";
+        case BinOp::Le: return "<=";
+        case BinOp::Gt: return ">";
+        case BinOp::Ge: return ">=";
+        case BinOp::And: return "&";
+        case BinOp::Or: return "|";
+        case BinOp::Xor: return "^";
+    }
+    throw std::runtime_error("codegen: unknown BinOp for operator overload");
+}
+
 void Codegen::genProcedure(const Stmt& stmt) {
     bool isFunction = stmt.kind == StmtKind::FunctionDecl;
     std::string retType = isFunction ? cppType(stmt.declaredType) : "void";
-    std::string name = mangleName(stmt.name);
-    std::string paramList = buildParamList(stmt.params);
+    std::string name = stmt.isOperator ? ("operator" + cppOperatorToken(stmt.operatorBinOp))
+                                        : mangleName(stmt.name);
+    std::string paramList =
+        stmt.isOperator ? buildOperatorParamList(stmt.params) : buildParamList(stmt.params);
 
     protoOut_ << retType << " " << name << "(" << paramList << ");\n";
 

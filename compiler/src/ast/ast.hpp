@@ -417,6 +417,15 @@ struct Stmt {
     // only property, which would need read/write-context-sensitive
     // resolution at every use site instead of always-both being assumed.
     bool isProperty = false;
+    // `Operator SYMBOL(lhs, rhs) AS type ... End Operator` - a free-standing
+    // (global) binary operator overload, always `kind == FunctionDecl` and
+    // always top-level (`ownerType` empty - member-declared operators,
+    // which real FreeBASIC also supports, are deliberately out of scope
+    // this slice). `name` holds the operator's textual symbol (e.g. "+"),
+    // used only for diagnostics - lookup is keyed by `operatorBinOp` plus
+    // the two params' types, not by name.
+    bool isOperator = false;
+    BinOp operatorBinOp = BinOp::Add;
 };
 
 struct Module {
