@@ -1,0 +1,34 @@
+.TH DOCGEN 1 "2026-07-28" "ebasic 0.1.0" "eBasic Manual"
+.SH NAME
+docgen \- eBasic documentation generator
+.SH SYNOPSIS
+.B docgen
+.I input.bas
+.B \-o
+.I output-dir
+.br
+.B docgen
+.RB { \-v | \-\-version }
+.br
+.B docgen
+.RB { \-h | \-\-help }
+.SH DESCRIPTION
+.B docgen
+extracts '''-marked doc comments from \fIinput.bas\fR and renders them,
+alongside each declaration's own signature, into
+\fIoutput-dir\fR/index.md and \fIoutput-dir\fR/index.html.
+.SH OPTIONS
+.TP
+.BI \-o " output-dir"
+Directory to write index.md and index.html into.
+.TP
+.BR \-v ", " \-\-version
+Print the version and exit.
+.TP
+.BR \-h ", " \-\-help
+Print usage and exit.
+.SH SEE ALSO
+.BR ebc (1),
+.BR ebpm (1)
+.br
+Full documentation: <https://github.com/yann64/ebasic/blob/main/docs/guide/docgen.md>

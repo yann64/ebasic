@@ -5,3 +5,13 @@ build/
 *.exe
 compile_commands.json
 .cache/
+
+# dpkg-buildpackage / debhelper artifacts (debian/ itself is tracked)
+/obj-*/
+/debian/.debhelper/
+/debian/ebasic/
+/debian/ebasic-dbgsym/
+/debian/debhelper-build-stamp
+/debian/files
+/debian/*.substvars
+/debian/*.debhelper.log

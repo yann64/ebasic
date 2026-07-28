@@ -1,0 +1,48 @@
+.TH EBPM 1 "2026-07-28" "ebasic 0.1.0" "eBasic Manual"
+.SH NAME
+ebpm \- the eBasic package manager
+.SH SYNOPSIS
+.B ebpm
+.I command
+.RI [ args ...]
+.br
+.B ebpm
+.RB { \-v | \-\-version }
+.br
+.B ebpm
+.RB { \-h | \-\-help }
+.SH DESCRIPTION
+.B ebpm
+is a Cargo-style package manager for eBasic: a TOML manifest
+(\fIebasic.toml\fR), path/git dependencies, and a lockfile
+(\fIebasic.lock\fR) for reproducible builds.
+.SH COMMANDS
+.TP
+.BI new " name"\fR\ [\-\-lib]
+Scaffold a new package directory \fIname\fR/.
+.TP
+.BR init " [\-\-lib]"
+Scaffold a package in the current directory.
+.TP
+.B build
+Build the package in the current directory.
+.TP
+.BR run " [\-\- " args ...]
+Build (if stale), then run the [bin] target. Arguments after a literal
+\fB\-\-\fR are forwarded to the built program.
+.TP
+.B test
+Build and run every \fItests/*.bas\fR file as a standalone program;
+a test passes if its program exits 0.
+.SH OPTIONS
+.TP
+.BR \-v ", " \-\-version
+Print the version and exit.
+.TP
+.BR \-h ", " \-\-help
+Print usage and exit.
+.SH SEE ALSO
+.BR ebc (1),
+.BR docgen (1)
+.br
+Full documentation: <https://github.com/yann64/ebasic/blob/main/docs/guide/ebpm.md>

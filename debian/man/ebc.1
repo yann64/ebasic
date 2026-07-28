@@ -1,0 +1,67 @@
+.TH EBC 1 "2026-07-28" "ebasic 0.1.0" "eBasic Manual"
+.SH NAME
+ebc \- the eBasic compiler
+.SH SYNOPSIS
+.B ebc
+.I input.bas
+.RB [ \-o
+.IR output ]
+.RB [ \-cxx
+.IR compiler ]
+.RB [ \-L
+.IR dir ]...
+.RB [ \-I
+.IR dir ]...
+.RB [ \-l
+.IR name ]...
+.RB [ \-\-keep\-cpp ]
+.RB [ \-\-lib ]
+.br
+.B ebc
+.RB { \-v | \-\-version }
+.br
+.B ebc
+.RB { \-h | \-\-help }
+.SH DESCRIPTION
+.B ebc
+transpiles \fIinput.bas\fR (eBasic source) to C++ and invokes a real
+backend compiler (g++ or clang++) to produce a native executable, or,
+with \fB\-\-lib\fR, a static library.
+.SH OPTIONS
+.TP
+.BI \-o " output"
+Output path. Defaults to the input file's own stem.
+.TP
+.BI \-cxx " compiler"
+Backend compiler to invoke. Defaults to the
+.B CXX
+environment variable if set, else the bare name
+.BR g++ .
+.TP
+.BI \-L " dir"
+Extra library search path, forwarded to the backend as \fB\-L\fR \fIdir\fR. Repeatable.
+.TP
+.BI \-I " dir"
+Extra #include search path for .bas source, consulted only as a fallback.
+Repeatable.
+.TP
+.BI \-l " name"
+Extra library to link. Repeatable.
+.TP
+.B \-\-keep\-cpp
+Don't delete the generated \fI<output>.gen.cpp\fR intermediate file.
+.TP
+.B \-\-lib
+Build a library (a static archive plus an auto-generated interface file)
+instead of an executable.
+.TP
+.BR \-v ", " \-\-version
+Print the version and exit.
+.TP
+.BR \-h ", " \-\-help
+Print usage and exit.
+.SH SEE ALSO
+.BR ebpm (1),
+.BR docgen (1)
+.br
+Full documentation: <https://github.com/yann64/ebasic/blob/main/docs/guide/ebc.md>

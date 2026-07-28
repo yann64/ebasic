@@ -1,0 +1,26 @@
+Source: ebasic
+Section: devel
+Priority: optional
+Maintainer: eBasic contributors <noreply@example.com>
+Build-Depends: debhelper-compat (= 13), cmake, g++
+Standards-Version: 4.6.2
+Homepage: https://github.com/yann64/ebasic
+Rules-Requires-Root: no
+
+Package: ebasic
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, g++ | clang
+Description: BASIC-to-C++ transpiler with package manager and doc generator
+ eBasic is an extended dialect of the BASIC programming language,
+ transpiled to C++ and compiled with a real backend compiler
+ (g++/clang++). Same syntax as FreeBASIC, reimplemented from scratch,
+ with TYPE-based OOP, C/C++ interop, namespaces, and a Cargo-style
+ package manager.
+ .
+ This package provides three tools:
+  - ebc: the compiler driver
+  - ebpm: the package manager
+  - docgen: doc-comment ('''-marked) to Markdown/HTML generator
+ .
+ Requires a real C++ compiler (g++ or clang) installed at runtime,
+ since ebc/ebpm invoke one as a subprocess to produce native code.
