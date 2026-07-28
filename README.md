@@ -9,7 +9,11 @@ to C++ and compiled with a real backend compiler (g++/clang++).
 - Same syntax as FreeBASIC, but fully reimplemented from scratch
 - Precompiled runtime header for faster compilation
 - Reuse of real C/C++ headers/libraries (`EXTERN`/`DECLARE`)
-- Cargo-like package management (`ebpm`)
+- Cargo-like package management (`ebpm`), including OS-conditional
+  dependencies (a different dependency per target platform, e.g. Win32 on
+  Windows vs GTK4 on Linux) paired with auto-defined platform macros
+  (`__FB_WIN32__`/`__FB_LINUX__`/`__FB_DARWIN__`/`__FB_HAIKU__`) for
+  conditional compilation in `.bas` source itself
 - Namespaces, TYPE-based OOP (fields, inheritance, properties, operator overloading)
 - Automated documentation generation (`docgen`)
 
@@ -20,9 +24,10 @@ and live on real hardware (Haiku).
 
 ## Status
 
-`0.1.0`. All phased milestones (M0-M8: core language, C/C++ interop, `ebpm`,
+`1.0.0`. All phased milestones (M0-M8: core language, C/C++ interop, `ebpm`,
 precompiled runtime header, `docgen`, four-platform ports) are complete,
-along with post-M8 CLI ergonomics (`-v`/`--version`, `-h`/`--help`). See
+along with post-M8 CLI ergonomics, Linux packaging (`.deb`/`.rpm`/Flatpak),
+and OS-conditional dependencies. See
 [`docs/architecture/roadmap.md`](docs/architecture/roadmap.md) for the full
 history and design decisions behind each milestone.
 
@@ -36,6 +41,20 @@ ctest --preset linux-gcc
 
 Other presets (see `CMakePresets.json`): `linux-clang`, `windows-mingw`
 (MinGW, run from an MSYS2 shell), `macos`, `haiku`.
+
+## Installing (Linux)
+
+Real, locally-buildable packages for all three major Linux packaging
+formats - see each format's own directory for the build recipe:
+
+- **`.deb`**: `dpkg-buildpackage -us -uc -b` (uses the top-level `debian/`)
+- **`.rpm`**: `rpmbuild -bb packaging/rpm/ebasic.spec`
+- **Flatpak**: `flatpak-builder --force-clean <builddir> packaging/flatpak/io.github.yann64.ebasic.json`
+
+Every format installs the three tools plus the runtime header/PCH into the
+platform's own standard prefix (`/usr` for `.deb`/`.rpm`, `/app` for
+Flatpak) - `ebc` resolves its own runtime data relative to wherever it was
+actually installed, so this works unmodified regardless of prefix.
 
 ## Usage
 

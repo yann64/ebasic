@@ -1,3 +1,10 @@
+ebasic (1.0.0) unstable; urgency=medium
+
+  * First tagged release (v1.0.0): all planned milestones complete, plus
+    OS-conditional dependencies and Linux packaging (deb/rpm/Flatpak).
+
+ -- eBasic contributors <noreply@example.com>  Tue, 28 Jul 2026 18:39:48 +0200
+
 ebasic (0.1.0) unstable; urgency=medium
 
   * Initial packaging.

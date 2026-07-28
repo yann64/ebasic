@@ -1,5 +1,5 @@
 Name:           ebasic
-Version:        0.1.0
+Version:        1.0.0
 Release:        1%{?dist}
 Summary:        BASIC-to-C++ transpiler with package manager and doc generator
 Group:          Development/Tools
@@ -63,5 +63,9 @@ ctest --test-dir build --output-on-failure
 %{_mandir}/man1/docgen.1*
 
 %changelog
+* Tue Jul 28 2026 eBasic contributors <noreply@example.com> - 1.0.0-1
+- First tagged release (v1.0.0): all planned milestones complete, plus
+  OS-conditional dependencies and Linux packaging.
+
 * Tue Jul 28 2026 eBasic contributors <noreply@example.com> - 0.1.0-1
 - Initial packaging.
