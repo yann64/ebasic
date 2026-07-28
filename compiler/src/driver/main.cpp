@@ -117,6 +117,27 @@ void printUsage(std::ostream& os) {
     os << "  module's own Lib \"name\" clauses.\n";
 }
 
+// M6: the runtime's PCH shadow directory (built by runtime/CMakeLists.txt,
+// GCC only), added as an extra -I *before* the real runtime include dir so
+// a plain `#include "ebasic/runtime/runtime.hpp"` automatically prefers the
+// precompiled .gch sitting there - no other change to the compile
+// invocation is needed (verified empirically: GCC's own automatic PCH
+// lookup, and its own graceful fallback when the .gch doesn't match, both
+// require no special flags at all). Empty when no system g++ was found to
+// build one (CMake defines the macro either way) - appending nothing in
+// that case, rather than passing a bogus `-I ""`, which could otherwise
+// resolve to searching the current directory.
+std::vector<std::string> runtimeIncludeArgs() {
+    std::vector<std::string> args;
+    if (std::string pchDir = EBASIC_RUNTIME_PCH_DIR; !pchDir.empty()) {
+        args.push_back("-I");
+        args.push_back(pchDir);
+    }
+    args.push_back("-I");
+    args.push_back(EBASIC_RUNTIME_INCLUDE_DIR);
+    return args;
+}
+
 // M5 (--lib mode): a library's object file must never define `main` itself
 // (it would collide with the consuming package's own `main` at final link
 // time), so its module may only contain declarations - no top-level
@@ -236,10 +257,12 @@ int main(int argc, char** argv) {
         fs::path archivePath = outDir / ("lib" + libName + ".a");
         fs::path ifacePath = outDir / (libName + ".iface.bas");
 
-        std::vector<std::string> compileArgs = {
-            cxx, "-std=c++17", "-I", EBASIC_RUNTIME_INCLUDE_DIR, "-c", cppPath.string(), "-o",
-            objPath.string(),
-        };
+        std::vector<std::string> compileArgs = {cxx, "-std=c++17"};
+        for (const std::string& a : runtimeIncludeArgs()) compileArgs.push_back(a);
+        compileArgs.push_back("-c");
+        compileArgs.push_back(cppPath.string());
+        compileArgs.push_back("-o");
+        compileArgs.push_back(objPath.string());
         rc = ebasic::runProcess(compileArgs);
         if (rc == 0) {
             rc = ebasic::runProcess({"ar", "rcs", archivePath.string(), objPath.string()});
@@ -251,9 +274,11 @@ int main(int argc, char** argv) {
         std::error_code ec;
         fs::remove(objPath, ec);
     } else {
-        std::vector<std::string> compileArgs = {
-            cxx, "-std=c++17", "-I", EBASIC_RUNTIME_INCLUDE_DIR, cppPath.string(), "-o", opts.outputPath,
-        };
+        std::vector<std::string> compileArgs = {cxx, "-std=c++17"};
+        for (const std::string& a : runtimeIncludeArgs()) compileArgs.push_back(a);
+        compileArgs.push_back(cppPath.string());
+        compileArgs.push_back("-o");
+        compileArgs.push_back(opts.outputPath);
         for (const std::string& dir : opts.libDirs) {
             compileArgs.push_back("-L");
             compileArgs.push_back(dir);

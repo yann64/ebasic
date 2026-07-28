@@ -22,4 +22,11 @@ target_link_libraries(ebc PRIVATE ebasic_process)
 
 target_compile_definitions(ebc PRIVATE
     EBASIC_RUNTIME_INCLUDE_DIR="${CMAKE_SOURCE_DIR}/runtime/include"
+    # M6: the runtime PCH shadow directory (see runtime/CMakeLists.txt) -
+    # empty string if no system g++ was found to build one; main.cpp only
+    # adds the extra -I when this is non-empty.
+    EBASIC_RUNTIME_PCH_DIR="${EBASIC_RUNTIME_PCH_DIR}"
 )
+if(TARGET ebasic_runtime_pch)
+    add_dependencies(ebc ebasic_runtime_pch)
+endif()
