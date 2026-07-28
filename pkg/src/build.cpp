@@ -132,18 +132,25 @@ namespace {
 // one), `pkg`'s compiled module has no way to know that library exists at
 // all, so ebpm must name it explicitly rather than relying on the
 // `Lib`-clause auto-derivation `ebc` normally uses.
+//
+// Looks each dependency edge up by *name* (`byName`), not by re-deriving
+// its directory from `Dependency::path` - that field is empty for a `git`
+// dependency (its directory only exists after resolveGitDependency ran),
+// so recomputing it here would silently resolve to the wrong thing (an
+// earlier version did exactly this, and for a git dependency the
+// mis-derived "directory" happened to collapse to `pkg.dir` itself,
+// silently treating the package as its own transitive dependency instead
+// of finding the real one at all).
 void collectTransitiveDeps(const ResolvedPackage& pkg,
-                            const std::unordered_map<std::string, const ResolvedPackage*>& byDir,
+                            const std::unordered_map<std::string, const ResolvedPackage*>& byName,
                             std::unordered_set<std::string>& seen,
                             std::vector<const ResolvedPackage*>& out) {
     for (const Dependency& dep : pkg.manifest.dependencies) {
-        std::error_code ec;
-        std::string depDir = fs::canonical(fs::path(pkg.dir) / dep.path, ec).string();
-        auto it = byDir.find(depDir);
-        if (it == byDir.end()) continue; // unreachable: already resolved by resolveDependencyGraph
-        if (!seen.insert(depDir).second) continue; // already collected via another path
+        auto it = byName.find(dep.name);
+        if (it == byName.end()) continue; // unreachable: already resolved by resolveDependencyGraph
+        if (!seen.insert(it->second->dir).second) continue; // already collected via another path
         out.push_back(it->second);
-        collectTransitiveDeps(*it->second, byDir, seen, out);
+        collectTransitiveDeps(*it->second, byName, seen, out);
     }
 }
 
@@ -153,15 +160,15 @@ int buildPackageWithDeps(const std::string& rootDir, std::string& err) {
     std::vector<ResolvedPackage> order;
     if (!resolveDependencyGraph(rootDir, order, err)) return 1;
 
-    // canonical package dir -> its resolved entry, consulted by
+    // package name -> its resolved entry, consulted by
     // collectTransitiveDeps to look up each dependency edge's target.
-    std::unordered_map<std::string, const ResolvedPackage*> byDir;
-    for (const ResolvedPackage& pkg : order) byDir[pkg.dir] = &pkg;
+    std::unordered_map<std::string, const ResolvedPackage*> byName;
+    for (const ResolvedPackage& pkg : order) byName[pkg.name] = &pkg;
 
     for (const ResolvedPackage& pkg : order) {
         std::unordered_set<std::string> seen;
         std::vector<const ResolvedPackage*> transitiveDeps;
-        collectTransitiveDeps(pkg, byDir, seen, transitiveDeps);
+        collectTransitiveDeps(pkg, byName, seen, transitiveDeps);
 
         std::vector<std::string> extraIncludeDirs;
         std::vector<std::string> extraLibDirs;

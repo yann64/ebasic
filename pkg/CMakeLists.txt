@@ -11,5 +11,6 @@ add_executable(ebpm
     src/build.cpp
     src/resolve.cpp
     src/lockfile.cpp
+    src/gitdep.cpp
 )
 target_link_libraries(ebpm PRIVATE tomlplusplus ebasic_process)

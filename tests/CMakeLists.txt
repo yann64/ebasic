@@ -131,3 +131,11 @@ add_test(
     NAME e2e_pkg_lib_and_app
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/lib_and_app myapp
 )
+
+# M5d: a git dependency, resolved against a real local bare repo the test
+# itself creates (git init --bare + one commit) - exercises the real
+# clone/fetch/checkout code path with no real-network dependency.
+add_test(
+    NAME e2e_pkg_lib_and_app_git
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_git_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/lib_and_app_git
+)

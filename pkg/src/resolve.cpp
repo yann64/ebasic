@@ -1,4 +1,6 @@
 #include "resolve.hpp"
+#include "gitdep.hpp"
+#include "lockfile.hpp"
 
 #include <filesystem>
 #include <functional>
@@ -10,6 +12,19 @@ namespace ebpm {
 
 bool resolveDependencyGraph(const std::string& rootDir, std::vector<ResolvedPackage>& order,
                              std::string& err) {
+    std::error_code rootEc;
+    fs::path canonicalRoot = fs::canonical(rootDir, rootEc);
+    if (rootEc) {
+        err = "cannot resolve package directory '" + rootDir + "': " + rootEc.message();
+        return false;
+    }
+    // Read once, up front, from the root's own ebasic.lock - a git
+    // dependency anywhere in the graph consults this by name (see
+    // resolveGitDependency's `pinnedCommit` parameter) so a repeat build
+    // stays reproducible instead of re-resolving whatever `branch` says
+    // right now.
+    std::unordered_map<std::string, std::string> pins = readLockfilePins(canonicalRoot.string());
+
     // canonical dir -> its already-resolved manifest (also serves as the
     // "fully resolved" memo, so a diamond dependency is only loaded once).
     std::unordered_map<std::string, Manifest> resolvedByDir;
@@ -17,7 +32,8 @@ bool resolveDependencyGraph(const std::string& rootDir, std::vector<ResolvedPack
     // resolved) - a dependency edge landing back on one of these is a cycle.
     std::vector<std::string> visiting;
 
-    std::function<bool(const std::string&)> visit = [&](const std::string& dir) -> bool {
+    std::function<bool(const std::string&, const std::string&)> visit =
+        [&](const std::string& dir, const std::string& gitCommit) -> bool {
         std::error_code ec;
         fs::path canonicalDir = fs::canonical(dir, ec);
         if (ec) {
@@ -40,13 +56,16 @@ bool resolveDependencyGraph(const std::string& rootDir, std::vector<ResolvedPack
 
         visiting.push_back(key);
         for (const Dependency& dep : manifest.dependencies) {
-            if (dep.path.empty()) {
-                err = "dependency '" + dep.name + "' of '" + manifest.name +
-                      "' is a git dependency - not supported yet (M5d)";
-                return false;
+            std::string depDir;
+            std::string depGitCommit;
+            if (!dep.path.empty()) {
+                depDir = (canonicalDir / dep.path).string();
+            } else {
+                auto pinIt = pins.find(dep.name);
+                std::string pinnedCommit = pinIt != pins.end() ? pinIt->second : std::string();
+                if (!resolveGitDependency(dep, pinnedCommit, depDir, depGitCommit, err)) return false;
             }
-            std::string depDir = (canonicalDir / dep.path).string();
-            if (!visit(depDir)) return false;
+            if (!visit(depDir, depGitCommit)) return false;
 
             std::error_code depEc;
             std::string depKey = fs::canonical(depDir, depEc).string();
@@ -63,12 +82,12 @@ bool resolveDependencyGraph(const std::string& rootDir, std::vector<ResolvedPack
         }
         visiting.pop_back();
 
-        order.push_back(ResolvedPackage{manifest.name, key, manifest});
+        order.push_back(ResolvedPackage{manifest.name, key, manifest, gitCommit});
         resolvedByDir[key] = std::move(manifest);
         return true;
     };
 
-    return visit(rootDir);
+    return visit(canonicalRoot.string(), "");
 }
 
 } // namespace ebpm

@@ -1,0 +1,10 @@
+[package]
+name = "gitapp"
+version = "0.1.0"
+
+[bin]
+name = "gitapp"
+path = "src/main.bas"
+
+[dependencies]
+gitmathlib = { git = "@GIT_URL@", branch = "master" }

@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <toml++/toml.hpp>
 
 namespace fs = std::filesystem;
 
@@ -21,6 +22,9 @@ bool writeLockfile(const std::string& rootDir, const std::vector<ResolvedPackage
         out << "\n[[package]]\n";
         out << "name = \"" << pkg.name << "\"\n";
         out << "path = \"" << pkg.dir << "\"\n";
+        if (!pkg.gitCommit.empty()) {
+            out << "commit = \"" << pkg.gitCommit << "\"\n";
+        }
     }
 
     std::ofstream file(lockPath);
@@ -30,6 +34,31 @@ bool writeLockfile(const std::string& rootDir, const std::vector<ResolvedPackage
     }
     file << out.str();
     return true;
+}
+
+std::unordered_map<std::string, std::string> readLockfilePins(const std::string& rootDir) {
+    std::unordered_map<std::string, std::string> pins;
+    fs::path lockPath = fs::path(rootDir) / "ebasic.lock";
+    if (!fs::exists(lockPath)) return pins;
+
+    toml::table tbl;
+    try {
+        tbl = toml::parse_file(lockPath.string());
+    } catch (const toml::parse_error&) {
+        return pins; // a malformed lockfile just means "nothing pinned yet"
+    }
+
+    auto packages = tbl["package"];
+    if (auto arr = packages.as_array()) {
+        for (auto&& entry : *arr) {
+            auto entryTbl = entry.as_table();
+            if (!entryTbl) continue;
+            auto name = (*entryTbl)["name"].value<std::string>();
+            auto commit = (*entryTbl)["commit"].value<std::string>();
+            if (name && commit && !commit->empty()) pins[*name] = *commit;
+        }
+    }
+    return pins;
 }
 
 } // namespace ebpm

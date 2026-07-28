@@ -1,0 +1,3 @@
+FUNCTION Triple(n AS INTEGER) AS INTEGER
+    Triple = n * 3
+END FUNCTION

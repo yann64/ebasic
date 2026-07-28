@@ -64,6 +64,12 @@ bool loadManifest(const std::string& manifestPath, Manifest& out, std::string& e
                 err = "[dependencies]." + dep.name + " must name exactly one of `path` or `git`";
                 return false;
             }
+            int refCount = (!dep.branch.empty()) + (!dep.tag.empty()) + (!dep.rev.empty());
+            if (refCount > 1) {
+                err = "[dependencies]." + dep.name + " must name at most one of `branch`, `tag`, "
+                      "or `rev`";
+                return false;
+            }
             out.dependencies.push_back(std::move(dep));
         }
     }
