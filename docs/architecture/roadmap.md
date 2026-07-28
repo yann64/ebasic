@@ -517,6 +517,14 @@ A three-slice plan (Pkg-1 through Pkg-3). Made tractable by M8e's already-reloca
 - Verified: full e2e suite (26/26, `linux-gcc` preset) and a clean `-Wall -Wextra` rebuild unaffected by the `process.cpp`/`main.cpp`/`gitdep.cpp` changes; no stray Flatpak build/install state left in the tracked working tree or the user's real Flatpak installation.
 - **The Linux packaging plan (Pkg-1 through Pkg-3) is now complete**: `.deb` (`debian/`), `.rpm` (`packaging/rpm/ebasic.spec`), and Flatpak (`packaging/flatpak/`) all build and run for real from this exact source tree, reusing M8e's relocatable `install()` design unchanged for the first two and with three now-real, generically-useful `process.cpp`/`main.cpp` accommodations for the third's genuinely different sandboxing model.
 
+## Post-Packaging Fix: `tests/cli/version_help.sh` drive-letter bug (found via real Windows CI)
+
+While the packaging work above was wrapping up, real `windows-mingw` CI (unrelated to it - this script predates the packaging plan) failed: `cli_version_help` errored with `D: command not found` for all three tools. Root cause: the script combined a tool's path and name into one string (`"$EBC:ebc"`) and split it back apart with `${entry%%:*}`/`${entry##*:}` - which breaks the moment the path itself contains a colon, exactly what every Windows path does (a drive letter, e.g. `D:/a/ebasic/.../ebc.exe`). `%%:*` strips from the *first* colon onward, so the extracted "path" was just `"D"`.
+
+**Reproduced locally without a Windows machine**, by exploiting the fact that Linux filesystems (unlike Windows) allow a literal `:` in a path - created a copy of `ebc` at a path containing `D:/` and confirmed the exact same failure (`.../D: Aucun fichier ou dossier de ce nom`) with the old script, then confirmed it's gone with the fix. Fixed by removing the combined-string/split trick entirely - a small `run_checks(path, name)` helper called three times explicitly (`tests/cli/version_help.sh`), never joining a path and a name into one delimited string at all.
+
+Verified: full e2e suite (26/26) still passing locally; pushed to trigger real CI on all four platforms to confirm the actual Windows fix, per this project's standing "CI is the real verification for Windows" discipline (M8's own approach) rather than trusting the local-repro alone.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

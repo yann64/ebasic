@@ -46,13 +46,22 @@ check_help() {
     echo "PASS: $tool_name $flag"
 }
 
-for entry in "$EBC:ebc" "$EBPM:ebpm" "$DOCGEN:docgen"; do
-    path="${entry%%:*}"
-    name="${entry##*:}"
+## Deliberately not "$path:$name" combined-string + split, unlike an
+## earlier version of this script - a Windows path (e.g.
+## D:/a/ebasic/.../ebc.exe) contains a drive-letter colon of its own,
+## which broke the split (extracted just "D" as the path, a real bug
+## only surfaced by real Windows CI, not visible on Linux/macOS where
+## paths never contain a colon).
+run_checks() {
+    local path="$1" name="$2"
     check_version "$path" "$name" "-v"
     check_version "$path" "$name" "--version"
     check_help "$path" "$name" "-h"
     check_help "$path" "$name" "--help"
-done
+}
+
+run_checks "$EBC" "ebc"
+run_checks "$EBPM" "ebpm"
+run_checks "$DOCGEN" "docgen"
 
 exit "$FAILED"
