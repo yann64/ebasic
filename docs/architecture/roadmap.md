@@ -463,6 +463,15 @@ A six-slice plan (Doc-1 through Doc-6), following the exact same slice-per-miles
 - Verified: `docs` Doxygen target unaffected; full e2e suite still 26/26.
 - **Next: `docs/guide/` - getting-started, one page per tool, expanded `examples/` (Doc-5)**, then the `README.md` refactor + final full link-check pass (Doc-6).
 
+## Doc-5 Implementation Notes (end-user guide: getting-started, tool pages, expanded examples, done)
+
+- New `docs/guide/getting-started.md`, `docs/guide/ebc.md`, `docs/guide/ebpm.md`, `docs/guide/docgen.md`. Every command shown was actually run, not written from memory - `ebpm new`/`build`/`run`/`test` were run live end-to-end against copies of real test packages (`tests/e2e_pkg/lib_and_app`, `tests/e2e_pkg/lib_with_tests`) to capture genuine output, including the actual `ebasic.lock` format produced by a real build (`[[package]] name/path` entries).
+- `examples/` grew from 2 files (`hello.bas`, `documented_mathlib.bas`) to 9 - one small, runnable program per reference topic area (`types_and_literals`, `operators`, `control_flow`, `procedures_and_arrays`, `type_oop`, `namespaces_pointers_unions`, `extern_interop`), each compiled and run to confirm correctness, and each additionally run through `docgen` to confirm it also parses cleanly there.
+- `extern_interop.bas` deliberately binds to real C standard library functions (`abs`, `atoi`) rather than the project's own internal test fixtures (`ebfixturec`/`ebfixturecpp`), since a public-facing example shouldn't depend on build-tree-only libraries a real user would never have. One candidate function (`strlen`) was tried first and rejected after it produced a real compiler warning (`declaration ... conflicts with built-in declaration` - `strlen` actually returns `size_t`, not `INTEGER`, so the `Declare`d signature technically mismatches GCC's own builtin knowledge of it) - swapped for `atoi` (a real, clean `const char* -> int` signature) instead of shipping an example that warns on its own recommended usage.
+- A small link-checker script (reused from Doc-4, extended to walk the whole `docs/` tree) confirmed every relative link across all `docs/**/*.md` files now resolves, including the two forward-references to this slice's own guide pages that were expected-broken as of Doc-4.
+- Verified: `docs` Doxygen target unaffected; full e2e suite still 26/26.
+- Next: `README.md` refactor + a final full link-check pass (Doc-6).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
