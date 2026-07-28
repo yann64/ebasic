@@ -3,6 +3,8 @@ add_executable(ebasic_lsp
     src/rpc.cpp
     src/documents.cpp
     src/server.cpp
+    src/uri.cpp
+    src/diagnostics.cpp
 )
 target_include_directories(ebasic_lsp PRIVATE
     ${CMAKE_SOURCE_DIR}/compiler/src

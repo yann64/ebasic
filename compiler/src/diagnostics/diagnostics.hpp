@@ -49,6 +49,12 @@ public:
     /// Registering the same path again returns the same id.
     int registerFile(const std::string& path);
 
+    /// The path passed to registerFile() for `fileId`, or "<unknown>" for an
+    /// out-of-range id - lets a caller (e.g. the LSP) map a diagnostic back
+    /// to the real file it belongs to, including one reached only through
+    /// an #include, not just the top-level input file.
+    const std::string& fileName(int fileId) const;
+
     /// Writes every recorded diagnostic to `os`, one per line, in the order
     /// they were reported.
     void printAll(std::ostream& os) const;

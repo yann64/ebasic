@@ -20,13 +20,17 @@ int DiagnosticEngine::registerFile(const std::string& path) {
     return id;
 }
 
+const std::string& DiagnosticEngine::fileName(int fileId) const {
+    static const std::string unknown = "<unknown>";
+    if (fileId >= 0 && static_cast<size_t>(fileId) < fileNames_.size()) {
+        return fileNames_[static_cast<size_t>(fileId)];
+    }
+    return unknown;
+}
+
 void DiagnosticEngine::printAll(std::ostream& os) const {
     for (const auto& d : diagnostics_) {
-        const std::string& filename =
-            (d.loc.fileId >= 0 && static_cast<size_t>(d.loc.fileId) < fileNames_.size())
-                ? fileNames_[static_cast<size_t>(d.loc.fileId)]
-                : std::string("<unknown>");
-        os << filename << ":" << d.loc.line << ":" << d.loc.column << ": "
+        os << fileName(d.loc.fileId) << ":" << d.loc.line << ":" << d.loc.column << ": "
            << (d.severity == Severity::Error ? "error: " : "warning: ") << d.message << "\n";
     }
 }

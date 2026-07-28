@@ -186,3 +186,10 @@ add_test(
     NAME lsp_smoke
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/lsp/smoke_test.sh $<TARGET_FILE:ebasic_lsp>
 )
+
+# LSP-2: publishDiagnostics - a real Sema error, a didChange that fixes it,
+# and a diagnostic inside an #include'd file routed to that file's own URI.
+add_test(
+    NAME lsp_diagnostics
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/lsp/diagnostics_test.sh $<TARGET_FILE:ebasic_lsp>
+)

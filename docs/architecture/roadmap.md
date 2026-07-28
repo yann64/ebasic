@@ -663,6 +663,48 @@ slices don't need to reshape the CMake target).
 - Verified: full e2e suite (29/29, including the new `lsp_smoke`), a clean
   `-Wall -Wextra` rebuild.
 
+## LSP-2 Implementation Notes (diagnostics, done)
+
+- `DiagnosticEngine` gained one small, additive public accessor -
+  `fileName(int fileId)` (`compiler/src/diagnostics/diagnostics.hpp`/`.cpp`)
+  - `printAll` itself now calls it too, rather than duplicating the same
+  bounds-checked lookup inline.
+- `lsp/src/uri.{hpp,cpp}`: real `file://` URI <-> filesystem path
+  conversion (percent-encode/decode, and the RFC 8089 Windows drive-letter
+  form `file:///C:/...`) - needed both to turn a `didOpen`/`didChange`'s
+  URI into the path `preprocess()` resolves `#include`s relative to, and to
+  turn a diagnostic's real originating file (via the new `fileName()`)
+  back into a URI to publish against.
+- `lsp/src/diagnostics.{hpp,cpp}`: `computeDiagnostics(path, text)` runs
+  the exact same Preprocessor -> Lexer -> Parser -> Sema pipeline `ebc`'s
+  `main.cpp` does (now via `ebasic_frontend` + `ebasic_sema`) against a
+  document's *current*, possibly-unsaved text, grouping the resulting
+  diagnostics by their real originating file (not just the edited
+  document) - an error inside an `#include`d file is published against
+  that file's own URI. An `#include`d file itself is still read fresh from
+  disk (an unsaved edit to one that's *also* open in the editor isn't
+  picked up until saved) - a deliberate simplification, not a bug.
+- `Server::publishDiagnostics` (`lsp/src/server.cpp`) always publishes an
+  (possibly empty) array for the edited document itself, and tracks which
+  other files it published a non-empty array for last time
+  (`lastDiagnosticUris_`) so a fix (or an `#include` that's no longer
+  reached) still clears a stale diagnostic instead of leaving it stuck.
+  Wired into both `didOpen` and `didChange`.
+- Diagnostic `range`s are one character wide (`SourceLoc` is a single
+  point everywhere - no node stores an end position, confirmed during
+  planning) - the closest honest approximation an editor can still usefully
+  underline; real per-token spans aren't added until/unless a later slice
+  needs them.
+- `tests/lsp/diagnostics_test.sh` (new `lsp_diagnostics` CTest): a real
+  Sema error surfacing with the right message/severity, a `didChange` that
+  fixes it clearing the diagnostic, and a diagnostic inside an `#include`d
+  file landing on that file's own URI, not the including document's.
+- Verified: full e2e suite (30/30, including the new `lsp_diagnostics`), a
+  clean `-Wall -Wextra` rebuild, manual protocol-level checks against a
+  real Sema type error and a real cross-file `#include` error before
+  writing the permanent test (both matched the test's own expectations
+  exactly).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
