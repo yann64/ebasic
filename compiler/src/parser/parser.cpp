@@ -92,23 +92,23 @@ Module Parser::parseModule() {
     Module module;
     skipNewlines();
     while (!check(TokenKind::End)) {
-        // M7: a run of leading '''  lines belongs to whatever documentable
-        // declaration follows - collected before dispatching, so an EXTERN
-        // block (which never receives a doc comment - see
-        // isDocumentableKind) doesn't accidentally swallow one meant for
-        // something else.
+        /// M7: a run of leading '''  lines belongs to whatever documentable
+        /// declaration follows - collected before dispatching, so an EXTERN
+        /// block (which never receives a doc comment - see
+        /// isDocumentableKind) doesn't accidentally swallow one meant for
+        /// something else.
         std::string doc = collectDocComment();
-        // A trailing/orphaned doc comment with nothing left to attach to
-        // (e.g. the very last thing in the file) - silently ignored rather
-        // than falling into parseStatement() below, which would otherwise
-        // report a spurious "expected a statement" for content that isn't
-        // actually a statement at all.
+        /// A trailing/orphaned doc comment with nothing left to attach to
+        /// (e.g. the very last thing in the file) - silently ignored rather
+        /// than falling into parseStatement() below, which would otherwise
+        /// report a spurious "expected a statement" for content that isn't
+        /// actually a statement at all.
         if (check(TokenKind::End)) break;
-        // An EXTERN block (M4) yields multiple top-level Stmts (one per
-        // Declare line) - handled directly here rather than through
-        // parseStatement()'s one-Stmt-per-call contract, and restricted to
-        // module scope (matches real FreeBASIC - EXTERN is a declarative,
-        // top-level-only construct, not legal inside a SUB/FUNCTION body).
+        /// An EXTERN block (M4) yields multiple top-level Stmts (one per
+        /// Declare line) - handled directly here rather than through
+        /// parseStatement()'s one-Stmt-per-call contract, and restricted to
+        /// module scope (matches real FreeBASIC - EXTERN is a declarative,
+        /// top-level-only construct, not legal inside a SUB/FUNCTION body).
         if (check(TokenKind::KwExtern)) {
             parseExternBlock(module.stmts);
         } else {
@@ -141,18 +141,18 @@ Type Parser::parseTypeKeyword() {
     else if (match(TokenKind::KwString)) base = TypeKind::StringT;
     else if (match(TokenKind::KwZString)) base = TypeKind::ZStringT;
     else if (match(TokenKind::KwAny)) {
-        // ANY PTR is FB's untyped/void*-equivalent pointer; ANY alone is not
-        // a usable type. Represented as Pointer with a null pointee.
+        /// ANY PTR is FB's untyped/void*-equivalent pointer; ANY alone is not
+        /// a usable type. Represented as Pointer with a null pointee.
         expect(TokenKind::KwPtr, "expected PTR after ANY");
         base.kind = TypeKind::Pointer;
         base.pointee = nullptr;
-        // Fall through to the trailing-PTR loop below (ANY PTR PTR is legal
-        // per FB docs: an Any Ptr Ptr may be dereferenced to yield an Any Ptr).
+        /// Fall through to the trailing-PTR loop below (ANY PTR PTR is legal
+        /// per FB docs: an Any Ptr Ptr may be dereferenced to yield an Any Ptr).
     } else if (check(TokenKind::Identifier)) {
-        // A user-defined TYPE name. Whether this identifier actually names a
-        // declared TYPE is a Sema question, not a parser one - same
-        // deferred-disambiguation philosophy as the Call expression (array
-        // read vs. function call), resolved by looking up what it names.
+        /// A user-defined TYPE name. Whether this identifier actually names a
+        /// declared TYPE is a Sema question, not a parser one - same
+        /// deferred-disambiguation philosophy as the Call expression (array
+        /// read vs. function call), resolved by looking up what it names.
         base.kind = TypeKind::UserDefined;
         base.typeName = advance().text;
     } else {
@@ -163,7 +163,7 @@ Type Parser::parseTypeKeyword() {
         return TypeKind::Unknown;
     }
 
-    // Postfix PTR suffix(es): `Type PTR` and multi-level `Type PTR PTR`.
+    /// Postfix PTR suffix(es): `Type PTR` and multi-level `Type PTR PTR`.
     while (match(TokenKind::KwPtr)) {
         Type wrapped;
         wrapped.kind = TypeKind::Pointer;
@@ -186,8 +186,8 @@ StmtPtr Parser::parseDim() {
 
     if (match(TokenKind::LParen)) {
         stmt->isArray = true;
-        // Empty parens - DIM arr() AS Type - declares a dynamic array (size
-        // 0 until REDIM'd) rather than a fixed-size one.
+        /// Empty parens - DIM arr() AS Type - declares a dynamic array (size
+        /// 0 until REDIM'd) rather than a fixed-size one.
         if (!check(TokenKind::RParen)) {
             ExprPtr first = parseExpr();
             if (match(TokenKind::KwTo)) {
@@ -309,8 +309,8 @@ StmtPtr Parser::parseRecordDecl() {
     stmt->loc = loc;
     stmt->name = nameTok.text;
     if (match(TokenKind::KwExtends)) {
-        // Left for Sema to reject on a UNION (single inheritance only
-        // applies to TYPE in this version).
+        /// Left for Sema to reject on a UNION (single inheritance only
+        /// applies to TYPE in this version).
         stmt->baseTypeName = expect(TokenKind::Identifier, "expected a base TYPE name after EXTENDS").text;
     }
     expectStmtEnd();
@@ -318,10 +318,10 @@ StmtPtr Parser::parseRecordDecl() {
 
     while (!check(TokenKind::KwEnd) && !check(TokenKind::End)) {
         if (check(TokenKind::KwDeclare)) {
-            // A method/constructor/destructor prototype - the real
-            // definition (body) lives in a separate top-level statement.
-            // Left for Sema to reject on a UNION (unions can't have
-            // members with constructors/destructors).
+            /// A method/constructor/destructor prototype - the real
+            /// definition (body) lives in a separate top-level statement.
+            /// Left for Sema to reject on a UNION (unions can't have
+            /// members with constructors/destructors).
             stmt->methods.push_back(parseMethodPrototype());
             skipNewlines();
             continue;
@@ -388,9 +388,9 @@ StmtPtr Parser::parseMethodPrototype() {
         stmt->isVirtual = isVirtual;
         stmt->isOverride = match(TokenKind::KwOverride);
     } else if (match(TokenKind::KwProperty)) {
-        // Getter vs setter, disambiguated by signature exactly like real
-        // FreeBASIC: a getter takes no parameters and has `AS <type>`; a
-        // setter takes exactly one parameter and has no return type.
+        /// Getter vs setter, disambiguated by signature exactly like real
+        /// FreeBASIC: a getter takes no parameters and has `AS <type>`; a
+        /// setter takes exactly one parameter and has no return type.
         stmt->isProperty = true;
         stmt->name = expect(TokenKind::Identifier, "expected a property name after Declare Property").text;
         stmt->params = parseParamList();
@@ -494,14 +494,14 @@ void Parser::parseExternNamespace(std::vector<StmtPtr>& out, const std::string& 
     nsStmt->kind = StmtKind::NamespaceDecl;
     nsStmt->loc = nameTok.loc;
     nsStmt->name = nameTok.text;
-    // The real (possibly aliased) C++ namespace name - Codegen wraps this
-    // namespace's members in a real `namespace realName { ... }` block
-    // (rather than qualifying each member's name individually), since a
-    // qualified `RetType realName::Member(...)` standalone declaration
-    // requires `realName` to already be an open namespace somewhere in
-    // the translation unit - it isn't, this is the only place it's ever
-    // mentioned. The BASIC-visible name/namespace (`ns.Name(args)`
-    // call-site resolution) is unaffected either way.
+    /// The real (possibly aliased) C++ namespace name - Codegen wraps this
+    /// namespace's members in a real `namespace realName { ... }` block
+    /// (rather than qualifying each member's name individually), since a
+    /// qualified `RetType realName::Member(...)` standalone declaration
+    /// requires `realName` to already be an open namespace somewhere in
+    /// the translation unit - it isn't, this is the only place it's ever
+    /// mentioned. The BASIC-visible name/namespace (`ns.Name(args)`
+    /// call-site resolution) is unaffected either way.
     nsStmt->externAlias = realName;
 
     while (!check(TokenKind::KwEnd) && !check(TokenKind::End)) {
@@ -543,20 +543,20 @@ StmtPtr Parser::parseExternDecl(const std::string& defaultLinkage, const std::st
     stmt->externLib = defaultLib;
     stmt->externAlias = nameTok.text; // default: the declared name, as-is
 
-    // Verified real FreeBASIC order: Name [Cdecl] [Lib "name"] [Alias
-    // "name"] (params) As type - the calling-convention/Lib/Alias clauses
-    // all come *before* the parameter list, not after (confirmed against
-    // real examples like `Declare Function strcpy CDecl Alias "strcpy"
-    // (...) As ZString Ptr`). Meaningful on the standalone form; harmless
-    // if repeated inside a block (the block's own linkage/lib already
-    // apply, so re-stating Cdecl/Lib here is a no-op, not an error) -
-    // Alias, though, is commonly still needed per-line even inside a
-    // block, since case-sensitivity mismatches are per-function.
+    /// Verified real FreeBASIC order: Name [Cdecl] [Lib "name"] [Alias
+    /// "name"] (params) As type - the calling-convention/Lib/Alias clauses
+    /// all come *before* the parameter list, not after (confirmed against
+    /// real examples like `Declare Function strcpy CDecl Alias "strcpy"
+    /// (...) As ZString Ptr`). Meaningful on the standalone form; harmless
+    /// if repeated inside a block (the block's own linkage/lib already
+    /// apply, so re-stating Cdecl/Lib here is a no-op, not an error) -
+    /// Alias, though, is commonly still needed per-line even inside a
+    /// block, since case-sensitivity mismatches are per-function.
     if (match(TokenKind::KwCdecl)) {
-        // Cdecl ("C" linkage) is the only calling convention this version
-        // supports (Stdcall/Windows is deferred to M8's Windows port) - and
-        // the only one a standalone Declare can produce in real FreeBASIC
-        // too; "C++" linkage is only reachable via an Extern "C++" block.
+        /// Cdecl ("C" linkage) is the only calling convention this version
+        /// supports (Stdcall/Windows is deferred to M8's Windows port) - and
+        /// the only one a standalone Declare can produce in real FreeBASIC
+        /// too; "C++" linkage is only reachable via an Extern "C++" block.
         stmt->externLinkage = "C";
     }
     if (match(TokenKind::KwLib)) {
@@ -602,8 +602,8 @@ ExprPtr Parser::parseMemberOrCallChain(ExprPtr base) {
         bool isArrow = check(TokenKind::Arrow);
         advance();
         if (isArrow) {
-            // `p->field` is pure sugar for `(*p).field` - desugar here so
-            // Sema/Codegen need no special-casing for the arrow form.
+            /// `p->field` is pure sugar for `(*p).field` - desugar here so
+            /// Sema/Codegen need no special-casing for the arrow form.
             auto deref = std::make_unique<Expr>();
             deref->kind = ExprKind::Deref;
             deref->loc = base->loc;
@@ -612,8 +612,8 @@ ExprPtr Parser::parseMemberOrCallChain(ExprPtr base) {
         }
         const Token& fieldTok = expect(TokenKind::Identifier, "expected a name after '.' or '->'");
         if (match(TokenKind::LParen)) {
-            // A possibly-qualified call: base.Name(args) - base becomes the
-            // qualifier (currently only meaningful as a namespace name).
+            /// A possibly-qualified call: base.Name(args) - base becomes the
+            /// qualifier (currently only meaningful as a namespace name).
             auto call = std::make_unique<Expr>();
             call->kind = ExprKind::Call;
             call->loc = fieldTok.loc;
@@ -647,9 +647,9 @@ StmtPtr Parser::parseAssign() {
     stmt->loc = loc;
 
     if (check(TokenKind::Star)) {
-        // `*p = expr` - assignment through a pointer dereference. Reuses
-        // the same unary-op parser as read position, so `*p->next = expr`
-        // etc. resolve identically on both sides of '='.
+        /// `*p = expr` - assignment through a pointer dereference. Reuses
+        /// the same unary-op parser as read position, so `*p->next = expr`
+        /// etc. resolve identically on both sides of '='.
         stmt->target = parseUnaryPtrOps();
         expect(TokenKind::Equals, "expected '=' in assignment");
         stmt->expr = parseExpr();
@@ -658,9 +658,9 @@ StmtPtr Parser::parseAssign() {
     }
 
     if (check(TokenKind::KwThis)) {
-        // `This.field = expr` - assignment to a member of the current
-        // instance, explicitly qualified (needed when a parameter/local
-        // shadows the member name; otherwise the bare name already works).
+        /// `This.field = expr` - assignment to a member of the current
+        /// instance, explicitly qualified (needed when a parameter/local
+        /// shadows the member name; otherwise the bare name already works).
         advance();
         auto thisExpr = std::make_unique<Expr>();
         thisExpr->kind = ExprKind::This;
@@ -684,7 +684,7 @@ StmtPtr Parser::parseAssign() {
             ExprPtr idx = parseExpr();
             expect(TokenKind::RParen, "expected ')' after array index");
             if (check(TokenKind::Dot) || check(TokenKind::Arrow)) {
-                // name(idx).field... - becomes a general lvalue chain.
+                /// name(idx).field... - becomes a general lvalue chain.
                 auto call = std::make_unique<Expr>();
                 call->kind = ExprKind::Call;
                 call->loc = loc;
@@ -748,11 +748,11 @@ StmtPtr Parser::parseStatement() {
     if (check(TokenKind::KwDestructor)) return parseDestructor();
     if (check(TokenKind::KwProperty)) return parseProperty();
     if (check(TokenKind::KwOperator)) return parseOperatorDecl();
-    // A standalone (non-block) top-level DECLARE - a bodyless EXTERN
-    // signature (M4). Not to be confused with `Declare Sub/Function/
-    // Constructor/Destructor/Property` inside a TYPE body, which is parsed
-    // entirely separately by parseMethodPrototype() from within
-    // parseRecordDecl()'s own loop and never reaches this dispatch.
+    /// A standalone (non-block) top-level DECLARE - a bodyless EXTERN
+    /// signature (M4). Not to be confused with `Declare Sub/Function/
+    /// Constructor/Destructor/Property` inside a TYPE body, which is parsed
+    /// entirely separately by parseMethodPrototype() from within
+    /// parseRecordDecl()'s own loop and never reaches this dispatch.
     if (check(TokenKind::KwDeclare)) return parseExternDecl("C", "");
     if (check(TokenKind::KwCall)) return parseCallStmt();
     if (check(TokenKind::KwReturn)) return parseReturn();
@@ -992,8 +992,8 @@ std::vector<Param> Parser::parseParamList() {
             expect(TokenKind::KwAs, "expected AS after parameter name");
             Type type = parseTypeKeyword();
 
-            // FreeBASIC defaults to BYREF for STRING and user-defined TYPE,
-            // BYVAL for every other built-in type (verified against docs).
+            /// FreeBASIC defaults to BYREF for STRING and user-defined TYPE,
+            /// BYVAL for every other built-in type (verified against docs).
             bool byRef = explicitByRef ||
                          (!explicitByVal && (type.kind == TypeKind::StringT ||
                                              type.kind == TypeKind::UserDefined));
@@ -1013,11 +1013,11 @@ std::vector<Param> Parser::parseParamList() {
 }
 
 StmtPtr Parser::parseSub() {
-    // An optional leading VIRTUAL on an out-of-line method definition
-    // mirrors real FreeBASIC syntax (`Virtual Sub Foo.Bar(...)`), but real
-    // C++ can't repeat `virtual` on an out-of-line definition - parsed and
-    // discarded; only the Declare-prototype's Virtual/Override matter for
-    // Codegen.
+    /// An optional leading VIRTUAL on an out-of-line method definition
+    /// mirrors real FreeBASIC syntax (`Virtual Sub Foo.Bar(...)`), but real
+    /// C++ can't repeat `virtual` on an out-of-line definition - parsed and
+    /// discarded; only the Declare-prototype's Virtual/Override matter for
+    /// Codegen.
     match(TokenKind::KwVirtual);
     SourceLoc loc = peek().loc;
     advance(); // SUB
@@ -1027,8 +1027,8 @@ StmtPtr Parser::parseSub() {
     stmt->kind = StmtKind::SubDecl;
     stmt->loc = loc;
     if (match(TokenKind::Dot)) {
-        // SUB TypeName.MethodName(...) - an out-of-line method definition,
-        // matching real FreeBASIC's "declared within, defined outside" rule.
+        /// SUB TypeName.MethodName(...) - an out-of-line method definition,
+        /// matching real FreeBASIC's "declared within, defined outside" rule.
         stmt->ownerType = nameTok.text;
         stmt->name = expect(TokenKind::Identifier, "expected a method name after '.'").text;
     } else {
@@ -1055,7 +1055,7 @@ StmtPtr Parser::parseFunction() {
     stmt->kind = StmtKind::FunctionDecl;
     stmt->loc = loc;
     if (match(TokenKind::Dot)) {
-        // FUNCTION TypeName.MethodName(...) - an out-of-line method definition.
+        /// FUNCTION TypeName.MethodName(...) - an out-of-line method definition.
         stmt->ownerType = nameTok.text;
         stmt->name = expect(TokenKind::Identifier, "expected a method name after '.'").text;
     } else {
@@ -1163,10 +1163,10 @@ StmtPtr Parser::parseProperty() {
     }
     expectStmtEnd();
 
-    // A getter's body uses the same `PropName = value` return-assignment
-    // pseudo-syntax as a real FUNCTION - thread currentFunctionName_ so
-    // parseAssign recognizes it (a setter has no return value, so nothing
-    // to thread there).
+    /// A getter's body uses the same `PropName = value` return-assignment
+    /// pseudo-syntax as a real FUNCTION - thread currentFunctionName_ so
+    /// parseAssign recognizes it (a setter has no return value, so nothing
+    /// to thread there).
     bool isGetter = stmt->kind == StmtKind::FunctionDecl;
     std::string outerFunction = currentFunctionName_;
     if (isGetter) currentFunctionName_ = canonicalName(stmt->name);
@@ -1202,8 +1202,8 @@ bool Parser::matchBinOpSymbol(BinOp& out) {
 }
 
 namespace {
-// For diagnostics/Stmt::name only - lookup itself is keyed by the BinOp
-// enum value plus operand types, never by this text.
+/// For diagnostics/Stmt::name only - lookup itself is keyed by the BinOp
+/// enum value plus operand types, never by this text.
 const char* binOpSymbolText(BinOp op) {
     switch (op) {
         case BinOp::Add: return "+";
@@ -1274,9 +1274,9 @@ StmtPtr Parser::parseCallStmt() {
     stmt->loc = loc;
 
     if (check(TokenKind::KwThis) || check(TokenKind::KwBase)) {
-        // CALL This.Method(args) - one method calling another on itself.
-        // CALL Base.Method(args) - a non-virtual call to the immediate
-        // base's own implementation (bypassing any override).
+        /// CALL This.Method(args) - one method calling another on itself.
+        /// CALL Base.Method(args) - a non-virtual call to the immediate
+        /// base's own implementation (bypassing any override).
         bool isBase = check(TokenKind::KwBase);
         advance();
         auto qualifier = std::make_unique<Expr>();
@@ -1290,10 +1290,10 @@ StmtPtr Parser::parseCallStmt() {
         stmt->name = nameTok.text;
 
         if (match(TokenKind::Dot)) {
-            // CALL Namespace.Name(args) or CALL obj.Method(args) - `target`
-            // holds the qualifier (reused from Assign's lvalue-chain field;
-            // CallStmt has no assignment target of its own to conflict
-            // with), `name` is the final segment.
+            /// CALL Namespace.Name(args) or CALL obj.Method(args) - `target`
+            /// holds the qualifier (reused from Assign's lvalue-chain field;
+            /// CallStmt has no assignment target of its own to conflict
+            /// with), `name` is the final segment.
             auto qualifier = std::make_unique<Expr>();
             qualifier->kind = ExprKind::Ident;
             qualifier->loc = nameTok.loc;
@@ -1334,12 +1334,12 @@ StmtPtr Parser::parseReturn() {
     return stmt;
 }
 
-// Expression grammar, loosest-binding to tightest-binding, matching
-// FreeBASIC's documented operator precedence (highest to lowest):
-//   ^  >  unary -  >  * /  >  \  >  MOD  >  SHL/SHR  >  + -  >  &  >
-//   relational  >  NOT  >  AND  >  OR  >  XOR
-// EQV/IMP/ANDALSO/ORELSE and the CAST/pointer/array/Is tiers are not part of
-// this language slice yet.
+/// Expression grammar, loosest-binding to tightest-binding, matching
+/// FreeBASIC's documented operator precedence (highest to lowest):
+///   ^  >  unary -  >  * /  >  \  >  MOD  >  SHL/SHR  >  + -  >  &  >
+///   relational  >  NOT  >  AND  >  OR  >  XOR
+/// EQV/IMP/ANDALSO/ORELSE and the CAST/pointer/array/Is tiers are not part of
+/// this language slice yet.
 
 ExprPtr Parser::makeBinary(BinOp op, SourceLoc loc, ExprPtr lhs, ExprPtr rhs) {
     auto bin = std::make_unique<Expr>();
@@ -1495,16 +1495,16 @@ ExprPtr Parser::parsePow() {
     while (check(TokenKind::Caret)) {
         SourceLoc loc = peek().loc;
         advance();
-        // Right operand allows a unary minus (2^-3) without letting '^' itself
-        // bind looser than negate: -2^2 must still parse as -(2^2).
+        /// Right operand allows a unary minus (2^-3) without letting '^' itself
+        /// bind looser than negate: -2^2 must still parse as -(2^2).
         left = makeBinary(BinOp::Pow, loc, std::move(left), parseNegate());
     }
     return left;
 }
 
-// '@' (address-of) and unary '*' (dereference) bind tighter than '^',
-// matching FB's documented precedence table. Right-associative (rare but
-// harmless: `@@x`/`**p`).
+/// '@' (address-of) and unary '*' (dereference) bind tighter than '^',
+/// matching FB's documented precedence table. Right-associative (rare but
+/// harmless: `@@x`/`**p`).
 ExprPtr Parser::parseUnaryPtrOps() {
     if (check(TokenKind::At)) {
         SourceLoc loc = peek().loc;

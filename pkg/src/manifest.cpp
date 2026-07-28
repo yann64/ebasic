@@ -60,6 +60,9 @@ bool loadManifest(const std::string& manifestPath, Manifest& out, std::string& e
             dep.branch = depTbl["branch"].value<std::string>().value_or("");
             dep.tag = depTbl["tag"].value<std::string>().value_or("");
             dep.rev = depTbl["rev"].value<std::string>().value_or("");
+            // Exactly one of path/git must be set: both empty or both
+            // non-empty are equally invalid, hence the equality check rather
+            // than an explicit XOR.
             if (dep.path.empty() == dep.git.empty()) {
                 err = "[dependencies]." + dep.name + " must name exactly one of `path` or `git`";
                 return false;

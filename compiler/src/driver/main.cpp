@@ -25,29 +25,29 @@ struct Options {
     std::string outputPath;
     std::string cxx;
     bool keepCpp = false;
-    // Extra library search paths (`-L <dir>`, repeatable), forwarded as-is
-    // to the backend compiler. A `Lib "name"` clause (M4) only names a
-    // library, not a path to it - the path (e.g. a test's build directory)
-    // has to come from outside the .bas source, exactly like g++'s own
-    // -L/-l split.
+    /// Extra library search paths (`-L <dir>`, repeatable), forwarded as-is
+    /// to the backend compiler. A `Lib "name"` clause (M4) only names a
+    /// library, not a path to it - the path (e.g. a test's build directory)
+    /// has to come from outside the .bas source, exactly like g++'s own
+    /// -L/-l split.
     std::vector<std::string> libDirs;
-    // M5c: extra libraries to link (`-l <name>`, repeatable), forwarded as
-    // `-l<name>` after the auto-derived ones from the module's own `Lib
-    // "name"` clauses. Needed for a *transitive* dependency: if this
-    // module `#include`s only its direct dependency's interface file, its
-    // own `Module::externLibs` has no idea a transitively-needed library
-    // even exists (that library's `Lib` clause lives in a different,
-    // never-`#include`d interface file) - ebpm passes it explicitly here
-    // instead, exactly like it already must pass `-L` for the same reason.
+    /// M5c: extra libraries to link (`-l <name>`, repeatable), forwarded as
+    /// `-l<name>` after the auto-derived ones from the module's own `Lib
+    /// "name"` clauses. Needed for a *transitive* dependency: if this
+    /// module `#include`s only its direct dependency's interface file, its
+    /// own `Module::externLibs` has no idea a transitively-needed library
+    /// even exists (that library's `Lib` clause lives in a different,
+    /// never-`#include`d interface file) - ebpm passes it explicitly here
+    /// instead, exactly like it already must pass `-L` for the same reason.
     std::vector<std::string> extraLibNames;
-    // M5: build a library (static archive + auto-generated interface file)
-    // instead of an executable - see printUsage for the exact output shape.
+    /// M5: build a library (static archive + auto-generated interface file)
+    /// instead of an executable - see printUsage for the exact output shape.
     bool libMode = false;
-    // M5: extra #include search paths (`-I <dir>`, repeatable) - a fallback
-    // only, consulted after the includer-relative lookup fails (see
-    // preprocess()'s doc comment). Lets a package's source #include a
-    // dependency's auto-generated interface file without knowing its exact
-    // relative filesystem path.
+    /// M5: extra #include search paths (`-I <dir>`, repeatable) - a fallback
+    /// only, consulted after the includer-relative lookup fails (see
+    /// preprocess()'s doc comment). Lets a package's source #include a
+    /// dependency's auto-generated interface file without knowing its exact
+    /// relative filesystem path.
     std::vector<std::string> includeDirs;
     /// -v/--version and -h/--help short-circuit everything else in main() -
     /// parseArgs still returns true with these set even if no input file
@@ -144,9 +144,9 @@ fs::path resolveOwnExecutablePath(const std::string& argv0) {
         fs::path canonical = fs::canonical(resolved, ec);
         return ec ? resolved : canonical;
     }
-    // A bare name (e.g. just "ebc", found via a PATH lookup by whatever
-    // launched us) - search PATH ourselves the same way, since argv[0]
-    // alone doesn't tell us where we actually live.
+    /// A bare name (e.g. just "ebc", found via a PATH lookup by whatever
+    /// launched us) - search PATH ourselves the same way, since argv[0]
+    /// alone doesn't tell us where we actually live.
     const char* pathEnv = std::getenv("PATH");
     if (pathEnv) {
 #ifdef _WIN32
@@ -212,12 +212,12 @@ std::vector<std::string> runtimeIncludeArgs(const std::string& argv0) {
     return args;
 }
 
-// M5 (--lib mode): a library's object file must never define `main` itself
-// (it would collide with the consuming package's own `main` at final link
-// time), so its module may only contain declarations - no top-level
-// executable statement (PRINT, assignment, IF, a loop, ...). Checked
-// structurally here, directly against the parsed module, rather than
-// threading a new mode flag through Sema.
+/// M5 (--lib mode): a library's object file must never define `main` itself
+/// (it would collide with the consuming package's own `main` at final link
+/// time), so its module may only contain declarations - no top-level
+/// executable statement (PRINT, assignment, IF, a loop, ...). Checked
+/// structurally here, directly against the parsed module, rather than
+/// threading a new mode flag through Sema.
 bool hasOnlyLibDeclarations(const ebasic::Module& module, std::string& err) {
     for (const auto& stmtPtr : module.stmts) {
         switch (stmtPtr->kind) {
@@ -328,11 +328,11 @@ int main(int argc, char** argv) {
 
     int rc = 0;
     if (opts.libMode) {
-        // M5: compile to an object file only (no main() to link into an
-        // executable - genuinely absent, see Codegen::generate's libMode),
-        // then archive it into a static lib alongside an auto-generated
-        // interface .bas file, exactly mirroring the M4 fixture-library
-        // pattern (transpile -> compile -> ar), just driven by ebc itself.
+        /// M5: compile to an object file only (no main() to link into an
+        /// executable - genuinely absent, see Codegen::generate's libMode),
+        /// then archive it into a static lib alongside an auto-generated
+        /// interface .bas file, exactly mirroring the M4 fixture-library
+        /// pattern (transpile -> compile -> ar), just driven by ebc itself.
         fs::path outDir = fs::path(opts.outputPath).parent_path();
         std::string libName = fs::path(opts.outputPath).filename().string();
         fs::path objPath = opts.outputPath + ".o";
@@ -365,16 +365,16 @@ int main(int argc, char** argv) {
             compileArgs.push_back("-L");
             compileArgs.push_back(dir);
         }
-        // Library names from `Lib "name"` clauses (M4) - -l flags must come
-        // after the object/source files on the command line for a
-        // traditional (non-`--start-group`) linker to resolve symbols from
-        // them correctly.
+        /// Library names from `Lib "name"` clauses (M4) - -l flags must come
+        /// after the object/source files on the command line for a
+        /// traditional (non-`--start-group`) linker to resolve symbols from
+        /// them correctly.
         for (const std::string& lib : codegen.externLibs()) {
             compileArgs.push_back("-l" + lib);
         }
-        // M5c: explicit -l names (a transitive dependency's library, whose
-        // own Lib clause never appears in *this* module at all - see
-        // Options::extraLibNames's doc comment).
+        /// M5c: explicit -l names (a transitive dependency's library, whose
+        /// own Lib clause never appears in *this* module at all - see
+        /// Options::extraLibNames's doc comment).
         for (const std::string& lib : opts.extraLibNames) {
             compileArgs.push_back("-l" + lib);
         }

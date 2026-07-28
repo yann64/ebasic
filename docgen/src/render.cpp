@@ -12,10 +12,10 @@ using ebasic::StmtKind;
 using ebasic::Type;
 using ebasic::TypeKind;
 
-// Renders `type` back into BASIC source syntax - docgen's own small copy
-// of Codegen::basicTypeName's logic (M5a). Not shared: Codegen's version
-// is a private static method on a class docgen has no other reason to
-// link against, and the whole function is a handful of lines either way.
+/// Renders `type` back into BASIC source syntax - docgen's own small copy
+/// of Codegen::basicTypeName's logic (M5a). Not shared: Codegen's version
+/// is a private static method on a class docgen has no other reason to
+/// link against, and the whole function is a handful of lines either way.
 std::string basicTypeName(const Type& type) {
     switch (type.kind) {
         case TypeKind::Byte: return "BYTE";
@@ -40,6 +40,9 @@ std::string basicTypeName(const Type& type) {
     return "INTEGER";
 }
 
+/// Re-renders a TYPE/UNION's own header + field list as BASIC source text,
+/// for display alongside its doc comment - the doc page shows the real
+/// declaration shape, not just its name.
 std::string renderTypeSignature(const Stmt& stmt) {
     std::ostringstream out;
     bool isUnion = stmt.kind == StmtKind::UnionDecl;
@@ -53,16 +56,18 @@ std::string renderTypeSignature(const Stmt& stmt) {
     return out.str();
 }
 
+/// Same as renderTypeSignature, for a single CONST declaration - shows its
+/// declared type, not its initializer value.
 std::string renderConstSignature(const Stmt& stmt) {
     return "CONST " + stmt.name + " AS " + basicTypeName(stmt.declaredType);
 }
 
-// Member values are deliberately not shown - resolving an ENUM member's
-// auto-incremented/expression value is Sema's job (Stmt::enumMembers'
-// `resolvedValue`), and docgen never runs Sema (only Preprocessor/Lexer/
-// Parser - see the M7 plan), so it would only ever be able to show the
-// unresolved default for most members. Documented as a deliberate
-// simplification rather than showing misleadingly-wrong values.
+/// Member values are deliberately not shown - resolving an ENUM member's
+/// auto-incremented/expression value is Sema's job (Stmt::enumMembers'
+/// `resolvedValue`), and docgen never runs Sema (only Preprocessor/Lexer/
+/// Parser - see the M7 plan), so it would only ever be able to show the
+/// unresolved default for most members. Documented as a deliberate
+/// simplification rather than showing misleadingly-wrong values.
 std::string renderEnumSignature(const Stmt& stmt) {
     std::ostringstream out;
     out << "ENUM " << stmt.name << "\n";
@@ -89,12 +94,12 @@ std::string renderProcSignature(const Stmt& stmt) {
     return out.str();
 }
 
-// True for a top-level SUB/FUNCTION that's a free procedure, not a TYPE
-// method's out-of-line definition (`ownerType` non-empty) - TYPE members
-// are out of scope for v1 (see the M7 plan) even though the parser
-// happens to capture a doc comment placed above one just like any other
-// top-level statement (Parser::isDocumentableKind only checks `kind`, not
-// `ownerType`) - docgen is the layer that decides not to surface it.
+/// True for a top-level SUB/FUNCTION that's a free procedure, not a TYPE
+/// method's out-of-line definition (`ownerType` non-empty) - TYPE members
+/// are out of scope for v1 (see the M7 plan) even though the parser
+/// happens to capture a doc comment placed above one just like any other
+/// top-level statement (Parser::isDocumentableKind only checks `kind`, not
+/// `ownerType`) - docgen is the layer that decides not to surface it.
 bool isFreeProc(const Stmt& stmt) {
     return (stmt.kind == StmtKind::SubDecl || stmt.kind == StmtKind::FunctionDecl) &&
            stmt.ownerType.empty();
@@ -145,9 +150,9 @@ std::string htmlEscape(const std::string& s) {
     return r;
 }
 
-// Splits `text` into blank-line-separated paragraphs, each wrapped in
-// <p>...</p> with lines joined by a single space and HTML-escaped - the
-// entire extent of this renderer's "Markdown" support (see render.hpp).
+/// Splits `text` into blank-line-separated paragraphs, each wrapped in
+/// <p>...</p> with lines joined by a single space and HTML-escaped - the
+/// entire extent of this renderer's "Markdown" support (see render.hpp).
 std::string renderProseAsHtml(const std::string& text) {
     std::ostringstream out;
     std::string para;

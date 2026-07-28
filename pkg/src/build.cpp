@@ -36,11 +36,11 @@ bool isStale(const std::vector<std::string>& srcPaths, const std::string& outPat
     if (ec) return true;
     for (const std::string& srcPath : srcPaths) {
         auto srcTime = fs::last_write_time(srcPath, ec);
-        // A missing source is a different problem (surfaced by ebc itself
-        // once the resulting rebuild attempt runs) - treated as stale here
-        // rather than silently skipped, so it can't mask a real problem
-        // (e.g. a dependency's source deleted out from under an otherwise
-        // still-newer binary) behind a false "nothing changed".
+        /// A missing source is a different problem (surfaced by ebc itself
+        /// once the resulting rebuild attempt runs) - treated as stale here
+        /// rather than silently skipped, so it can't mask a real problem
+        /// (e.g. a dependency's source deleted out from under an otherwise
+        /// still-newer binary) behind a false "nothing changed".
         if (ec || srcTime > outTime) return true;
     }
     return false;
@@ -61,17 +61,17 @@ int buildPackage(const Manifest& manifest, const std::string& packageDir,
 
     std::string ebc = ebcCommand();
 
-    // [lib] and [bin] are independent targets - a package may have either or
-    // both, each invoking ebc separately (a lib build never produces an
-    // executable, so there's no ordering dependency between the two within
-    // a single package - only across packages, once M5c's dependency graph
-    // exists).
+    /// [lib] and [bin] are independent targets - a package may have either or
+    /// both, each invoking ebc separately (a lib build never produces an
+    /// executable, so there's no ordering dependency between the two within
+    /// a single package - only across packages, once M5c's dependency graph
+    /// exists).
     if (manifest.hasLib) {
-        // Printed to stderr, not stdout (matches Cargo's own convention) -
-        // so `ebpm run > output.txt` captures only the program's real
-        // output, never ebpm's own build noise. Flushed explicitly (not
-        // just "\n") so it's guaranteed to appear before the child
-        // process's own output when both share the same terminal/pipe.
+        /// Printed to stderr, not stdout (matches Cargo's own convention) -
+        /// so `ebpm run > output.txt` captures only the program's real
+        /// output, never ebpm's own build noise. Flushed explicitly (not
+        /// just "\n") so it's guaranteed to appear before the child
+        /// process's own output when both share the same terminal/pipe.
         std::cerr << "   Compiling " << manifest.name << " (lib)" << std::endl;
         std::vector<std::string> args = {
             ebc,
@@ -123,24 +123,24 @@ int buildPackage(const Manifest& manifest, const std::string& packageDir,
 
 namespace {
 
-// Recursively collects every package `pkg` depends on, directly or
-// transitively (deduplicated via `seen`, keyed by canonical dir - so a
-// diamond dependency is only added once). Needed because a dependency's
-// own `Lib "name"` clause only ever appears in *its own* auto-generated
-// interface file - if `pkg` never `#include`s that file directly (only a
-// closer dependency's interface, which itself `#include`s the transitive
-// one), `pkg`'s compiled module has no way to know that library exists at
-// all, so ebpm must name it explicitly rather than relying on the
-// `Lib`-clause auto-derivation `ebc` normally uses.
-//
-// Looks each dependency edge up by *name* (`byName`), not by re-deriving
-// its directory from `Dependency::path` - that field is empty for a `git`
-// dependency (its directory only exists after resolveGitDependency ran),
-// so recomputing it here would silently resolve to the wrong thing (an
-// earlier version did exactly this, and for a git dependency the
-// mis-derived "directory" happened to collapse to `pkg.dir` itself,
-// silently treating the package as its own transitive dependency instead
-// of finding the real one at all).
+/// Recursively collects every package `pkg` depends on, directly or
+/// transitively (deduplicated via `seen`, keyed by canonical dir - so a
+/// diamond dependency is only added once). Needed because a dependency's
+/// own `Lib "name"` clause only ever appears in *its own* auto-generated
+/// interface file - if `pkg` never `#include`s that file directly (only a
+/// closer dependency's interface, which itself `#include`s the transitive
+/// one), `pkg`'s compiled module has no way to know that library exists at
+/// all, so ebpm must name it explicitly rather than relying on the
+/// `Lib`-clause auto-derivation `ebc` normally uses.
+///
+/// Looks each dependency edge up by *name* (`byName`), not by re-deriving
+/// its directory from `Dependency::path` - that field is empty for a `git`
+/// dependency (its directory only exists after resolveGitDependency ran),
+/// so recomputing it here would silently resolve to the wrong thing (an
+/// earlier version did exactly this, and for a git dependency the
+/// mis-derived "directory" happened to collapse to `pkg.dir` itself,
+/// silently treating the package as its own transitive dependency instead
+/// of finding the real one at all).
 void collectTransitiveDeps(const ResolvedPackage& pkg,
                             const std::unordered_map<std::string, const ResolvedPackage*>& byName,
                             std::unordered_set<std::string>& seen,
@@ -160,8 +160,8 @@ int buildPackageWithDeps(const std::string& rootDir, std::string& err) {
     std::vector<ResolvedPackage> order;
     if (!resolveDependencyGraph(rootDir, order, err)) return 1;
 
-    // package name -> its resolved entry, consulted by
-    // collectTransitiveDeps to look up each dependency edge's target.
+    /// package name -> its resolved entry, consulted by
+    /// collectTransitiveDeps to look up each dependency edge's target.
     std::unordered_map<std::string, const ResolvedPackage*> byName;
     for (const ResolvedPackage& pkg : order) byName[pkg.name] = &pkg;
 
@@ -183,11 +183,11 @@ int buildPackageWithDeps(const std::string& rootDir, std::string& err) {
         if (rc != 0) return rc;
     }
 
-    // Written at the root's own *canonical* directory (order's last entry -
-    // see resolveDependencyGraph), not the raw, possibly-relative `rootDir`
-    // argument, so the lockfile always lands next to the manifest that was
-    // actually resolved, regardless of what path the caller happened to
-    // pass in.
+    /// Written at the root's own *canonical* directory (order's last entry -
+    /// see resolveDependencyGraph), not the raw, possibly-relative `rootDir`
+    /// argument, so the lockfile always lands next to the manifest that was
+    /// actually resolved, regardless of what path the caller happened to
+    /// pass in.
     if (!writeLockfile(order.back().dir, order, err)) return 1;
     return 0;
 }
@@ -201,8 +201,8 @@ bool computeConsumerDirs(const std::string& rootDir, std::vector<std::string>& i
     std::unordered_map<std::string, const ResolvedPackage*> byName;
     for (const ResolvedPackage& pkg : order) byName[pkg.name] = &pkg;
 
-    // resolveDependencyGraph's own doc comment guarantees the root is
-    // always last.
+    /// resolveDependencyGraph's own doc comment guarantees the root is
+    /// always last.
     const ResolvedPackage& root = order.back();
     std::unordered_set<std::string> seen;
     std::vector<const ResolvedPackage*> transitiveDeps;
@@ -214,11 +214,11 @@ bool computeConsumerDirs(const std::string& rootDir, std::vector<std::string>& i
         libDirs.push_back(depTargetDir);
         libNames.push_back(dep->name);
     }
-    // The root's *own* target dir/name too - unlike buildPackageWithDeps's
-    // per-package loop (which never needs a package to see its own output
-    // while building itself), a *consumer* of the root package (a test
-    // file) needs exactly what an external dependent package would: the
-    // root's interface file to #include and its archive to link.
+    /// The root's *own* target dir/name too - unlike buildPackageWithDeps's
+    /// per-package loop (which never needs a package to see its own output
+    /// while building itself), a *consumer* of the root package (a test
+    /// file) needs exactly what an external dependent package would: the
+    /// root's interface file to #include and its archive to link.
     if (root.manifest.hasLib) {
         std::string rootTargetDir = (fs::path(root.dir) / "target").string();
         includeDirs.push_back(rootTargetDir);

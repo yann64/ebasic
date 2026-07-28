@@ -6,16 +6,20 @@
 namespace ebasic {
 
 namespace {
+/// SELECT CASE's own, looser compatibility rule for a CASE value against the
+/// selector's type: any two numeric types are comparable (unlike
+/// isAssignCompatible's stricter assignment rule), and STRING only matches
+/// STRING.
 bool isCaseCompatible(TypeKind a, TypeKind b) {
     return (isNumericType(a) && isNumericType(b)) || (a == TypeKind::StringT && b == TypeKind::StringT);
 }
 
-// Strict pointee-type identity (NOT the looser numeric-widening rule that
-// isAssignCompatible allows between plain variables - C++ pointers have no
-// implicit float*<->int* conversion, so `Integer PTR = Single PTR` must be
-// rejected, not silently accepted the way `DIM x AS INTEGER: x = 3.5` is).
-// Either side being ANY PTR (null pointee) is universally compatible.
-// Recurses for PTR PTR.
+/// Strict pointee-type identity (NOT the looser numeric-widening rule that
+/// isAssignCompatible allows between plain variables - C++ pointers have no
+/// implicit float*<->int* conversion, so `Integer PTR = Single PTR` must be
+/// rejected, not silently accepted the way `DIM x AS INTEGER: x = 3.5` is).
+/// Either side being ANY PTR (null pointee) is universally compatible.
+/// Recurses for PTR PTR.
 bool pointeesIdentical(const Type& a, const Type& b) {
     if (a.kind != b.kind) return false;
     if (a.kind == TypeKind::UserDefined) return canonicalName(a.typeName) == canonicalName(b.typeName);
@@ -64,9 +68,9 @@ void Sema::check(Module& module) {
 void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
     auto isRecordDecl = [](StmtKind k) { return k == StmtKind::TypeDecl || k == StmtKind::UnionDecl; };
 
-    // Pass 1: register every TYPE/UNION's name first, so a field can
-    // reference one declared later in the file (mirrors
-    // collectProcedures/labels).
+    /// Pass 1: register every TYPE/UNION's name first, so a field can
+    /// reference one declared later in the file (mirrors
+    /// collectProcedures/labels).
     for (auto& stmt : stmts) {
         if (!isRecordDecl(stmt->kind)) continue;
         std::string key = canonicalName(stmt->name);
@@ -76,7 +80,7 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
         }
         structs_[key] = RecordInfo{};
     }
-    // Pass 2: now that every name is known, resolve each one's fields.
+    /// Pass 2: now that every name is known, resolve each one's fields.
     for (auto& stmt : stmts) {
         if (!isRecordDecl(stmt->kind)) continue;
         std::string key = canonicalName(stmt->name);
@@ -105,11 +109,11 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
             info.fields.push_back(field);
         }
 
-        // EXTENDS (single inheritance only) - UNION cannot use it (kept
-        // simple: real FB allows a restricted form, but combining UNION's
-        // own "no complex members" restriction with inheritance isn't
-        // needed to prove TYPE inheritance/virtual dispatch, this slice's
-        // actual goal).
+        /// EXTENDS (single inheritance only) - UNION cannot use it (kept
+        /// simple: real FB allows a restricted form, but combining UNION's
+        /// own "no complex members" restriction with inheritance isn't
+        /// needed to prove TYPE inheritance/virtual dispatch, this slice's
+        /// actual goal).
         if (!stmt->baseTypeName.empty()) {
             if (stmt->kind == StmtKind::UnionDecl) {
                 diags_.error(stmt->loc, "UNION cannot use EXTENDS");
@@ -124,19 +128,19 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
             }
         }
 
-        // Method/constructor/destructor prototypes (Declare ... inside the
-        // TYPE body) - UNION cannot have any (FreeBASIC unions may not
-        // contain members with constructors/destructors).
+        /// Method/constructor/destructor prototypes (Declare ... inside the
+        /// TYPE body) - UNION cannot have any (FreeBASIC unions may not
+        /// contain members with constructors/destructors).
         if (stmt->kind == StmtKind::UnionDecl && !stmt->methods.empty()) {
             diags_.error(stmt->methods.front()->loc,
                          "UNION cannot have member procedures (constructors, destructors, or "
                          "methods)");
         } else {
-            // Per-TYPE scratch data, just for this loop: which properties
-            // have already seen a getter/setter declaration, so a genuine
-            // getter+setter pair can be told apart from a duplicate
-            // getter/getter or setter/setter, and a type mismatch between
-            // the two halves can be caught.
+            /// Per-TYPE scratch data, just for this loop: which properties
+            /// have already seen a getter/setter declaration, so a genuine
+            /// getter+setter pair can be told apart from a duplicate
+            /// getter/getter or setter/setter, and a type mismatch between
+            /// the two halves can be caught.
             std::unordered_map<std::string, bool> propGetterSeen, propSetterSeen;
             for (const StmtPtr& method : stmt->methods) {
                 if (method->isCtor) {
@@ -202,14 +206,14 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
                 procInfo.isFunction = method->kind == StmtKind::FunctionDecl;
                 procInfo.returnType = method->declaredType;
                 procInfo.params = method->params;
-                // An override necessarily participates in the vtable too,
-                // whether or not `Virtual` was also explicitly written.
+                /// An override necessarily participates in the vtable too,
+                /// whether or not `Virtual` was also explicitly written.
                 procInfo.isVirtual = method->isVirtual || method->isOverride;
                 info.methods[methodKey] = std::move(procInfo);
             }
-            // Every declared property must have BOTH a getter and a setter
-            // declared (this version's deliberate simplification - see
-            // Stmt::isProperty's comment).
+            /// Every declared property must have BOTH a getter and a setter
+            /// declared (this version's deliberate simplification - see
+            /// Stmt::isProperty's comment).
             for (const auto& [propKey, propInfo] : info.properties) {
                 (void)propInfo;
                 if (!propGetterSeen.count(propKey)) {
@@ -222,26 +226,26 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
                 }
             }
         }
-        // M4d: a TYPE with no fields, no methods/properties, no ctor/dtor,
-        // and no EXTENDS is an opaque external handle - computed here since
-        // every field/method/EXTENDS check above has already run for this
-        // TYPE. Deliberately excludes UnionDecl (an empty UNION is a
-        // degenerate case, not this feature's target).
+        /// M4d: a TYPE with no fields, no methods/properties, no ctor/dtor,
+        /// and no EXTENDS is an opaque external handle - computed here since
+        /// every field/method/EXTENDS check above has already run for this
+        /// TYPE. Deliberately excludes UnionDecl (an empty UNION is a
+        /// degenerate case, not this feature's target).
         info.isOpaque = stmt->kind == StmtKind::TypeDecl && info.fields.empty() && info.methods.empty() &&
                          info.properties.empty() && !info.hasCtor && !info.hasDtor && info.baseName.empty();
         it->second = std::move(info);
     }
-    // Pass 3: M4d opaque-TYPE restrictions that need every TYPE/UNION's
-    // `isOpaque` fully resolved first (a forward-referenced opaque TYPE
-    // wouldn't have its flag set yet if checked during pass 2 above - same
-    // forward-reference concern as pass 4's UNION/STRING check below).
-    // Opaque types are PTR-only: reject by-value embedding as a field in
-    // another TYPE/UNION, and reject EXTENDS naming an opaque type as the
-    // base (unknown layout - nothing to inherit). Extending an opaque type
-    // is separately rejected because that assignment (`stmt->baseTypeName`)
-    // already forces `info.baseName` non-empty, which makes `isOpaque` false
-    // for the derived TYPE itself - so there's nothing further to check on
-    // that side.
+    /// Pass 3: M4d opaque-TYPE restrictions that need every TYPE/UNION's
+    /// `isOpaque` fully resolved first (a forward-referenced opaque TYPE
+    /// wouldn't have its flag set yet if checked during pass 2 above - same
+    /// forward-reference concern as pass 4's UNION/STRING check below).
+    /// Opaque types are PTR-only: reject by-value embedding as a field in
+    /// another TYPE/UNION, and reject EXTENDS naming an opaque type as the
+    /// base (unknown layout - nothing to inherit). Extending an opaque type
+    /// is separately rejected because that assignment (`stmt->baseTypeName`)
+    /// already forces `info.baseName` non-empty, which makes `isOpaque` false
+    /// for the derived TYPE itself - so there's nothing further to check on
+    /// that side.
     for (auto& stmt : stmts) {
         if (!isRecordDecl(stmt->kind)) continue;
         for (const FieldDecl& field : stmt->fields) {
@@ -261,11 +265,11 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
             }
         }
     }
-    // Pass 4: UNION-only "no STRING, directly or nested" restriction. Run
-    // only after every TYPE/UNION's fields are fully resolved above (pass
-    // 2), since a UNION declared earlier in the file may embed a TYPE
-    // declared later - checking against a not-yet-populated RecordInfo
-    // would miss a nested STRING.
+    /// Pass 4: UNION-only "no STRING, directly or nested" restriction. Run
+    /// only after every TYPE/UNION's fields are fully resolved above (pass
+    /// 2), since a UNION declared earlier in the file may embed a TYPE
+    /// declared later - checking against a not-yet-populated RecordInfo
+    /// would miss a nested STRING.
     for (auto& stmt : stmts) {
         if (stmt->kind != StmtKind::UnionDecl) continue;
         for (const FieldDecl& field : stmt->fields) {
@@ -277,13 +281,13 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
             }
         }
     }
-    // Pass 5: match each out-of-line method/constructor/destructor
-    // DEFINITION (a top-level SubDecl/FunctionDecl with `ownerType` set) to
-    // its declared prototype, marking it defined. A definition naming an
-    // unknown TYPE, an undeclared method, or a duplicate definition, is an
-    // error here - matches real FreeBASIC's "declared within, defined
-    // outside" split, just checked eagerly instead of surfacing as a
-    // backend link error.
+    /// Pass 5: match each out-of-line method/constructor/destructor
+    /// DEFINITION (a top-level SubDecl/FunctionDecl with `ownerType` set) to
+    /// its declared prototype, marking it defined. A definition naming an
+    /// unknown TYPE, an undeclared method, or a duplicate definition, is an
+    /// error here - matches real FreeBASIC's "declared within, defined
+    /// outside" split, just checked eagerly instead of surfacing as a
+    /// backend link error.
     for (auto& stmt : stmts) {
         if (stmt->ownerType.empty()) continue;
         std::string typeKey = canonicalName(stmt->ownerType);
@@ -350,9 +354,9 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
                                          "' has a different parameter count than its declaration");
         }
     }
-    // Pass 6: every declared method/constructor/destructor must have a
-    // matching out-of-line definition - an undefined one would otherwise
-    // only surface as a confusing backend "incomplete type"/link error.
+    /// Pass 6: every declared method/constructor/destructor must have a
+    /// matching out-of-line definition - an undefined one would otherwise
+    /// only surface as a confusing backend "incomplete type"/link error.
     for (auto& stmt : stmts) {
         if (stmt->kind != StmtKind::TypeDecl) continue;
         auto it = structs_.find(canonicalName(stmt->name));
@@ -385,13 +389,13 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
             }
         }
     }
-    // Pass 7: EXTENDS cycle check. Every base-name lookup above only
-    // required the base to *exist*, not that its own chain be acyclic -
-    // walk each TYPE's chain now that every baseName is resolved, so a
-    // cycle (A extends B, B extends A, ...) is reported once cleanly
-    // instead of surfacing later as unbounded recursion in codegen/lookup
-    // helpers (which are cycle-guarded defensively, but a clear diagnostic
-    // here is much friendlier than silent truncation there).
+    /// Pass 7: EXTENDS cycle check. Every base-name lookup above only
+    /// required the base to *exist*, not that its own chain be acyclic -
+    /// walk each TYPE's chain now that every baseName is resolved, so a
+    /// cycle (A extends B, B extends A, ...) is reported once cleanly
+    /// instead of surfacing later as unbounded recursion in codegen/lookup
+    /// helpers (which are cycle-guarded defensively, but a clear diagnostic
+    /// here is much friendlier than silent truncation there).
     for (auto& stmt : stmts) {
         if (stmt->kind != StmtKind::TypeDecl) continue;
         std::string key = canonicalName(stmt->name);
@@ -413,13 +417,13 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
             diags_.error(stmt->loc, "circular inheritance involving TYPE '" + stmt->name + "'");
         }
     }
-    // Pass 8: an Override method must match a Virtual method somewhere up
-    // the (now fully-resolved and acyclic) base chain - run only after
-    // pass 6 confirms no cycles, so this walk is guaranteed to terminate
-    // without relying on its own cycle guard. A narrower "is it actually
-    // virtual" mismatch is left for the backend: Codegen emits a literal
-    // `override` regardless, and g++ already gives a precise error for
-    // that case ("marked override, but does not override").
+    /// Pass 8: an Override method must match a Virtual method somewhere up
+    /// the (now fully-resolved and acyclic) base chain - run only after
+    /// pass 6 confirms no cycles, so this walk is guaranteed to terminate
+    /// without relying on its own cycle guard. A narrower "is it actually
+    /// virtual" mismatch is left for the backend: Codegen emits a literal
+    /// `override` regardless, and g++ already gives a precise error for
+    /// that case ("marked override, but does not override").
     for (auto& stmt : stmts) {
         if (stmt->kind != StmtKind::TypeDecl) continue;
         std::string key = canonicalName(stmt->name);
@@ -555,15 +559,15 @@ void Sema::collectProcedures(std::vector<StmtPtr>& stmts, const std::string& pre
             continue;
         }
         if (stmt->kind != StmtKind::SubDecl && stmt->kind != StmtKind::FunctionDecl) continue;
-        // A TYPE method/constructor/destructor definition - registered
-        // into its own RecordInfo::methods by collectTypes, not the global
-        // procedures_ map (two different TYPEs' same-named methods, or a
-        // method sharing a name with an unrelated free function, must not
-        // collide here).
+        /// A TYPE method/constructor/destructor definition - registered
+        /// into its own RecordInfo::methods by collectTypes, not the global
+        /// procedures_ map (two different TYPEs' same-named methods, or a
+        /// method sharing a name with an unrelated free function, must not
+        /// collide here).
         if (!stmt->ownerType.empty()) continue;
-        // An operator overload - registered into operatorOverloads_ by
-        // collectOperators, keyed by (BinOp, lhs type, rhs type), never by
-        // name (its `name` is just the symbol text, for diagnostics only).
+        /// An operator overload - registered into operatorOverloads_ by
+        /// collectOperators, keyed by (BinOp, lhs type, rhs type), never by
+        /// name (its `name` is just the symbol text, for diagnostics only).
         if (stmt->isOperator) continue;
         std::string key = prefix.empty() ? canonicalName(stmt->name) : prefix + "::" + canonicalName(stmt->name);
         if (symbols_.count(key) || procedures_.count(key)) {
@@ -666,15 +670,15 @@ const PropertyInfo* Sema::findPropertyInChain(const std::string& typeKey, const 
 }
 
 bool Sema::isAssignCompatible(const Type& targetType, const Type& valueType) const {
-    // Pointer target/value: ANY PTR (null pointee) is universally compatible
-    // with any other pointer on either side (verified against FB docs -
-    // "implicitly converted to and from other pointer types"); two typed
-    // pointers require identical pointees. Assigning an integer-family value
-    // (the null-literal `0` convention) to a pointer target is allowed
-    // structurally here - the backend (g++) rejects any non-zero
-    // non-pointer-constant case, the same "defer to the backend" pattern
-    // used elsewhere in this codebase. Assigning a pointer to a non-pointer
-    // target is never allowed.
+    /// Pointer target/value: ANY PTR (null pointee) is universally compatible
+    /// with any other pointer on either side (verified against FB docs -
+    /// "implicitly converted to and from other pointer types"); two typed
+    /// pointers require identical pointees. Assigning an integer-family value
+    /// (the null-literal `0` convention) to a pointer target is allowed
+    /// structurally here - the backend (g++) rejects any non-zero
+    /// non-pointer-constant case, the same "defer to the backend" pattern
+    /// used elsewhere in this codebase. Assigning a pointer to a non-pointer
+    /// target is never allowed.
     bool targetIsPtr = targetType.kind == TypeKind::Pointer;
     bool valueIsPtr = valueType.kind == TypeKind::Pointer;
     if (targetIsPtr || valueIsPtr) {
@@ -685,14 +689,14 @@ bool Sema::isAssignCompatible(const Type& targetType, const Type& valueType) con
         return targetIsPtr && isIntegerFamily(valueType.kind);
     }
 
-    // STRING and ZSTRING are mutually assign-compatible (verified against
-    // FB docs: any string type argument may be passed directly to a
-    // ZSTRING PTR parameter) - the actual marshaling in both directions is
-    // handled entirely by BString's own implicit `const char*` conversion
-    // operator and its `BString(const char*)` constructor in the generated
-    // C++ (M4), so this is purely a type-compatibility rule; Codegen needs
-    // no per-call conversion logic. Neither is compatible with anything
-    // else (numeric, UserDefined, ...).
+    /// STRING and ZSTRING are mutually assign-compatible (verified against
+    /// FB docs: any string type argument may be passed directly to a
+    /// ZSTRING PTR parameter) - the actual marshaling in both directions is
+    /// handled entirely by BString's own implicit `const char*` conversion
+    /// operator and its `BString(const char*)` constructor in the generated
+    /// C++ (M4), so this is purely a type-compatibility rule; Codegen needs
+    /// no per-call conversion logic. Neither is compatible with anything
+    /// else (numeric, UserDefined, ...).
     bool targetIsStringLike = targetType.kind == TypeKind::StringT || targetType.kind == TypeKind::ZStringT;
     bool valueIsStringLike = valueType.kind == TypeKind::StringT || valueType.kind == TypeKind::ZStringT;
     if (targetIsStringLike || valueIsStringLike) return targetIsStringLike && valueIsStringLike;
@@ -701,11 +705,11 @@ bool Sema::isAssignCompatible(const Type& targetType, const Type& valueType) con
     bool valueIsUser = valueType.kind == TypeKind::UserDefined;
     if (targetIsUser != valueIsUser) return false;
     if (targetIsUser) {
-        // An implicit upcast: a value of a TYPE derived (directly or
-        // transitively) from the target's TYPE is compatible, matching
-        // C++'s own base-pointer/reference/slicing-assignment behavior -
-        // needed for e.g. passing a Derived instance to a BYREF Base
-        // parameter to demonstrate virtual dispatch.
+        /// An implicit upcast: a value of a TYPE derived (directly or
+        /// transitively) from the target's TYPE is compatible, matching
+        /// C++'s own base-pointer/reference/slicing-assignment behavior -
+        /// needed for e.g. passing a Derived instance to a BYREF Base
+        /// parameter to demonstrate virtual dispatch.
         return isSameOrDerivedFrom(canonicalName(valueType.typeName), canonicalName(targetType.typeName));
     }
     return true;
@@ -720,7 +724,7 @@ bool Sema::isLvalue(const Expr& expr) const {
         case ExprKind::Deref:
             return true; // *p is always addressable when p is a pointer
         case ExprKind::Call: {
-            // An array-element read is an lvalue; a function-call result is not.
+            /// An array-element read is an lvalue; a function-call result is not.
             if (expr.lhs) return false; // qualified calls are always procedure calls
             SymbolInfo info;
             return lookupSymbol(canonicalName(expr.stringValue), info) && info.isArray;
@@ -757,8 +761,8 @@ void Sema::checkCallArgs(const ProcedureInfo& proc, std::vector<ExprPtr>& args, 
             }
         }
     }
-    // Any extra args beyond the parameter count still get type-checked so
-    // their own errors (undeclared names, etc.) aren't silently skipped.
+    /// Any extra args beyond the parameter count still get type-checked so
+    /// their own errors (undeclared names, etc.) aren't silently skipped.
     for (size_t i = n; i < args.size(); ++i) {
         checkExpr(*args[i]);
     }
@@ -894,10 +898,10 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                 return;
             }
             if (stmt.target) {
-                // A general Member/Call-chain lvalue (obj.field, arr(i).field,
-                // ...) - checkExpr's own resolution (Ident/Call/Member) already
-                // validates the chain structurally; just check the assigned
-                // value's type against it.
+                /// A general Member/Call-chain lvalue (obj.field, arr(i).field,
+                /// ...) - checkExpr's own resolution (Ident/Call/Member) already
+                /// validates the chain structurally; just check the assigned
+                /// value's type against it.
                 Type targetType = checkExpr(*stmt.target);
                 Type exprType = checkExpr(*stmt.expr);
                 if (!isAssignCompatible(targetType, exprType)) {
@@ -908,10 +912,10 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
             std::string key = canonicalName(stmt.name);
             SymbolInfo info;
             if (!lookupSymbol(key, info)) {
-                // Implicit `This.field = value` when inside a method, no
-                // array index, and no local/parameter/global matches -
-                // mirrors the read-side Ident fallback in checkExpr. Walks
-                // the base chain too, so assigning an inherited field works.
+                /// Implicit `This.field = value` when inside a method, no
+                /// array index, and no local/parameter/global matches -
+                /// mirrors the read-side Ident fallback in checkExpr. Walks
+                /// the base chain too, so assigning an inherited field works.
                 if (!stmt.index && !currentClassName_.empty()) {
                     if (const FieldDecl* field = findFieldInChain(currentClassName_, key)) {
                         Type exprType = checkExpr(*stmt.expr);
@@ -1040,8 +1044,8 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                              "labels are only supported at the top level of a program in this "
                              "version of ebc");
             }
-            // A new label always ends any GOSUB body span in progress, and
-            // starts a new one if this label is itself a GOSUB target.
+            /// A new label always ends any GOSUB body span in progress, and
+            /// starts a new one if this label is itself a GOSUB target.
             insideGosubBody_ = gosubTargets_.count(canonicalName(stmt.name)) != 0;
             return;
         }
@@ -1093,10 +1097,10 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
             locals_.clear();
             insideProcedure_ = true;
             currentFunctionReturnType_ = isFunction ? stmt.declaredType : Type(TypeKind::Unknown);
-            // An out-of-line method/constructor/destructor definition
-            // (`ownerType` set) - not a free SUB/FUNCTION. Methods don't
-            // nest, so a plain save/restore (no stack) suffices, mirroring
-            // insideProcedure_'s own simplification.
+            /// An out-of-line method/constructor/destructor definition
+            /// (`ownerType` set) - not a free SUB/FUNCTION. Methods don't
+            /// nest, so a plain save/restore (no stack) suffices, mirroring
+            /// insideProcedure_'s own simplification.
             currentClassName_ = stmt.ownerType.empty() ? std::string() : canonicalName(stmt.ownerType);
 
             for (const Param& param : stmt.params) {
@@ -1123,7 +1127,7 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                 bool targetIsNamespaceIdent = stmt.target->kind == ExprKind::Ident &&
                                                namespaces_.count(canonicalName(stmt.target->stringValue));
                 if (targetIsNamespaceIdent) {
-                    // CALL Namespace.Name(args) - target is the qualifier.
+                    /// CALL Namespace.Name(args) - target is the qualifier.
                     std::string nsKey = canonicalName(stmt.target->stringValue);
                     auto it = procedures_.find(nsKey + "::" + canonicalName(stmt.name));
                     if (it == procedures_.end()) {
@@ -1135,10 +1139,10 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                     checkCallArgs(it->second, stmt.args, stmt.loc);
                     return;
                 }
-                // CALL obj.Method(args) / CALL This.Method(args) / CALL
-                // Base.Method(args) - target is a receiver expression,
-                // resolved by what its type is (walking the base chain, so
-                // an inherited method resolves too).
+                /// CALL obj.Method(args) / CALL This.Method(args) / CALL
+                /// Base.Method(args) - target is a receiver expression,
+                /// resolved by what its type is (walking the base chain, so
+                /// an inherited method resolves too).
                 Type receiverType = checkExpr(*stmt.target);
                 if (receiverType.kind != TypeKind::UserDefined) {
                     if (receiverType.kind != TypeKind::Unknown) {
@@ -1205,12 +1209,12 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
         }
         case StmtKind::TypeDecl:
         case StmtKind::UnionDecl: {
-            // Name registration, field-type resolution, and (for UNION) the
-            // no-STRING restriction already happened in the collectTypes
-            // pre-pass (fields have no expressions or control flow to
-            // check) - just enforce the top-level rule, matching
-            // SUB/FUNCTION, so a nested TYPE/UNION isn't silently accepted
-            // as a no-op while being unusable (never registered).
+            /// Name registration, field-type resolution, and (for UNION) the
+            /// no-STRING restriction already happened in the collectTypes
+            /// pre-pass (fields have no expressions or control flow to
+            /// check) - just enforce the top-level rule, matching
+            /// SUB/FUNCTION, so a nested TYPE/UNION isn't silently accepted
+            /// as a no-op while being unusable (never registered).
             if (!atTopLevel) {
                 diags_.error(stmt.loc, "TYPE/UNION declarations are only supported at the top level "
                                         "of a program");
@@ -1268,10 +1272,10 @@ Type Sema::checkExpr(Expr& expr) {
             std::string key = canonicalName(expr.stringValue);
             SymbolInfo info;
             if (!lookupSymbol(key, info)) {
-                // Implicit `This.field` when inside a method and no
-                // local/parameter/global matches - a local/param always
-                // wins (verified FB rule: it "hides" the member). Walks the
-                // base chain too, so an inherited field resolves.
+                /// Implicit `This.field` when inside a method and no
+                /// local/parameter/global matches - a local/param always
+                /// wins (verified FB rule: it "hides" the member). Walks the
+                /// base chain too, so an inherited field resolves.
                 if (!currentClassName_.empty()) {
                     if (const FieldDecl* field = findFieldInChain(currentClassName_, key)) {
                         expr.type = field->type;
@@ -1325,7 +1329,7 @@ Type Sema::checkExpr(Expr& expr) {
                 bool lhsIsNamespaceIdent = expr.lhs->kind == ExprKind::Ident &&
                                            namespaces_.count(canonicalName(expr.lhs->stringValue));
                 if (lhsIsNamespaceIdent) {
-                    // Namespace.Name(args) - lhs is the qualifier.
+                    /// Namespace.Name(args) - lhs is the qualifier.
                     std::string nsKey = canonicalName(expr.lhs->stringValue);
                     auto procIt = procedures_.find(nsKey + "::" + canonicalName(expr.stringValue));
                     if (procIt == procedures_.end()) {
@@ -1344,12 +1348,12 @@ Type Sema::checkExpr(Expr& expr) {
                     expr.type = proc.returnType;
                     return expr.type;
                 }
-                // obj.Method(args) / This.Method(args) / Base.Method(args) -
-                // lhs is a receiver expression, resolved by looking up what
-                // its type actually is, walking the base chain (a third
-                // instance of this codebase's "disambiguate by what it
-                // names" pattern, after array-vs-function Call and
-                // NAMESPACE's qualified lookup).
+                /// obj.Method(args) / This.Method(args) / Base.Method(args) -
+                /// lhs is a receiver expression, resolved by looking up what
+                /// its type actually is, walking the base chain (a third
+                /// instance of this codebase's "disambiguate by what it
+                /// names" pattern, after array-vs-function Call and
+                /// NAMESPACE's qualified lookup).
                 Type receiverType = checkExpr(*expr.lhs);
                 if (receiverType.kind != TypeKind::UserDefined) {
                     if (receiverType.kind != TypeKind::Unknown) {
@@ -1446,18 +1450,18 @@ Type Sema::checkExpr(Expr& expr) {
                 expr.type = TypeKind::Unknown;
                 return expr.type;
             }
-            // Walks the base chain too, so an inherited field resolves the
-            // same as one declared directly.
+            /// Walks the base chain too, so an inherited field resolves the
+            /// same as one declared directly.
             if (const FieldDecl* field = findFieldInChain(typeKey, canonicalName(expr.stringValue))) {
                 expr.type = field->type;
                 return expr.type;
             }
-            // A PROPERTY looks exactly like a field at its access site (no
-            // parens) - resolved the same way, walking the base chain too.
-            // Every declared property is guaranteed to have both a getter
-            // and setter (Sema's own simplifying requirement), so no
-            // separate "does a getter/setter actually exist" check is
-            // needed here regardless of read/write context.
+            /// A PROPERTY looks exactly like a field at its access site (no
+            /// parens) - resolved the same way, walking the base chain too.
+            /// Every declared property is guaranteed to have both a getter
+            /// and setter (Sema's own simplifying requirement), so no
+            /// separate "does a getter/setter actually exist" check is
+            /// needed here regardless of read/write context.
             if (const PropertyInfo* prop = findPropertyInChain(typeKey, canonicalName(expr.stringValue))) {
                 expr.type = prop->type;
                 expr.isProperty = true;
@@ -1521,11 +1525,11 @@ Type Sema::checkExpr(Expr& expr) {
             Type lt = checkExpr(*expr.lhs);
             Type rt = checkExpr(*expr.rhs);
 
-            // A user-defined operand always resolves through the operator
-            // overload table instead of the built-in rules below -
-            // deliberately an exact (BinOp, lhsType, rhsType) match, no
-            // promotion, to keep this first real overload-resolution
-            // mechanism narrow.
+            /// A user-defined operand always resolves through the operator
+            /// overload table instead of the built-in rules below -
+            /// deliberately an exact (BinOp, lhsType, rhsType) match, no
+            /// promotion, to keep this first real overload-resolution
+            /// mechanism narrow.
             if (lt.kind == TypeKind::UserDefined || rt.kind == TypeKind::UserDefined) {
                 auto it = operatorOverloads_.find(operatorKey(expr.binOp, lt, rt));
                 if (it == operatorOverloads_.end()) {
@@ -1546,10 +1550,10 @@ Type Sema::checkExpr(Expr& expr) {
                     return expr.type;
 
                 case BinOp::Add:
-                    // Pointer arithmetic (verified against FB docs): p + n
-                    // scales by the pointee's size, matching C++'s own
-                    // pointer arithmetic natively - codegen just reuses the
-                    // plain '+' emission and lets C++ do the scaling.
+                    /// Pointer arithmetic (verified against FB docs): p + n
+                    /// scales by the pointee's size, matching C++'s own
+                    /// pointer arithmetic natively - codegen just reuses the
+                    /// plain '+' emission and lets C++ do the scaling.
                     if (lt.kind == TypeKind::Pointer && isIntegerFamily(rt.kind)) {
                         expr.type = lt;
                         return expr.type;
@@ -1568,8 +1572,8 @@ Type Sema::checkExpr(Expr& expr) {
 
                 case BinOp::Sub:
                     if (lt.kind == TypeKind::Pointer && rt.kind == TypeKind::Pointer) {
-                        // Pointer difference (verified: legal, result is in
-                        // elements, like C++'s own ptrdiff_t subtraction).
+                        /// Pointer difference (verified: legal, result is in
+                        /// elements, like C++'s own ptrdiff_t subtraction).
                         bool compatible = !lt.pointee || !rt.pointee ||
                                           pointeesIdentical(*lt.pointee, *rt.pointee);
                         if (!compatible) {
@@ -1606,8 +1610,8 @@ Type Sema::checkExpr(Expr& expr) {
                         expr.type = TypeKind::Double;
                         return expr.type;
                     }
-                    // '/' is always real division in FreeBASIC, even between
-                    // two integer operands (use '\' for integer division).
+                    /// '/' is always real division in FreeBASIC, even between
+                    /// two integer operands (use '\' for integer division).
                     expr.type = (!isFloatFamily(lt) && !isFloatFamily(rt))
                                     ? TypeKind::Double
                                     : promoteNumeric(lt, rt);
@@ -1617,8 +1621,8 @@ Type Sema::checkExpr(Expr& expr) {
                     if (!isNumericType(lt) || !isNumericType(rt)) {
                         diags_.error(expr.loc, "'^' requires numeric operands");
                     }
-                    // Exponentiation always yields a real result here; FB's
-                    // integer-power special case is deferred (see roadmap).
+                    /// Exponentiation always yields a real result here; FB's
+                    /// integer-power special case is deferred (see roadmap).
                     expr.type = TypeKind::Double;
                     return expr.type;
 
@@ -1651,8 +1655,8 @@ Type Sema::checkExpr(Expr& expr) {
                 case BinOp::Gt:
                 case BinOp::Ge: {
                     bool bothPointers = lt.kind == TypeKind::Pointer && rt.kind == TypeKind::Pointer;
-                    // A pointer compared against a plain integer covers the
-                    // common `p = 0` / `p <> 0` null check.
+                    /// A pointer compared against a plain integer covers the
+                    /// common `p = 0` / `p <> 0` null check.
                     bool pointerVsInt = (lt.kind == TypeKind::Pointer && isIntegerFamily(rt.kind)) ||
                                         (rt.kind == TypeKind::Pointer && isIntegerFamily(lt.kind));
                     if (bothPointers || pointerVsInt) {

@@ -18,18 +18,18 @@ bool resolveDependencyGraph(const std::string& rootDir, std::vector<ResolvedPack
         err = "cannot resolve package directory '" + rootDir + "': " + rootEc.message();
         return false;
     }
-    // Read once, up front, from the root's own ebasic.lock - a git
-    // dependency anywhere in the graph consults this by name (see
-    // resolveGitDependency's `pinnedCommit` parameter) so a repeat build
-    // stays reproducible instead of re-resolving whatever `branch` says
-    // right now.
+    /// Read once, up front, from the root's own ebasic.lock - a git
+    /// dependency anywhere in the graph consults this by name (see
+    /// resolveGitDependency's `pinnedCommit` parameter) so a repeat build
+    /// stays reproducible instead of re-resolving whatever `branch` says
+    /// right now.
     std::unordered_map<std::string, std::string> pins = readLockfilePins(canonicalRoot.string());
 
-    // canonical dir -> its already-resolved manifest (also serves as the
-    // "fully resolved" memo, so a diamond dependency is only loaded once).
+    /// canonical dir -> its already-resolved manifest (also serves as the
+    /// "fully resolved" memo, so a diamond dependency is only loaded once).
     std::unordered_map<std::string, Manifest> resolvedByDir;
-    // Canonical dirs currently on the DFS stack (an ancestor still being
-    // resolved) - a dependency edge landing back on one of these is a cycle.
+    /// Canonical dirs currently on the DFS stack (an ancestor still being
+    /// resolved) - a dependency edge landing back on one of these is a cycle.
     std::vector<std::string> visiting;
 
     std::function<bool(const std::string&, const std::string&)> visit =
@@ -69,11 +69,11 @@ bool resolveDependencyGraph(const std::string& rootDir, std::vector<ResolvedPack
 
             std::error_code depEc;
             std::string depKey = fs::canonical(depDir, depEc).string();
-            // A resolved dependency must have a [lib] target - there's
-            // nothing else for a dependent package to link against (a
-            // dependency's own [bin], if any, is irrelevant to whoever
-            // depends on it). `depEc` can't be set here (visit() already
-            // canonicalized this same path successfully above).
+            /// A resolved dependency must have a [lib] target - there's
+            /// nothing else for a dependent package to link against (a
+            /// dependency's own [bin], if any, is irrelevant to whoever
+            /// depends on it). `depEc` can't be set here (visit() already
+            /// canonicalized this same path successfully above).
             if (!resolvedByDir[depKey].hasLib) {
                 err = "dependency '" + dep.name + "' (at '" + depKey + "') has no [lib] target to "
                       "build against";

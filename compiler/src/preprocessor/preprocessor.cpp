@@ -24,9 +24,9 @@ bool isIdentChar(char c) {
     return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
 }
 
-// Expands macro references in `line`, skipping over string-literal contents
-// (so a macro name that happens to appear inside a "..." string is left
-// alone) and stopping at a ' line comment (its contents are never expanded).
+/// Expands macro references in `line`, skipping over string-literal contents
+/// (so a macro name that happens to appear inside a "..." string is left
+/// alone) and stopping at a ' line comment (its contents are never expanded).
 std::string expandMacros(const std::string& line, const std::unordered_map<std::string, std::string>& macros) {
     std::string out;
     size_t i = 0;
@@ -63,9 +63,9 @@ std::string expandMacros(const std::string& line, const std::unordered_map<std::
     return out;
 }
 
-// Parses `#include ["once"] "path"`. `rest` is everything after the
-// "include" keyword. Returns false (with no diagnostic - the caller does
-// that) if it isn't well-formed.
+/// Parses `#include ["once"] "path"`. `rest` is everything after the
+/// "include" keyword. Returns false (with no diagnostic - the caller does
+/// that) if it isn't well-formed.
 bool parseIncludeDirective(std::string rest, bool& once, std::string& path) {
     rest = trimLeft(rest);
     once = false;
@@ -91,31 +91,31 @@ std::vector<std::string> splitLines(const std::string& source) {
     return lines;
 }
 
-// State shared across the whole recursive expansion (spans #include
-// boundaries), as opposed to each file's own #ifdef nesting, which is not
-// (see expandSource's doc comment).
+/// State shared across the whole recursive expansion (spans #include
+/// boundaries), as opposed to each file's own #ifdef nesting, which is not
+/// (see expandSource's doc comment).
 struct PPState {
     DiagnosticEngine& diags;
     std::unordered_map<std::string, std::string> macros;
-    // Canonical absolute paths already brought in, by a plain #include or an
-    // #include once, at least once - consulted (only) by #include once to
-    // decide whether to skip a repeat inclusion.
+    /// Canonical absolute paths already brought in, by a plain #include or an
+    /// #include once, at least once - consulted (only) by #include once to
+    /// decide whether to skip a repeat inclusion.
     std::unordered_set<std::string> everIncluded;
-    // Canonical absolute paths currently being expanded (i.e. an ancestor
-    // #include is still open), for circular-#include detection.
+    /// Canonical absolute paths currently being expanded (i.e. an ancestor
+    /// #include is still open), for circular-#include detection.
     std::vector<std::string> activeStack;
-    // M5: extra search paths, consulted in order only after the normal
-    // includer-relative lookup fails - see preprocess()'s doc comment.
+    /// M5: extra search paths, consulted in order only after the normal
+    /// includer-relative lookup fails - see preprocess()'s doc comment.
     std::vector<std::string> includeDirs;
 };
 
 void expandSource(PPState& state, const std::string& source, int fileId, const fs::path& dir,
                    std::ostringstream& out, std::vector<SourceLoc>& lineMap);
 
-// Handles one #include/#include once directive: resolves the path, guards
-// against cycles and (for `once`) repeats, then recurses. Always emits
-// exactly one line (blank) for the directive itself into the parent's
-// stream - the included file's own lines are emitted by the recursive call.
+/// Handles one #include/#include once directive: resolves the path, guards
+/// against cycles and (for `once`) repeats, then recurses. Always emits
+/// exactly one line (blank) for the directive itself into the parent's
+/// stream - the included file's own lines are emitted by the recursive call.
 void handleInclude(PPState& state, const std::string& rawArg, const fs::path& dir, SourceLoc loc,
                     std::ostringstream& out, std::vector<SourceLoc>& lineMap) {
     bool once = false;
@@ -132,11 +132,11 @@ void handleInclude(PPState& state, const std::string& rawArg, const fs::path& di
 
     std::error_code ec;
     fs::path canonical = fs::canonical(resolved, ec);
-    // M5: only fall back to the -I search list for a relative path whose
-    // includer-relative lookup just failed - an absolute path has nowhere
-    // else to resolve against, and a successful includer-relative lookup
-    // always wins outright (matches a C/C++ compiler's own quote-include
-    // search order: includer's directory first, -I list second).
+    /// M5: only fall back to the -I search list for a relative path whose
+    /// includer-relative lookup just failed - an absolute path has nowhere
+    /// else to resolve against, and a successful includer-relative lookup
+    /// always wins outright (matches a C/C++ compiler's own quote-include
+    /// search order: includer's directory first, -I list second).
     if (ec && !requested.is_absolute()) {
         for (const std::string& searchDir : state.includeDirs) {
             fs::path candidate = fs::path(searchDir) / requested;
@@ -183,12 +183,12 @@ void handleInclude(PPState& state, const std::string& rawArg, const fs::path& di
     state.activeStack.pop_back();
 }
 
-// Expands one file's content (already read into `source`) into `out`/
-// `lineMap`, recursing into handleInclude for any #include directives.
-// #ifdef/#ifndef nesting is local to this file - it must be balanced within
-// the file itself (an unclosed one is an error reported against this file),
-// unlike macros, which are shared globally across the whole program so a
-// #define in one file is visible in files included after it.
+/// Expands one file's content (already read into `source`) into `out`/
+/// `lineMap`, recursing into handleInclude for any #include directives.
+/// #ifdef/#ifndef nesting is local to this file - it must be balanced within
+/// the file itself (an unclosed one is an error reported against this file),
+/// unlike macros, which are shared globally across the whole program so a
+/// #define in one file is visible in files included after it.
 void expandSource(PPState& state, const std::string& source, int fileId, const fs::path& dir,
                    std::ostringstream& out, std::vector<SourceLoc>& lineMap) {
     std::vector<std::string> lines = splitLines(source);

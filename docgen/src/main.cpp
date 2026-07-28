@@ -18,11 +18,15 @@ namespace fs = std::filesystem;
 
 namespace {
 
+/// Parsed command-line options - see parseArgs.
 struct Options {
     std::string inputPath;
     std::string outputDir;
+    /// -v/--version and -h/--help short-circuit everything else in main() -
+    /// parseArgs still returns true with these set even if inputPath/
+    /// outputDir were never given, matching ebc's own convention.
     bool showVersion = false;
-    bool showHelp = false;
+    bool showHelp = false; ///< see showVersion
 };
 
 void printUsage(std::ostream& os) {
@@ -31,6 +35,11 @@ void printUsage(std::ostream& os) {
     os << "  produces <output-dir>/index.md and <output-dir>/index.html\n";
 }
 
+/// Fills `opts` from argv, or returns false with a message in `err`.
+/// Recognizes -o <dir>, -v/--version, -h/--help, and one positional input
+/// path - anything else (an unknown flag, more than one positional
+/// argument, or a missing required flag/positional when neither -v nor -h
+/// was given) is an error.
 bool parseArgs(int argc, char** argv, Options& opts, std::string& err) {
     std::vector<std::string> args(argv + 1, argv + argc);
     for (size_t i = 0; i < args.size(); ++i) {

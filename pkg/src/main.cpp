@@ -29,17 +29,17 @@ void printUsage(std::ostream& os) {
     os << "                       program; pass = exit code 0\n";
 }
 
-// Loads "ebasic.toml" from the current directory - every command below
-// operates on the package rooted at cwd (M5b: no dependency graph, no
-// package-path argument yet).
+/// Loads "ebasic.toml" from the current directory - every command below
+/// operates on the package rooted at cwd (M5b: no dependency graph, no
+/// package-path argument yet).
 bool loadCurrentManifest(ebpm::Manifest& out, std::string& err) {
     return ebpm::loadManifest("ebasic.toml", out, err);
 }
 
-// Bare package-name text for a manifest's [package] name = "..." line - not
-// a general TOML string escaper (a package name is always a plain
-// identifier-ish string in practice), just enough to avoid producing
-// malformed TOML from a name containing a literal quote.
+/// Bare package-name text for a manifest's [package] name = "..." line - not
+/// a general TOML string escaper (a package name is always a plain
+/// identifier-ish string in practice), just enough to avoid producing
+/// malformed TOML from a name containing a literal quote.
 std::string escapeTomlString(const std::string& s) {
     std::string r;
     for (char c : s) {
@@ -73,9 +73,9 @@ std::string stubLibSource() {
     return "FUNCTION Placeholder() AS INTEGER\n    Placeholder = 0\nEND FUNCTION\n";
 }
 
-// Writes a fresh package (manifest + one stub source file) into `dir`,
-// which must already exist and be empty of any prior `ebasic.toml`. Shared
-// by `new` (dir is a just-created subdirectory) and `init` (dir is `.`).
+/// Writes a fresh package (manifest + one stub source file) into `dir`,
+/// which must already exist and be empty of any prior `ebasic.toml`. Shared
+/// by `new` (dir is a just-created subdirectory) and `init` (dir is `.`).
 bool scaffoldInto(const fs::path& dir, const std::string& name, bool isLib, std::string& err) {
     fs::path manifestPath = dir / "ebasic.toml";
     if (fs::exists(manifestPath)) {
@@ -168,9 +168,9 @@ int cmdBuild(const std::vector<std::string>& args) {
 }
 
 int cmdRun(const std::vector<std::string>& args) {
-    // Everything before a literal "--" would be an ebpm-side run option -
-    // none exist yet, so any argument not after "--" is an error. Everything
-    // after "--" is forwarded verbatim to the built binary.
+    /// Everything before a literal "--" would be an ebpm-side run option -
+    /// none exist yet, so any argument not after "--" is an error. Everything
+    /// after "--" is forwarded verbatim to the built binary.
     std::vector<std::string> forwardArgs;
     for (size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "--") {
@@ -193,9 +193,9 @@ int cmdRun(const std::vector<std::string>& args) {
         return 1;
     }
 
-    // Staleness is checked against every package in the resolved graph, not
-    // just the root's own source - a dependency's source changing must
-    // also trigger a rebuild of whatever depends on it.
+    /// Staleness is checked against every package in the resolved graph, not
+    /// just the root's own source - a dependency's source changing must
+    /// also trigger a rebuild of whatever depends on it.
     std::vector<ebpm::ResolvedPackage> order;
     if (!ebpm::resolveDependencyGraph(".", order, err)) {
         std::cerr << "ebpm: error: " << err << "\n";
@@ -221,14 +221,14 @@ int cmdRun(const std::vector<std::string>& args) {
     return ebasic::runProcess(runArgs);
 }
 
-// M5e: the eBasic *language* has no test/assert syntax yet, so this is
-// deliberately the simplest meaningful interpretation of "a test" - a
-// standalone `.bas` program under tests/, compiled and run as a *consumer*
-// of the package under test (able to #include/link its interface exactly
-// like an external dependent package would - see computeConsumerDirs), and
-// judged purely by its own exit code. No assertion primitives, no
-// golden-output diffing - both would need real language support first, and
-// are easy to layer on top of this once/if that exists.
+/// M5e: the eBasic *language* has no test/assert syntax yet, so this is
+/// deliberately the simplest meaningful interpretation of "a test" - a
+/// standalone `.bas` program under tests/, compiled and run as a *consumer*
+/// of the package under test (able to #include/link its interface exactly
+/// like an external dependent package would - see computeConsumerDirs), and
+/// judged purely by its own exit code. No assertion primitives, no
+/// golden-output diffing - both would need real language support first, and
+/// are easy to layer on top of this once/if that exists.
 int cmdTest(const std::vector<std::string>& args) {
     if (!args.empty()) {
         std::cerr << "ebpm: error: 'test' takes no arguments yet\n";
@@ -236,8 +236,8 @@ int cmdTest(const std::vector<std::string>& args) {
     }
 
     std::string err;
-    // Build the package (and its dependencies) first, so a [lib] package's
-    // own interface/archive already exist for a test file to use.
+    /// Build the package (and its dependencies) first, so a [lib] package's
+    /// own interface/archive already exist for a test file to use.
     int rc = ebpm::buildPackageWithDeps(".", err);
     if (!err.empty()) {
         std::cerr << "ebpm: error: " << err << "\n";
@@ -322,10 +322,10 @@ int main(int argc, char** argv) {
         return 1;
     }
     std::string command = args[0];
-    // -v/--version and -h/--help are checked on the leading token only, not
-    // scanned for anywhere in argv - "run" forwards everything after "--"
-    // to the user's own program (e.g. `ebpm run -- --help`), which must
-    // reach that program untouched, not be swallowed by ebpm itself.
+    /// -v/--version and -h/--help are checked on the leading token only, not
+    /// scanned for anywhere in argv - "run" forwards everything after "--"
+    /// to the user's own program (e.g. `ebpm run -- --help`), which must
+    /// reach that program untouched, not be swallowed by ebpm itself.
     if (command == "-v" || command == "--version") {
         std::cout << "ebpm " << ebasic::versionString() << "\n";
         return 0;

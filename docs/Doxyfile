@@ -1008,6 +1008,8 @@ WARN_LOGFILE           = build/docs/doxygen_warnings.log
 INPUT                  = README.md \
                          compiler/src \
                          runtime/include \
+                         pkg/src \
+                         docgen/src \
                          docs/architecture
 
 # This tag can be used to specify the character encoding of the source files

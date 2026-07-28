@@ -13,20 +13,20 @@ namespace ebasic {
 
 namespace {
 
-// Windows has no execvp-style "argv array" process-creation API -
-// CreateProcess takes a single command-line *string*, which the child's
-// own CRT re-splits back into argv using this exact convention. Building
-// it by hand means following the documented Windows argument-quoting
-// algorithm precisely (Microsoft's own reference implementation, widely
-// cited as "the" correct way to do this): an argument with no
-// space/tab/newline/quote is passed through unquoted; otherwise it's
-// wrapped in quotes, with every run of backslashes doubled when it
-// immediately precedes either a literal quote (which itself gets escaped)
-// or the end of the argument (so the closing quote we add isn't itself
-// escaped). Getting this wrong is a classic, subtle bug (arguments
-// containing spaces or quotes silently splitting wrong) - written and
-// reviewed carefully since there's no local Windows machine to test it
-// against; correctness here is verified via CI (M8d), not assumed.
+/// Windows has no execvp-style "argv array" process-creation API -
+/// CreateProcess takes a single command-line *string*, which the child's
+/// own CRT re-splits back into argv using this exact convention. Building
+/// it by hand means following the documented Windows argument-quoting
+/// algorithm precisely (Microsoft's own reference implementation, widely
+/// cited as "the" correct way to do this): an argument with no
+/// space/tab/newline/quote is passed through unquoted; otherwise it's
+/// wrapped in quotes, with every run of backslashes doubled when it
+/// immediately precedes either a literal quote (which itself gets escaped)
+/// or the end of the argument (so the closing quote we add isn't itself
+/// escaped). Getting this wrong is a classic, subtle bug (arguments
+/// containing spaces or quotes silently splitting wrong) - written and
+/// reviewed carefully since there's no local Windows machine to test it
+/// against; correctness here is verified via CI (M8d), not assumed.
 std::string quoteArgvArgument(const std::string& argument) {
     if (!argument.empty() && argument.find_first_of(" \t\n\v\"") == std::string::npos) {
         return argument;
@@ -53,6 +53,8 @@ std::string quoteArgvArgument(const std::string& argument) {
     return result;
 }
 
+/// Joins an argv into the single, space-separated command-line string
+/// CreateProcess expects, quoting each argument via quoteArgvArgument.
 std::string buildCommandLine(const std::vector<std::string>& args) {
     std::string cmdLine;
     for (size_t i = 0; i < args.size(); ++i) {
@@ -66,10 +68,10 @@ std::string buildCommandLine(const std::vector<std::string>& args) {
 
 int runProcess(const std::vector<std::string>& args) {
     std::string cmdLine = buildCommandLine(args);
-    // CreateProcessA requires a mutable buffer for its command-line
-    // argument (it may rewrite it in place) - a std::string's own buffer
-    // isn't guaranteed safe to hand over that way, so it's copied into an
-    // explicit, writable buffer first.
+    /// CreateProcessA requires a mutable buffer for its command-line
+    /// argument (it may rewrite it in place) - a std::string's own buffer
+    /// isn't guaranteed safe to hand over that way, so it's copied into an
+    /// explicit, writable buffer first.
     std::vector<char> cmdLineBuf(cmdLine.begin(), cmdLine.end());
     cmdLineBuf.push_back('\0');
 
@@ -97,9 +99,9 @@ int runProcessCaptureOutput(const std::vector<std::string>& args, std::string& o
     HANDLE readPipe = nullptr;
     HANDLE writePipe = nullptr;
     if (!CreatePipe(&readPipe, &writePipe, &sa, 0)) return -1;
-    // The parent's (read) end must not be inherited by the child, or the
-    // pipe would never signal EOF once the child exits (the child's own
-    // stray copy of the read handle would keep it open).
+    /// The parent's (read) end must not be inherited by the child, or the
+    /// pipe would never signal EOF once the child exits (the child's own
+    /// stray copy of the read handle would keep it open).
     SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0);
 
     std::string cmdLine = buildCommandLine(args);
@@ -116,9 +118,9 @@ int runProcessCaptureOutput(const std::vector<std::string>& args, std::string& o
 
     BOOL ok = CreateProcessA(nullptr, cmdLineBuf.data(), nullptr, nullptr, TRUE, 0, nullptr, nullptr,
                               &si, &pi);
-    // The parent's own copy of the write end must be closed regardless of
-    // whether CreateProcess succeeded - the child gets its own inherited
-    // copy, and holding this one open would itself prevent EOF.
+    /// The parent's own copy of the write end must be closed regardless of
+    /// whether CreateProcess succeeded - the child gets its own inherited
+    /// copy, and holding this one open would itself prevent EOF.
     CloseHandle(writePipe);
     if (!ok) {
         CloseHandle(readPipe);

@@ -7,6 +7,8 @@
 
 namespace ebasic {
 
+/// Every distinct lexical token the Lexer produces - literals, punctuation,
+/// and one enumerator per reserved keyword (Kw-prefixed).
 enum class TokenKind {
     End,
     Newline,
@@ -14,11 +16,11 @@ enum class TokenKind {
     IntLiteral,
     DoubleLiteral,
     StringLiteral,
-    // M7: a `'''`-marked doc comment line (three or more leading
-    // apostrophes) - `text` holds everything after the marker, with at
-    // most one leading space trimmed (matching `/// text`'s convention). A
-    // plain `'`/`''` comment is still silently discarded by
-    // skipSpacesAndComments and never produces any token at all.
+    /// M7: a `'''`-marked doc comment line (three or more leading
+    /// apostrophes) - `text` holds everything after the marker, with at
+    /// most one leading space trimmed (matching `/// text`'s convention). A
+    /// plain `'`/`''` comment is still silently discarded by
+    /// skipSpacesAndComments and never produces any token at all.
     DocComment,
     Plus,
     Minus,
@@ -115,6 +117,10 @@ enum class TokenKind {
     KwZString,
 };
 
+/// One lexed token - `intValue`/`doubleValue` are only meaningful for
+/// IntLiteral/DoubleLiteral respectively, `text` holds the raw source text
+/// for everything else that needs it (identifiers, string/doc-comment
+/// contents).
 struct Token {
     TokenKind kind;
     std::string text;
@@ -123,15 +129,19 @@ struct Token {
     SourceLoc loc;
 };
 
+/// Turns preprocessed source text into a flat token stream for the Parser.
 class Lexer {
 public:
-    // `lineMap[i]` gives the true {fileId, line} of `source`'s (i+1)-th
-    // line, as produced by preprocess() - since `source` may be a flattened
-    // multi-file result, the lexer's own line_ counter (over `source`) is
-    // translated through this map rather than used directly, so tokens (and
-    // therefore diagnostics) report their real originating file/line.
+    /// `lineMap[i]` gives the true {fileId, line} of `source`'s (i+1)-th
+    /// line, as produced by preprocess() - since `source` may be a flattened
+    /// multi-file result, the lexer's own line_ counter (over `source`) is
+    /// translated through this map rather than used directly, so tokens (and
+    /// therefore diagnostics) report their real originating file/line.
     Lexer(std::string source, const std::vector<SourceLoc>& lineMap, DiagnosticEngine& diags);
 
+    /// Lexes the entire source in one pass, always ending with a single
+    /// End token (so the Parser never needs a separate "have we run out of
+    /// tokens" check).
     std::vector<Token> tokenize();
 
 private:
@@ -144,9 +154,9 @@ private:
     Token lexNumber();
     Token lexString();
     Token lexIdentifierOrKeyword();
-    // M7: lexes a `'''`-marked doc comment line (skipSpacesAndComments has
-    // already stopped just before the leading apostrophes rather than
-    // skipping them, unlike a plain comment).
+    /// M7: lexes a `'''`-marked doc comment line (skipSpacesAndComments has
+    /// already stopped just before the leading apostrophes rather than
+    /// skipping them, unlike a plain comment).
     Token lexDocComment();
     SourceLoc currentLoc() const;
 

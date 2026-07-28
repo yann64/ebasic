@@ -31,12 +31,12 @@ std::string Codegen::cppType(const Type& type) {
         case TypeKind::Boolean: return "std::int8_t";
         case TypeKind::StringT: return "::ebasic::rt::BString";
         case TypeKind::ZStringT: return "const char*";
-        // A TYPE and a variable can never share a name (Sema shares one
-        // namespace for both), so reusing mangleName for the struct's own
-        // name can't collide with any variable's mangled name.
+        /// A TYPE and a variable can never share a name (Sema shares one
+        /// namespace for both), so reusing mangleName for the struct's own
+        /// name can't collide with any variable's mangled name.
         case TypeKind::UserDefined: return mangleName(type.typeName);
         case TypeKind::Pointer:
-            // ANY PTR (null pointee) is FB's void*-equivalent.
+            /// ANY PTR (null pointee) is FB's void*-equivalent.
             return type.pointee ? (cppType(*type.pointee) + "*") : "void*";
         case TypeKind::Unknown: break;
     }
@@ -59,6 +59,9 @@ std::string Codegen::escapeStringLiteral(const std::string& s) {
 }
 
 namespace {
+/// True for the six comparison operators - genExpr uses this to render their
+/// result as BASIC's own -1/0 boolean convention (via a ternary + explicit
+/// cast) rather than plain C++'s `true`/`false`.
 bool isRelational(BinOp op) {
     switch (op) {
         case BinOp::Eq:
@@ -75,13 +78,13 @@ bool isRelational(BinOp op) {
 } // namespace
 
 std::string Codegen::memberReceiverPrefix(const Expr& lhs) {
-    // Namespace.Name -> C++ eb_ns::eb_name; This -> this->eb_name (a
-    // normal, potentially-virtual access/call); Base -> a *qualified*,
-    // non-virtual access to the immediate base's own implementation
-    // (eb_base::eb_name, implicitly using the current `this` - exactly
-    // like C++'s own `Base::member` from inside a derived member
-    // function); anything else (a variable, a field, ...) is plain
-    // `.`-access on that receiver.
+    /// Namespace.Name -> C++ eb_ns::eb_name; This -> this->eb_name (a
+    /// normal, potentially-virtual access/call); Base -> a *qualified*,
+    /// non-virtual access to the immediate base's own implementation
+    /// (eb_base::eb_name, implicitly using the current `this` - exactly
+    /// like C++'s own `Base::member` from inside a derived member
+    /// function); anything else (a variable, a field, ...) is plain
+    /// `.`-access on that receiver.
     if (lhs.kind == ExprKind::Ident && namespaces_.count(canonicalName(lhs.stringValue))) {
         return mangleName(lhs.stringValue) + "::";
     }
@@ -112,11 +115,11 @@ void Codegen::collectExternProcNames(const std::vector<StmtPtr>& stmts, const st
                                       const std::string& realPrefix) {
     for (const auto& stmtPtr : stmts) {
         if (stmtPtr->kind == StmtKind::NamespaceDecl) {
-            // Two parallel prefixes: `keyPrefix` is built from BASIC-visible
-            // names (what a Call/CallStmt's lhs/target actually spells, used
-            // to look this entry back up), `realPrefix` from the real
-            // (possibly aliased) external name(s) (what Codegen must
-            // actually emit) - they can differ (M4c's whole point).
+            /// Two parallel prefixes: `keyPrefix` is built from BASIC-visible
+            /// names (what a Call/CallStmt's lhs/target actually spells, used
+            /// to look this entry back up), `realPrefix` from the real
+            /// (possibly aliased) external name(s) (what Codegen must
+            /// actually emit) - they can differ (M4c's whole point).
             std::string nsKey = (keyPrefix.empty() ? "" : keyPrefix + "::") + canonicalName(stmtPtr->name);
             std::string realNs = stmtPtr->externAlias.empty() ? stmtPtr->name : stmtPtr->externAlias;
             std::string nsReal = (realPrefix.empty() ? "" : realPrefix + "::") + realNs;
@@ -144,17 +147,17 @@ std::string Codegen::genExpr(const Expr& expr) {
             return mangleName(expr.stringValue);
         case ExprKind::Call: {
             if (expr.lhs) {
-                // Namespace.Name(args) -> C++ eb_ns::eb_name(args) (or,
-                // for an Extern "C++" NAMESPACE binding, the real
-                // qualified external name verbatim - see
-                // resolveCalleeName); This -> this->eb_name(args) (a
-                // normal, potentially-virtual call); Base -> a
-                // *qualified*, non-virtual call to the immediate base's
-                // own implementation (eb_base::eb_name(args), implicitly
-                // using the current `this` - exactly like C++'s own
-                // `Base::method()` from inside a derived member function);
-                // anything else (a variable, a field, ...) is a plain
-                // method call on that receiver -> eb_recv.eb_name(args).
+                /// Namespace.Name(args) -> C++ eb_ns::eb_name(args) (or,
+                /// for an Extern "C++" NAMESPACE binding, the real
+                /// qualified external name verbatim - see
+                /// resolveCalleeName); This -> this->eb_name(args) (a
+                /// normal, potentially-virtual call); Base -> a
+                /// *qualified*, non-virtual call to the immediate base's
+                /// own implementation (eb_base::eb_name(args), implicitly
+                /// using the current `this` - exactly like C++'s own
+                /// `Base::method()` from inside a derived member function);
+                /// anything else (a variable, a field, ...) is a plain
+                /// method call on that receiver -> eb_recv.eb_name(args).
                 std::string result = resolveCalleeName(expr.lhs.get(), expr.stringValue) + "(";
                 for (size_t i = 0; i < expr.args.size(); ++i) {
                     if (i > 0) result += ", ";
@@ -179,11 +182,11 @@ std::string Codegen::genExpr(const Expr& expr) {
         }
         case ExprKind::Member: {
             std::string prefix = memberReceiverPrefix(*expr.lhs);
-            // A PROPERTY has no native C++ syntax - rewrite the read into a
-            // getter call (`.eb_name_get()`); the write side is handled
-            // separately in Assign's own codegen, since it needs a
-            // completely different shape (`.eb_name_set(value)`, not
-            // `= value`).
+            /// A PROPERTY has no native C++ syntax - rewrite the read into a
+            /// getter call (`.eb_name_get()`); the write side is handled
+            /// separately in Assign's own codegen, since it needs a
+            /// completely different shape (`.eb_name_set(value)`, not
+            /// `= value`).
             if (expr.isProperty) {
                 return prefix + mangleName(expr.stringValue) + "_get()";
             }
@@ -195,12 +198,12 @@ std::string Codegen::genExpr(const Expr& expr) {
             return "(*(" + genExpr(*expr.lhs) + "))";
         case ExprKind::This:
         case ExprKind::Base:
-            // A bare This/Base used as a value (not immediately followed by
-            // `.field`/`.Method()`, which Member/Call special-case above
-            // without going through this branch at all) needs the
-            // dereferenced *value*, not the raw `this` pointer - e.g.
-            // passing `This` to a BYREF/BYVAL parameter, or `@This` taking
-            // its address (`&this` is ill-formed C++; `&(*this)` is not).
+            /// A bare This/Base used as a value (not immediately followed by
+            /// `.field`/`.Method()`, which Member/Call special-case above
+            /// without going through this branch at all) needs the
+            /// dereferenced *value*, not the raw `this` pointer - e.g.
+            /// passing `This` to a BYREF/BYVAL parameter, or `@This` taking
+            /// its address (`&this` is ill-formed C++; `&(*this)` is not).
             return "(*this)";
         case ExprKind::UnaryNeg:
             return "(-" + genExpr(*expr.lhs) + ")";
@@ -209,19 +212,19 @@ std::string Codegen::genExpr(const Expr& expr) {
         case ExprKind::Binary: {
             const std::string lhs = genExpr(*expr.lhs);
             const std::string rhs = genExpr(*expr.rhs);
-            // A user-defined operand always means a real Operator overload
-            // resolved it (Sema already validated this) - the built-in
-            // special-cased forms below (forced real division, std::pow)
-            // don't apply; a plain textual operator (falling through to the
-            // generic switch) correctly resolves to the user's own
-            // overloaded C++ operator instead.
+            /// A user-defined operand always means a real Operator overload
+            /// resolved it (Sema already validated this) - the built-in
+            /// special-cased forms below (forced real division, std::pow)
+            /// don't apply; a plain textual operator (falling through to the
+            /// generic switch) correctly resolves to the user's own
+            /// overloaded C++ operator instead.
             bool involvesUserDefined =
                 expr.lhs->type.kind == TypeKind::UserDefined || expr.rhs->type.kind == TypeKind::UserDefined;
 
             if (expr.binOp == BinOp::Div && !involvesUserDefined && !isFloatFamily(expr.lhs->type) &&
                 !isFloatFamily(expr.rhs->type)) {
-                // FreeBASIC's '/' is always real division; force it since two
-                // C++ integers would otherwise truncate.
+                /// FreeBASIC's '/' is always real division; force it since two
+                /// C++ integers would otherwise truncate.
                 return "(static_cast<double>(" + lhs + ") / static_cast<double>(" + rhs + "))";
             }
             if (expr.binOp == BinOp::Pow && !involvesUserDefined) {
@@ -292,7 +295,7 @@ void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out, int indent) {
             }
             std::string lowerVar = mangleName(stmt.name) + "__lo";
             if (!stmt.arrayUpper) {
-                // DIM arr() AS Type: a dynamic array, empty until REDIM'd.
+                /// DIM arr() AS Type: a dynamic array, empty until REDIM'd.
                 out << ind(indent) << "auto " << lowerVar << " = 0;\n";
                 out << ind(indent) << "std::vector<" << cppType(stmt.declaredType) << "> "
                     << mangleName(stmt.name) << ";\n";
@@ -336,18 +339,18 @@ void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out, int indent) {
                 return;
             }
             if (stmt.target) {
-                // A PROPERTY setter needs a completely different shape
-                // (`.eb_name_set(value)`, a method call) than a plain
-                // assignment - can't just call genExpr on the whole target,
-                // since that produces the *getter* form instead.
+                /// A PROPERTY setter needs a completely different shape
+                /// (`.eb_name_set(value)`, a method call) than a plain
+                /// assignment - can't just call genExpr on the whole target,
+                /// since that produces the *getter* form instead.
                 if (stmt.target->kind == ExprKind::Member && stmt.target->isProperty) {
                     out << ind(indent) << memberReceiverPrefix(*stmt.target->lhs)
                         << mangleName(stmt.target->stringValue) << "_set(" << genExpr(*stmt.expr)
                         << ");\n";
                     return;
                 }
-                // A general Member/Call-chain lvalue (obj.field, arr(i).field,
-                // ...) - genExpr already produces a valid C++ lvalue for it.
+                /// A general Member/Call-chain lvalue (obj.field, arr(i).field,
+                /// ...) - genExpr already produces a valid C++ lvalue for it.
                 out << ind(indent) << genExpr(*stmt.target) << " = " << genExpr(*stmt.expr) << ";\n";
                 return;
             }
@@ -480,9 +483,9 @@ void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out, int indent) {
             out << mangleName(stmt.name) << ": ;\n";
             return;
         case StmtKind::ExitLoop: {
-            // EXIT SUB/FUNCTION need no label/goto: a plain C++ `return`
-            // already unwinds out of any number of enclosing loops within
-            // the current function, which is exactly what they mean.
+            /// EXIT SUB/FUNCTION need no label/goto: a plain C++ `return`
+            /// already unwinds out of any number of enclosing loops within
+            /// the current function, which is exactly what they mean.
             if (stmt.exitKind == LoopKind::Sub) {
                 out << ind(indent) << "return;\n";
                 return;
@@ -512,11 +515,11 @@ void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out, int indent) {
             throw std::runtime_error("codegen: NAMESPACE must be top-level (sema should have caught "
                                       "this)");
         case StmtKind::CallStmt: {
-            // Same shapes as the expression-position Call: a
-            // Namespace.Name(args) qualifier (`::`), a This.Method(args)
-            // receiver (`->`), a Base.Method(args) qualified non-virtual
-            // call (`eb_base::`), an obj.Method(args) receiver (`.`), or a
-            // plain free-function call (no prefix).
+            /// Same shapes as the expression-position Call: a
+            /// Namespace.Name(args) qualifier (`::`), a This.Method(args)
+            /// receiver (`->`), a Base.Method(args) qualified non-virtual
+            /// call (`eb_base::`), an obj.Method(args) receiver (`.`), or a
+            /// plain free-function call (no prefix).
             std::string calleeName = resolveCalleeName(stmt.target.get(), stmt.name);
             out << ind(indent) << calleeName << "(";
             for (size_t i = 0; i < stmt.args.size(); ++i) {
@@ -543,21 +546,21 @@ void Codegen::genTypeDecl(const Stmt& stmt) {
     std::string key = canonicalName(stmt.name);
     if (typesEmitted_.count(key)) return;
     if (!typesBeingEmitted_.insert(key).second) {
-        // Circular embedding (TypeA contains a TypeB field, TypeB contains a
-        // TypeA field, ...) - impossible as a real, finite-size C++
-        // aggregate. Break the recursion here rather than looping forever;
-        // the backend will reject whichever struct ends up incomplete.
+        /// Circular embedding (TypeA contains a TypeB field, TypeB contains a
+        /// TypeA field, ...) - impossible as a real, finite-size C++
+        /// aggregate. Break the recursion here rather than looping forever;
+        /// the backend will reject whichever struct ends up incomplete.
         return;
     }
 
-    // M4d: a TYPE with zero fields, zero methods (which also covers
-    // properties/ctor/dtor - all stored in `stmt.methods`), and no EXTENDS is
-    // an opaque external handle (Sema's RecordInfo::isOpaque, recomputed
-    // here directly from the AST since Codegen has no access to Sema's
-    // internal tables). Emit a bare forward declaration only - never a `{
-    // };` body, which would wrongly claim a concrete, empty-but-complete
-    // layout against the real library's actual, unknown one. Only ever legal
-    // via PTR; Sema already rejects by-value DIM/embedding/EXTENDS of it.
+    /// M4d: a TYPE with zero fields, zero methods (which also covers
+    /// properties/ctor/dtor - all stored in `stmt.methods`), and no EXTENDS is
+    /// an opaque external handle (Sema's RecordInfo::isOpaque, recomputed
+    /// here directly from the AST since Codegen has no access to Sema's
+    /// internal tables). Emit a bare forward declaration only - never a `{
+    /// };` body, which would wrongly claim a concrete, empty-but-complete
+    /// layout against the real library's actual, unknown one. Only ever legal
+    /// via PTR; Sema already rejects by-value DIM/embedding/EXTENDS of it.
     if (stmt.kind == StmtKind::TypeDecl && stmt.fields.empty() && stmt.methods.empty() &&
         stmt.baseTypeName.empty()) {
         typesOut_ << "struct " << mangleName(stmt.name) << ";\n\n";
@@ -571,21 +574,21 @@ void Codegen::genTypeDecl(const Stmt& stmt) {
         auto it = typeDeclsByName_.find(canonicalName(field.type.typeName));
         if (it != typeDeclsByName_.end()) genTypeDecl(*it->second);
     }
-    // A base class needs its *full* definition above the derived struct too
-    // (inheriting from an incomplete type is illegal, same reason an
-    // embedded-by-value field does) - so it's a dependency exactly like one.
+    /// A base class needs its *full* definition above the derived struct too
+    /// (inheriting from an incomplete type is illegal, same reason an
+    /// embedded-by-value field does) - so it's a dependency exactly like one.
     if (!stmt.baseTypeName.empty()) {
         auto baseIt = typeDeclsByName_.find(canonicalName(stmt.baseTypeName));
         if (baseIt != typeDeclsByName_.end()) genTypeDecl(*baseIt->second);
     }
 
-    // A C++ union may have at most one member with a default (in-class)
-    // initializer - so unlike a struct's per-field `{}`, a union's members
-    // are declared bare and the whole object is zero-initialized instead
-    // wherever it's DIM'd (`Type var{};`, already emitted unconditionally
-    // by the Dim codegen below), matching FreeBASIC's own "otherwise
-    // initializes to zero" default (STRING*N fields, the one exception,
-    // are Sema-rejected from UNIONs entirely - see collectTypes).
+    /// A C++ union may have at most one member with a default (in-class)
+    /// initializer - so unlike a struct's per-field `{}`, a union's members
+    /// are declared bare and the whole object is zero-initialized instead
+    /// wherever it's DIM'd (`Type var{};`, already emitted unconditionally
+    /// by the Dim codegen below), matching FreeBASIC's own "otherwise
+    /// initializes to zero" default (STRING*N fields, the one exception,
+    /// are Sema-rejected from UNIONs entirely - see collectTypes).
     bool isUnion = stmt.kind == StmtKind::UnionDecl;
     typesOut_ << (isUnion ? "union " : "struct ") << mangleName(stmt.name);
     if (!stmt.baseTypeName.empty()) {
@@ -597,10 +600,10 @@ void Codegen::genTypeDecl(const Stmt& stmt) {
         if (!isUnion) typesOut_ << "{}";
         typesOut_ << ";\n";
     }
-    // Method/constructor/destructor *declarations* only (real C++ member
-    // declarations, matching FreeBASIC's own "declared within" half) - the
-    // body lives in a separate out-of-line definition, emitted by
-    // genMethodDefinition. UNION never reaches here with any (Sema-rejected).
+    /// Method/constructor/destructor *declarations* only (real C++ member
+    /// declarations, matching FreeBASIC's own "declared within" half) - the
+    /// body lives in a separate out-of-line definition, emitted by
+    /// genMethodDefinition. UNION never reaches here with any (Sema-rejected).
     for (const StmtPtr& method : stmt.methods) {
         if (method->isCtor) {
             typesOut_ << ind(1) << mangleName(stmt.name) << "();\n";
@@ -611,9 +614,9 @@ void Codegen::genTypeDecl(const Stmt& stmt) {
             continue;
         }
         if (method->isProperty) {
-            // A PROPERTY has no native C++ syntax - declared as two plain
-            // methods, `_get`/`_set`, rewritten from field-like access at
-            // every use site by genExpr(Member)/Assign's own codegen.
+            /// A PROPERTY has no native C++ syntax - declared as two plain
+            /// methods, `_get`/`_set`, rewritten from field-like access at
+            /// every use site by genExpr(Member)/Assign's own codegen.
             bool isGetter = method->kind == StmtKind::FunctionDecl;
             std::string retType = isGetter ? cppType(method->declaredType) : "void";
             typesOut_ << ind(1) << retType << " " << mangleName(method->name)
@@ -622,8 +625,8 @@ void Codegen::genTypeDecl(const Stmt& stmt) {
         }
         bool isFunction = method->kind == StmtKind::FunctionDecl;
         std::string retType = isFunction ? cppType(method->declaredType) : "void";
-        // `Override` implies participation in the vtable too, whether or
-        // not `Virtual` was also explicitly written (Sema's own rule).
+        /// `Override` implies participation in the vtable too, whether or
+        /// not `Virtual` was also explicitly written (Sema's own rule).
         bool isVirtual = method->isVirtual || method->isOverride;
         typesOut_ << ind(1) << (isVirtual ? "virtual " : "") << retType << " "
                    << mangleName(method->name) << "(" << buildParamList(method->params) << ")"
@@ -692,14 +695,14 @@ void Codegen::genProcedure(const Stmt& stmt) {
     std::string retType = isFunction ? cppType(stmt.declaredType) : "void";
 
     if (stmt.isExtern) {
-        // A DECLARE/EXTERN signature (M4): no eBasic-side body at all - the
-        // real definition lives in an external C/C++ library, so only a
-        // prototype is ever emitted, using the real external name
-        // *verbatim* (never mangleName, which would rename it to something
-        // the linker can't find). "C" linkage needs `extern "C"` so the
-        // real symbol isn't C++-mangled; "C++" linkage needs no wrapping at
-        // all - it's already a normal, real C++ declaration, the concrete
-        // payoff of transpiling to real C++ rather than emulating mangling.
+        /// A DECLARE/EXTERN signature (M4): no eBasic-side body at all - the
+        /// real definition lives in an external C/C++ library, so only a
+        /// prototype is ever emitted, using the real external name
+        /// *verbatim* (never mangleName, which would rename it to something
+        /// the linker can't find). "C" linkage needs `extern "C"` so the
+        /// real symbol isn't C++-mangled; "C++" linkage needs no wrapping at
+        /// all - it's already a normal, real C++ declaration, the concrete
+        /// payoff of transpiling to real C++ rather than emulating mangling.
         std::string externName = stmt.externAlias.empty() ? stmt.name : stmt.externAlias;
         std::string paramList = buildParamList(stmt.params);
         bool wrapC = stmt.externLinkage == "C";
@@ -720,8 +723,8 @@ void Codegen::genProcedure(const Stmt& stmt) {
     if (isFunction) {
         procOut_ << ind(1) << retType << " eb__ret{};\n";
     }
-    // A local array can shadow a global of the same name; save/restore so
-    // that mapping doesn't leak into code generated after this procedure.
+    /// A local array can shadow a global of the same name; save/restore so
+    /// that mapping doesn't leak into code generated after this procedure.
     auto savedArrayLowerBounds = arrayLowerBoundVar_;
     genBlock(stmt.body, procOut_, 1);
     arrayLowerBoundVar_ = savedArrayLowerBounds;
@@ -736,10 +739,10 @@ void Codegen::genMethodDefinition(const Stmt& stmt) {
     std::string owner = mangleName(stmt.ownerType);
     std::string paramList = buildParamList(stmt.params);
 
-    // A constructor/destructor has no return type at all in C++ (not even
-    // `void`) and is named after the owning TYPE itself; a real method
-    // gets `Owner::eb_name`, same as any other out-of-line C++ member
-    // definition.
+    /// A constructor/destructor has no return type at all in C++ (not even
+    /// `void`) and is named after the owning TYPE itself; a real method
+    /// gets `Owner::eb_name`, same as any other out-of-line C++ member
+    /// definition.
     std::string retType;
     std::string qualifiedName;
     if (stmt.isCtor) {
@@ -748,10 +751,10 @@ void Codegen::genMethodDefinition(const Stmt& stmt) {
         qualifiedName = owner + "::~" + owner;
     } else {
         retType = (isFunction ? cppType(stmt.declaredType) : "void") + " ";
-        // A PROPERTY's getter/setter share one FreeBASIC identifier but
-        // need two distinct C++ method names (matching genTypeDecl's own
-        // declarations) - `isFunction` (has a return type) already tells
-        // getter from setter, same as for the declaration.
+        /// A PROPERTY's getter/setter share one FreeBASIC identifier but
+        /// need two distinct C++ method names (matching genTypeDecl's own
+        /// declarations) - `isFunction` (has a return type) already tells
+        /// getter from setter, same as for the declaration.
         qualifiedName = owner + "::" + mangleName(stmt.name) + (stmt.isProperty ? (isFunction ? "_get" : "_set") : "");
     }
 
@@ -759,8 +762,8 @@ void Codegen::genMethodDefinition(const Stmt& stmt) {
     if (isFunction) {
         procOut_ << ind(1) << cppType(stmt.declaredType) << " eb__ret{};\n";
     }
-    // A local array can shadow a global of the same name; save/restore so
-    // that mapping doesn't leak into code generated after this method.
+    /// A local array can shadow a global of the same name; save/restore so
+    /// that mapping doesn't leak into code generated after this method.
     auto savedArrayLowerBounds = arrayLowerBoundVar_;
     std::string savedOwnerType = currentOwnerType_;
     currentOwnerType_ = canonicalName(stmt.ownerType);
@@ -775,19 +778,19 @@ void Codegen::genMethodDefinition(const Stmt& stmt) {
 
 void Codegen::genNamespaceDecl(const Stmt& stmt) {
     std::string ns = mangleName(stmt.name);
-    // TYPE can't be nested inside a NAMESPACE (Sema-enforced), so typesOut_
-    // never gets content here - skip wrapping it at all. Only wrap
-    // proto/proc/globals if this namespace actually contributes to them, to
-    // avoid emitting empty `namespace eb_x { }` noise.
+    /// TYPE can't be nested inside a NAMESPACE (Sema-enforced), so typesOut_
+    /// never gets content here - skip wrapping it at all. Only wrap
+    /// proto/proc/globals if this namespace actually contributes to them, to
+    /// avoid emitting empty `namespace eb_x { }` noise.
     bool hasProcs = false;
     bool hasGlobals = false;
-    // A "purely extern" NAMESPACE (M4c: every member is an EXTERN/DECLARE
-    // binding, e.g. `Extern "C++" Namespace ebfixture ... End Namespace`)
-    // must NOT be wrapped in this BASIC-side eb_-mangled namespace at all:
-    // each member's externAlias already carries its own fully-qualified
-    // real external name (e.g. "ebfixture::Square"), computed once at
-    // parse time - nesting that inside `namespace eb_ebfixture { ... }`
-    // would look for the wrong, doubly-qualified symbol.
+    /// A "purely extern" NAMESPACE (M4c: every member is an EXTERN/DECLARE
+    /// binding, e.g. `Extern "C++" Namespace ebfixture ... End Namespace`)
+    /// must NOT be wrapped in this BASIC-side eb_-mangled namespace at all:
+    /// each member's externAlias already carries its own fully-qualified
+    /// real external name (e.g. "ebfixture::Square"), computed once at
+    /// parse time - nesting that inside `namespace eb_ebfixture { ... }`
+    /// would look for the wrong, doubly-qualified symbol.
     bool isPureExtern = true;
     for (const auto& memberPtr : stmt.body) {
         if (memberPtr->kind == StmtKind::SubDecl || memberPtr->kind == StmtKind::FunctionDecl) {
@@ -800,14 +803,14 @@ void Codegen::genNamespaceDecl(const Stmt& stmt) {
         }
     }
     if (hasProcs && isPureExtern) {
-        // A qualified standalone declaration (`RetType realNs::Member(...)`)
-        // requires `realNs` to already be an open namespace somewhere in
-        // the translation unit - it isn't, so genProcedure's own
-        // (unqualified) name is instead wrapped in a real
-        // `namespace realNs { ... }` block here, using the namespace's
-        // real (possibly aliased) external name, never mangleName. Every
-        // isExtern member has no body at all, so only protoOut_ ever gets
-        // anything - no need to also open this block in procOut_.
+        /// A qualified standalone declaration (`RetType realNs::Member(...)`)
+        /// requires `realNs` to already be an open namespace somewhere in
+        /// the translation unit - it isn't, so genProcedure's own
+        /// (unqualified) name is instead wrapped in a real
+        /// `namespace realNs { ... }` block here, using the namespace's
+        /// real (possibly aliased) external name, never mangleName. Every
+        /// isExtern member has no body at all, so only protoOut_ ever gets
+        /// anything - no need to also open this block in procOut_.
         std::string realNs = stmt.externAlias.empty() ? stmt.name : stmt.externAlias;
         protoOut_ << "namespace " << realNs << " {\n";
         for (const auto& memberPtr : stmt.body) {
@@ -831,8 +834,8 @@ void Codegen::genNamespaceDecl(const Stmt& stmt) {
                    member.kind == StmtKind::Enum) {
             genStmt(member, globalsOut_, 1);
         }
-        // Sema already rejects anything else (incl. nested TYPE/NAMESPACE)
-        // directly inside a NAMESPACE.
+        /// Sema already rejects anything else (incl. nested TYPE/NAMESPACE)
+        /// directly inside a NAMESPACE.
     }
 
     if (hasProcs) {
@@ -845,20 +848,20 @@ void Codegen::genNamespaceDecl(const Stmt& stmt) {
 std::string Codegen::generate(const Module& module, bool libMode) {
     externLibs_ = module.externLibs;
 
-    // Top-level DIM/CONST/ENUM become real C++ globals (declared before any
-    // function bodies) so SUB/FUNCTION can see them; SUB/FUNCTION become
-    // separate C++ functions (prototype + body); everything else still runs
-    // in main(), in its original relative order. Sema already enforces
-    // declare-before-use sequentially (including for globals referenced from
-    // a procedure body), so bucketing all globals before all procedures is
-    // always a safe superset of that ordering.
-    //
-    // A GOSUB-target Label starts a span of statements hoisted into their
-    // own synthesized function (ending at the next Label, of any kind, or
-    // end of program) instead of running inline in main() - see
-    // gosubFunctionName's doc comment. Declarative statements (DIM/CONST/
-    // ENUM/SUB/FUNCTION) are never part of that span; they're bucketed the
-    // same regardless of whether a GOSUB span is currently open.
+    /// Top-level DIM/CONST/ENUM become real C++ globals (declared before any
+    /// function bodies) so SUB/FUNCTION can see them; SUB/FUNCTION become
+    /// separate C++ functions (prototype + body); everything else still runs
+    /// in main(), in its original relative order. Sema already enforces
+    /// declare-before-use sequentially (including for globals referenced from
+    /// a procedure body), so bucketing all globals before all procedures is
+    /// always a safe superset of that ordering.
+    ///
+    /// A GOSUB-target Label starts a span of statements hoisted into their
+    /// own synthesized function (ending at the next Label, of any kind, or
+    /// end of program) instead of running inline in main() - see
+    /// gosubFunctionName's doc comment. Declarative statements (DIM/CONST/
+    /// ENUM/SUB/FUNCTION) are never part of that span; they're bucketed the
+    /// same regardless of whether a GOSUB span is currently open.
     for (const auto& stmtPtr : module.stmts) {
         if (stmtPtr->kind == StmtKind::GoSub) gosubTargets_.insert(canonicalName(stmtPtr->name));
         else if (stmtPtr->kind == StmtKind::TypeDecl || stmtPtr->kind == StmtKind::UnionDecl) {
@@ -872,16 +875,16 @@ std::string Codegen::generate(const Module& module, bool libMode) {
     }
     collectExternProcNames(module.stmts, "", "");
 
-    // Forward-declare every TYPE/UNION before any full definition. A pointer
-    // field (self-referential, e.g. a linked-list Node, or pointing at
-    // another TYPE/UNION declared later in the file) only needs the
-    // pointee's name in scope, not its full definition - genTypeDecl's
-    // dependency ordering below only pulls in embedded-by-value fields, so a
-    // bare pointer target might otherwise reach the backend as an
-    // undeclared type. The forward declaration's class-key (`struct` vs
-    // `union`) must match the eventual definition's - a mismatch is
-    // ill-formed C++, unlike C's more permissive elaborated-type-specifier
-    // rules.
+    /// Forward-declare every TYPE/UNION before any full definition. A pointer
+    /// field (self-referential, e.g. a linked-list Node, or pointing at
+    /// another TYPE/UNION declared later in the file) only needs the
+    /// pointee's name in scope, not its full definition - genTypeDecl's
+    /// dependency ordering below only pulls in embedded-by-value fields, so a
+    /// bare pointer target might otherwise reach the backend as an
+    /// undeclared type. The forward declaration's class-key (`struct` vs
+    /// `union`) must match the eventual definition's - a mismatch is
+    /// ill-formed C++, unlike C's more permissive elaborated-type-specifier
+    /// rules.
     for (const auto& [name, declStmt] : typeDeclsByName_) {
         bool isUnion = declStmt->kind == StmtKind::UnionDecl;
         typesOut_ << (isUnion ? "union " : "struct ") << mangleName(name) << ";\n";
@@ -941,11 +944,11 @@ std::string Codegen::generate(const Module& module, bool libMode) {
     if (!globalsOut_.str().empty()) out << globalsOut_.str() << "\n";
     if (!protoOut_.str().empty()) out << protoOut_.str() << "\n";
     out << procOut_.str();
-    // M5 library build: no main() at all - the driver has already verified
-    // there are no top-level executable statements to put in one (mainOut
-    // is guaranteed empty here), and a library's object file must never
-    // define `main` itself (it would collide with the consuming package's
-    // own `main` at final link time).
+    /// M5 library build: no main() at all - the driver has already verified
+    /// there are no top-level executable statements to put in one (mainOut
+    /// is guaranteed empty here), and a library's object file must never
+    /// define `main` itself (it would collide with the consuming package's
+    /// own `main` at final link time).
     if (!libMode) {
         out << "int main() {\n";
         out << mainOut.str();
@@ -988,11 +991,11 @@ std::string Codegen::generateLibraryInterface(const Module& module, const std::s
         const Stmt& stmt = *stmtPtr;
         if ((stmt.kind == StmtKind::TypeDecl || stmt.kind == StmtKind::UnionDecl) &&
             stmt.methods.empty() && stmt.baseTypeName.empty()) {
-            // A plain-data or opaque record (no methods/ctor/dtor, no
-            // EXTENDS) - safe to duplicate verbatim across translation
-            // units, exactly like a C header's struct definition is. A
-            // record with methods is not (yet) exportable across a
-            // library boundary - skipped here, deferred.
+            /// A plain-data or opaque record (no methods/ctor/dtor, no
+            /// EXTENDS) - safe to duplicate verbatim across translation
+            /// units, exactly like a C header's struct definition is. A
+            /// record with methods is not (yet) exportable across a
+            /// library boundary - skipped here, deferred.
             typesText << (stmt.kind == StmtKind::UnionDecl ? "UNION " : "TYPE ") << stmt.name << "\n";
             for (const FieldDecl& field : stmt.fields) {
                 typesText << "    " << field.name << " AS " << basicTypeName(field.type) << "\n";
@@ -1000,21 +1003,21 @@ std::string Codegen::generateLibraryInterface(const Module& module, const std::s
             typesText << (stmt.kind == StmtKind::UnionDecl ? "END UNION" : "END TYPE") << "\n\n";
         } else if ((stmt.kind == StmtKind::SubDecl || stmt.kind == StmtKind::FunctionDecl) &&
                    stmt.ownerType.empty() && !stmt.isExtern) {
-            // Only export a signature whose C++ representation is
-            // identical whether declared normally or via Extern/Declare -
-            // true for primitives, ZSTRING, Pointer, and a plain-data/
-            // opaque UserDefined type, but NOT for STRING: an ordinary
-            // FUNCTION/SUB compiles a STRING parameter/return to a real
-            // BString (by BYREF default), while an Extern Declare's
-            // ZSTRING would compile to a bare `const char*` - the same
-            // Alias-matched symbol name would then be called with the
-            // wrong argument representation entirely (not just a pointer
-            // difference - BString is a non-trivial class), a real,
-            // silent ABI mismatch rather than a merely cosmetic one. This
-            // is a deliberate scope cut, not an oversight: exporting a
-            // STRING-using procedure safely would need an auto-generated
-            // ZSTRING<->BString marshaling shim at the boundary, not just
-            // a re-declared prototype.
+            /// Only export a signature whose C++ representation is
+            /// identical whether declared normally or via Extern/Declare -
+            /// true for primitives, ZSTRING, Pointer, and a plain-data/
+            /// opaque UserDefined type, but NOT for STRING: an ordinary
+            /// FUNCTION/SUB compiles a STRING parameter/return to a real
+            /// BString (by BYREF default), while an Extern Declare's
+            /// ZSTRING would compile to a bare `const char*` - the same
+            /// Alias-matched symbol name would then be called with the
+            /// wrong argument representation entirely (not just a pointer
+            /// difference - BString is a non-trivial class), a real,
+            /// silent ABI mismatch rather than a merely cosmetic one. This
+            /// is a deliberate scope cut, not an oversight: exporting a
+            /// STRING-using procedure safely would need an auto-generated
+            /// ZSTRING<->BString marshaling shim at the boundary, not just
+            /// a re-declared prototype.
             bool hasStringSignature = stmt.declaredType.kind == TypeKind::StringT;
             for (const Param& p : stmt.params) {
                 if (p.type.kind == TypeKind::StringT) hasStringSignature = true;

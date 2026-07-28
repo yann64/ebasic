@@ -12,10 +12,10 @@ namespace ebpm {
 
 namespace {
 
-// A filesystem-safe cache-directory name for a git URL - every character
-// that isn't alphanumeric/`-`/`_`/`.` becomes `_`. Deliberately readable
-// rather than an opaque hash, so `~/.ebpm/cache/git/` stays inspectable by
-// hand.
+/// A filesystem-safe cache-directory name for a git URL - every character
+/// that isn't alphanumeric/`-`/`_`/`.` becomes `_`. Deliberately readable
+/// rather than an opaque hash, so `~/.ebpm/cache/git/` stays inspectable by
+/// hand.
 std::string sanitizeForDirName(const std::string& s) {
     std::string r;
     r.reserve(s.size());
@@ -29,10 +29,14 @@ std::string sanitizeForDirName(const std::string& s) {
     return r;
 }
 
+/// The global cache root every git dependency is cloned/fetched into
+/// (`<home>/.ebpm/cache/git/`), shared across every package on the machine
+/// rather than per-package - the same URL cloned by two different packages
+/// reuses one clone.
 fs::path gitCacheRoot() {
-    // M8a: Windows doesn't set HOME by default (some shells/environments
-    // do, but it isn't guaranteed) - USERPROFILE is its real equivalent,
-    // checked as a fallback rather than assumed unnecessary.
+    /// M8a: Windows doesn't set HOME by default (some shells/environments
+    /// do, but it isn't guaranteed) - USERPROFILE is its real equivalent,
+    /// checked as a fallback rather than assumed unnecessary.
     const char* home = std::getenv("HOME");
     if (!home) home = std::getenv("USERPROFILE");
     return fs::path(home ? home : ".") / ".ebpm" / "cache" / "git";
@@ -66,10 +70,10 @@ bool resolveGitDependency(const Dependency& dep, const std::string& pinnedCommit
         }
     }
 
-    // A pinned commit (from a prior ebasic.lock entry) always wins - this
-    // is what keeps a repeat build reproducible even if the remote branch
-    // named by `dep.branch` has since moved. Otherwise fall back to
-    // whatever ref the manifest itself names.
+    /// A pinned commit (from a prior ebasic.lock entry) always wins - this
+    /// is what keeps a repeat build reproducible even if the remote branch
+    /// named by `dep.branch` has since moved. Otherwise fall back to
+    /// whatever ref the manifest itself names.
     std::string ref;
     bool isBranch = false;
     if (!pinnedCommit.empty()) {
@@ -83,12 +87,12 @@ bool resolveGitDependency(const Dependency& dep, const std::string& pinnedCommit
         ref = dep.rev;
     }
     if (!ref.empty()) {
-        // A remote branch has no local tracking branch on a fresh clone -
-        // try the remote-tracking form first, but *only* for `branch`
-        // (the only case "origin/<ref>" could ever mean anything - a
-        // pinned commit SHA or a tag is never spelled that way, and
-        // trying it there would just print a confusing, guaranteed-to-fail
-        // attempt before the real, correct checkout below).
+        /// A remote branch has no local tracking branch on a fresh clone -
+        /// try the remote-tracking form first, but *only* for `branch`
+        /// (the only case "origin/<ref>" could ever mean anything - a
+        /// pinned commit SHA or a tag is never spelled that way, and
+        /// trying it there would just print a confusing, guaranteed-to-fail
+        /// attempt before the real, correct checkout below).
         int rc = -1;
         if (isBranch) {
             rc = ebasic::runProcess({"git", "-C", cacheDir.string(), "checkout", "origin/" + ref});

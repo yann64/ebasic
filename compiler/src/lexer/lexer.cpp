@@ -61,11 +61,11 @@ void Lexer::skipSpacesAndComments() {
         if (c == ' ' || c == '\t' || c == '\r') {
             advance();
         } else if (c == '\'') {
-            // M7: a `'''` (three or more apostrophes) doc comment stops
-            // here, unconsumed, so tokenize()'s main loop lexes it as a
-            // real DocComment token instead - a plain `'`/`''` comment
-            // still falls through to the ordinary skip-to-end-of-line
-            // below, exactly as before.
+            /// M7: a `'''` (three or more apostrophes) doc comment stops
+            /// here, unconsumed, so tokenize()'s main loop lexes it as a
+            /// real DocComment token instead - a plain `'`/`''` comment
+            /// still falls through to the ordinary skip-to-end-of-line
+            /// below, exactly as before.
             if (peek(1) == '\'' && peek(2) == '\'') break;
             while (!isAtEnd() && peek() != '\n') advance();
         } else if (c == '_' && (peek(1) == '\n' || (peek(1) == '\r' && peek(2) == '\n'))) {
@@ -216,9 +216,9 @@ std::vector<Token> Lexer::tokenize() {
             continue;
         }
         if (c == '\'') {
-            // skipSpacesAndComments only ever leaves a `'` unconsumed for
-            // the `'''` doc-comment case (a plain comment is always fully
-            // skipped there instead) - reaching here confirms it.
+            /// skipSpacesAndComments only ever leaves a `'` unconsumed for
+            /// the `'''` doc-comment case (a plain comment is always fully
+            /// skipped there instead) - reaching here confirms it.
             tokens.push_back(lexDocComment());
             continue;
         }
