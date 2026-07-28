@@ -7,6 +7,8 @@ namespace ebasic {
 
 // Runs args[0] with the given argv (no shell involved), waits for it to
 // exit, and returns its exit status (or -1 if it could not be started/waited on).
+// Cross-platform (M8a): POSIX (fork/execvp/waitpid) or Windows
+// (CreateProcess) under the hood, picked at compile time - see process.cpp.
 int runProcess(const std::vector<std::string>& args);
 
 // Same as runProcess, but also captures everything the child writes to

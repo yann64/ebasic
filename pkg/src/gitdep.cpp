@@ -30,7 +30,11 @@ std::string sanitizeForDirName(const std::string& s) {
 }
 
 fs::path gitCacheRoot() {
+    // M8a: Windows doesn't set HOME by default (some shells/environments
+    // do, but it isn't guaranteed) - USERPROFILE is its real equivalent,
+    // checked as a fallback rather than assumed unnecessary.
     const char* home = std::getenv("HOME");
+    if (!home) home = std::getenv("USERPROFILE");
     return fs::path(home ? home : ".") / ".ebpm" / "cache" / "git";
 }
 
