@@ -581,6 +581,49 @@ The user asked for a plan to "implement compilation using clang++". **Direct ins
 - **Explicitly out of scope, as decided in the plan**: extending M6's PCH speedup to Clang's own `-include-pch` mechanism (a distinct performance feature, not required for correctness - M6's original GCC-only decision stands) and a MinGW+Clang toolchain on Windows (a materially bigger, more novel addition than reusing an already-available compiler on an already-supported platform).
 - Verified: full e2e suite (28/28) with both the default `g++` backend and `CXX=clang++`; a clean `-Wall -Wextra` rebuild of eBasic's own compiler under Clang.
 
+## LSP Plan Summary (in progress)
+
+The user asked for a detailed plan to implement a Language Server Protocol
+server for eBasic, explicitly required to be aware of `ebpm` dependencies
+(a `.bas` file `#include`-ing another package's auto-generated
+`<name>.iface.bas`). Guiding principle, carried over directly from this
+project's own established anti-duplication discipline (`docgen` reusing
+`ebasic_frontend` instead of writing a second parser): the LSP reuses the
+*real* compiler/package-manager components rather than re-implementing name
+resolution or dependency resolution. Six slices: LSP-1 transport/document
+sync, LSP-2 diagnostics, LSP-3 Sema symbol locations/outline/hover, LSP-4
+go-to-definition/references, LSP-5 `ebpm`-awareness, LSP-6 completion. Full
+plan: see the `lsp/` component design below as each slice lands.
+
+## LSP CMake Refactor Implementation Notes (`ebasic_sema` + `ebasic_pkg` shared libs, done)
+
+Two small, purely additive CMake refactors, both mirroring the exact
+`ebasic_process`/`ebasic_frontend` precedent (a shared STATIC lib split out
+of an executable so a second real consumer can reuse it, rather than
+duplicating the source or reaching across component boundaries):
+
+- `compiler/CMakeLists.txt`: `sema.cpp` moved out of `ebc`'s own executable
+  sources into a new `ebasic_sema` STATIC lib (public-links `ebasic_frontend`,
+  since `Sema::check()` takes a `Module&`). `ebc` now links `ebasic_process`
+  + `ebasic_frontend` + `ebasic_sema` instead of compiling `sema.cpp`
+  directly. `codegen.cpp` stays compiled directly into `ebc` only - the LSP
+  never needs codegen, so it wasn't worth sharing.
+- `pkg/CMakeLists.txt`: `manifest.cpp`/`build.cpp`/`resolve.cpp`/
+  `lockfile.cpp`/`gitdep.cpp` moved out of `ebpm`'s own executable sources
+  into a new `ebasic_pkg` STATIC lib (public-links `tomlplusplus` +
+  `ebasic_process`). `ebpm`'s executable target shrinks to just `main.cpp`,
+  linking `ebasic_pkg`. This is what will let the upcoming LSP-5 slice call
+  `resolveDependencyGraph`/`computeConsumerDirs` in-process for real,
+  identical-to-`ebpm` dependency resolution.
+- No behavior change to `ebc`/`ebpm` themselves - purely a build-graph
+  reshape. Verified: a full rebuild from scratch (`linux-gcc` preset) is
+  clean with no new warnings, and the full e2e suite (28/28) passes
+  unchanged.
+- `third_party/nlohmann_json/` vendored (`nlohmann/json.hpp` single header,
+  pinned to the `v3.11.3` tag, plus its `LICENSE`) the same way
+  `third_party/tomlplusplus/` already is - needed for the LSP's own
+  JSON-RPC transport (LSP-1).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

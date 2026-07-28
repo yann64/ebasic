@@ -21,14 +21,23 @@ add_library(ebasic_frontend STATIC
 )
 target_include_directories(ebasic_frontend PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
+# LSP: the type-checker on its own, split out the same way ebasic_frontend
+# was - so the new ebasic_lsp (lsp/) can get real, resolved symbol/type info
+# (not just a parsed Module) without duplicating Sema's own name-resolution
+# logic. Deliberately excludes codegen: the LSP never emits C++.
+add_library(ebasic_sema STATIC
+    src/sema/sema.cpp
+)
+target_include_directories(ebasic_sema PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(ebasic_sema PUBLIC ebasic_frontend)
+
 add_executable(ebc
     src/driver/main.cpp
-    src/sema/sema.cpp
     src/codegen/codegen.cpp
 )
 
 target_include_directories(ebc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/generated)
-target_link_libraries(ebc PRIVATE ebasic_process ebasic_frontend)
+target_link_libraries(ebc PRIVATE ebasic_process ebasic_frontend ebasic_sema)
 
 target_compile_definitions(ebc PRIVATE
     # M8e: two candidate locations for the runtime headers/PCH are baked

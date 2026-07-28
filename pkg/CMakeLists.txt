@@ -5,15 +5,26 @@
 add_library(tomlplusplus INTERFACE)
 target_include_directories(tomlplusplus INTERFACE ${CMAKE_SOURCE_DIR}/third_party/tomlplusplus)
 
-add_executable(ebpm
-    src/main.cpp
+# LSP: manifest parsing + dependency-graph resolution + build-flag
+# computation, split out of ebpm the same way ebasic_process/ebasic_frontend
+# were split out of ebc - so the new ebasic_lsp (lsp/) can call the real
+# resolveDependencyGraph/computeConsumerDirs in-process to resolve
+# #include "dep.iface.bas" exactly like a real `ebpm build` would, rather
+# than re-implementing (and risking drifting from) dependency resolution.
+add_library(ebasic_pkg STATIC
     src/manifest.cpp
     src/build.cpp
     src/resolve.cpp
     src/lockfile.cpp
     src/gitdep.cpp
 )
-target_link_libraries(ebpm PRIVATE tomlplusplus ebasic_process)
+target_link_libraries(ebasic_pkg PUBLIC tomlplusplus ebasic_process)
+target_include_directories(ebasic_pkg PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(ebpm
+    src/main.cpp
+)
+target_link_libraries(ebpm PRIVATE ebasic_pkg)
 target_include_directories(ebpm PRIVATE ${CMAKE_BINARY_DIR}/generated)
 
 install(TARGETS ebpm RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
