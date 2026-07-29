@@ -6,11 +6,14 @@
 
 namespace ebpm {
 
-/// A `[dependencies]` entry: exactly one of `path`/`git` is set (mutual
-/// exclusion enforced by the loader, not by this struct's shape). At most one
-/// of `branch`/`tag`/`rev` is meaningful, and only when `git` is set - M5a's
-/// loader accepts and stores all three; only M5d's resolver actually acts on
-/// them.
+/// A `[dependencies]` entry: exactly one of `path`/`git`/`version` is set
+/// (mutual exclusion enforced by the loader, not by this struct's shape).
+/// At most one of `branch`/`tag`/`rev` is meaningful, and only when `git`
+/// is set (never combined with `version` - a registry index entry already
+/// names its own tag, see loadManifest's doc comment). `version` is a
+/// requirement string (e.g. `"^1.2.0"`) identifying a *registry*
+/// dependency - `name = "^1.2.0"` is shorthand for `name = { version =
+/// "^1.2.0" }`, matching Cargo's own `serde = "1.0"` shorthand.
 struct Dependency {
     std::string name;
     std::string path;
@@ -18,6 +21,7 @@ struct Dependency {
     std::string branch;
     std::string tag;
     std::string rev;
+    std::string version;
 };
 
 /// A package's `[lib]` target - present iff the package builds a library.
@@ -76,8 +80,10 @@ std::vector<Dependency> effectiveDependencies(const Manifest& manifest);
 /// `out`, applying every field default described above. Returns false (with
 /// a human-readable message in `err`) on a missing file, malformed TOML, a
 /// missing required field, a `[dependencies]` (or `[target.*.dependencies]`)
-/// entry naming neither `path` nor `git` (or both), or a `[target.X...]`
-/// section whose `X` isn't one of `windows`/`linux`/`macos`/`haiku`.
+/// entry naming zero or more than one of `path`/`git`/`version`, `version`
+/// combined with `branch`/`tag`/`rev`, a malformed `version` requirement
+/// string, or a `[target.X...]` section whose `X` isn't one of
+/// `windows`/`linux`/`macos`/`haiku`.
 bool loadManifest(const std::string& manifestPath, Manifest& out, std::string& err);
 
 } // namespace ebpm

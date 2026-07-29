@@ -194,6 +194,14 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_git_multiref_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/git_same_url_diff_refs
 )
 
+# REG-2: a [dependencies] entry's new `version` alternative (registry
+# dependency) - every rejected path/git/version/branch/tag/rev combination
+# and malformed requirement string, checked via a real `ebpm build`.
+add_test(
+    NAME e2e_pkg_manifest_version_errors
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/manifest_version_errors.sh $<TARGET_FILE:ebpm>
+)
+
 # M5e: `ebpm test` on a [lib] package with one passing tests/*.bas file.
 add_test(
     NAME e2e_pkg_lib_with_tests

@@ -1,4 +1,5 @@
 #include "manifest.hpp"
+#include "semver.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -29,31 +30,49 @@ std::vector<Dependency> effectiveDependencies(const Manifest& manifest) {
 
 namespace {
 
-/// Shared per-entry parsing/validation for one `name = { path = "..." }`
-/// (or `git = "..."`) style dependency table entry - used identically for
-/// both the top-level `[dependencies]` table and each `[target.<os>.
-/// dependencies]` table, so the exactly-one-of-path-or-git and
-/// at-most-one-of-branch-tag-rev rules are enforced in exactly one place.
-/// `sectionLabel` is only used to make `err` point at the right section
-/// (e.g. "[dependencies]" or "[target.linux.dependencies]").
+/// Shared per-entry parsing/validation for one `name = "..."` (a registry
+/// version-requirement shorthand) or `name = { path = "..." }` (or
+/// `git = "..."`, or `version = "..."`) style dependency entry - used
+/// identically for both the top-level `[dependencies]` table and each
+/// `[target.<os>.dependencies]` table, so the exactly-one-of-path-git-
+/// version and at-most-one-of-branch-tag-rev rules are enforced in exactly
+/// one place. `sectionLabel` is only used to make `err` point at the right
+/// section (e.g. "[dependencies]" or "[target.linux.dependencies]").
 bool parseDependencyEntry(const std::string& sectionLabel, const toml::key& key,
                            const toml::node& val, Dependency& dep, std::string& err) {
+    dep.name = std::string(key.str());
+
+    /// `name = "^1.2.0"` shorthand for a registry dependency - equivalent
+    /// to `name = { version = "^1.2.0" }` below (Cargo's own
+    /// `serde = "1.0"` shorthand has the same shape).
+    if (val.is_string()) {
+        dep.version = *val.value<std::string>();
+        VersionReq req;
+        std::string reqErr;
+        if (!parseVersionReq(dep.version, req, reqErr)) {
+            err = sectionLabel + "." + dep.name + ": " + reqErr;
+            return false;
+        }
+        return true;
+    }
     if (!val.is_table()) {
-        err = sectionLabel + "." + std::string(key.str()) +
-              " must be an inline table (e.g. { path = \"...\" } or { git = \"...\" })";
+        err = sectionLabel + "." + dep.name +
+              " must be a version requirement string (e.g. \"^1.2.0\") or an inline table "
+              "(e.g. { path = \"...\" }, { git = \"...\" }, or { version = \"...\" })";
         return false;
     }
     const toml::table& depTbl = *val.as_table();
-    dep.name = std::string(key.str());
     dep.path = depTbl["path"].value<std::string>().value_or("");
     dep.git = depTbl["git"].value<std::string>().value_or("");
+    dep.version = depTbl["version"].value<std::string>().value_or("");
     dep.branch = depTbl["branch"].value<std::string>().value_or("");
     dep.tag = depTbl["tag"].value<std::string>().value_or("");
     dep.rev = depTbl["rev"].value<std::string>().value_or("");
-    // Exactly one of path/git must be set: both empty or both non-empty are
-    // equally invalid, hence the equality check rather than an explicit XOR.
-    if (dep.path.empty() == dep.git.empty()) {
-        err = sectionLabel + "." + dep.name + " must name exactly one of `path` or `git`";
+
+    int kindCount = (!dep.path.empty()) + (!dep.git.empty()) + (!dep.version.empty());
+    if (kindCount != 1) {
+        err = sectionLabel + "." + dep.name +
+              " must name exactly one of `path`, `git`, or `version`";
         return false;
     }
     int refCount = (!dep.branch.empty()) + (!dep.tag.empty()) + (!dep.rev.empty());
@@ -61,6 +80,20 @@ bool parseDependencyEntry(const std::string& sectionLabel, const toml::key& key,
         err = sectionLabel + "." + dep.name +
               " must name at most one of `branch`, `tag`, or `rev`";
         return false;
+    }
+    if (!dep.version.empty() && refCount > 0) {
+        err = sectionLabel + "." + dep.name +
+              " may not combine `version` with `branch`/`tag`/`rev` (a registry index entry "
+              "already names its own tag)";
+        return false;
+    }
+    if (!dep.version.empty()) {
+        VersionReq req;
+        std::string reqErr;
+        if (!parseVersionReq(dep.version, req, reqErr)) {
+            err = sectionLabel + "." + dep.name + ": " + reqErr;
+            return false;
+        }
     }
     return true;
 }

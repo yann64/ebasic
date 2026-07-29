@@ -1331,6 +1331,37 @@ input, leading zeros, empty string) - all passed on the first run, no bugs
 found needing a fix. Verified: full suite (40/40), clean `-Wall -Wextra
 -Werror` rebuild.
 
+### REG-2 Implementation Notes (manifest `version` field + shorthand, done)
+
+`Dependency` (`manifest.hpp`) gains a `version` field; `parseDependencyEntry`
+now accepts a bare-string shorthand (`dep = "^1.2.0"`, matching Cargo's own
+`serde = "1.0"` convention) alongside the existing inline-table form (which
+now also accepts `{ version = "..." }`), enforces a real three-way "exactly
+one of `path`/`git`/`version`" exclusivity (loosened from the prior
+two-way `path`/`git` check), rejects `version` combined with
+`branch`/`tag`/`rev` (meaningless once an index has already picked a tag),
+and syntax-validates the requirement string via REG-1's `parseVersionReq`
+at load time.
+
+Testable purely at the manifest layer (no resolver/index support exists
+yet - that's REG-3/REG-4) via a new `tests/e2e_pkg/manifest_version_errors.
+sh`, checked with a real `ebpm build` against nine synthetic, throwaway
+manifests (no checked-in fixture directories - these are single-purpose,
+inline-generated error cases): every rejected combination (`git`+`version`,
+`path`+`version`, neither given, `version` with each of
+`branch`/`tag`/`rev`, a malformed requirement in both shorthand and table
+form, a partial `=` exact requirement) produces the expected error message
+and a non-zero exit. The *valid* case (a well-formed registry dependency
+actually resolving/building) is deliberately left untested until REG-4
+lands real resolver support - asserting today's transient "falls through to
+`resolveGitDependency` with an empty URL" behavior would just be testing
+something about to change in the very next slice.
+
+Verified: full suite (41/41) passing, clean `-Wall -Wextra -Werror`
+rebuild - fully backward compatible (no existing manifest anywhere in this
+repo's tests uses `version` in `[dependencies]`, so the three-way
+exclusivity check never changes behavior for any of them).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
