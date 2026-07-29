@@ -193,6 +193,15 @@ std::string Codegen::genExpr(const Expr& expr) {
             return prefix + mangleName(expr.stringValue);
         }
         case ExprKind::AddressOf:
+            /// `@ProcName` (Expr::isProcAddress, set by Sema) - a real C
+            /// function pointer converted to `void*` (ANY PTR at the
+            /// eBasic level) via an explicit cast, since C++ has no
+            /// implicit function-pointer-to-object-pointer conversion
+            /// (unlike most other pointer conversions this language
+            /// already allows implicitly).
+            if (expr.isProcAddress) {
+                return "reinterpret_cast<void*>(&" + mangleName(expr.lhs->stringValue) + ")";
+            }
             return "(&(" + genExpr(*expr.lhs) + "))";
         case ExprKind::Deref:
             return "(*(" + genExpr(*expr.lhs) + "))";

@@ -249,6 +249,18 @@ struct Expr {
     /// instead of plain `.eb_name` field access, since C++ has no native
     /// property syntax.
     bool isProperty = false;
+    /// AddressOf only: true when the operand (`lhs`, an Ident) names a
+    /// top-level, non-extern, non-method SUB/FUNCTION (`@ProcName`) rather
+    /// than an ordinary lvalue - set by Sema, read by Codegen to emit
+    /// `reinterpret_cast<void*>(&eb_name)` instead of the ordinary
+    /// `&(lvalue)` form. Needed for C callback-style APIs (e.g. GLib's
+    /// GCallback for `g_signal_connect`), which take a callback as an
+    /// untyped pointer (`ANY PTR` on the eBasic side - see Sema's
+    /// AddressOf case) - converting a real function pointer to an object
+    /// pointer isn't an implicit conversion in C++, unlike most other
+    /// pointer conversions this language already allows, so it needs an
+    /// explicit cast Codegen must insert itself.
+    bool isProcAddress = false;
 };
 
 using ExprPtr = std::unique_ptr<Expr>;

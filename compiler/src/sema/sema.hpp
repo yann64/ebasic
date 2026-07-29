@@ -33,6 +33,12 @@ struct ProcedureInfo {
     bool isFunction = false;
     Type returnType; // unused for SUB
     std::vector<Param> params;
+    /// True for an `Extern`-declared (bodyless) SUB/FUNCTION - `@ProcName`
+    /// (AddressOf) rejects these, since there's no eBasic-compiled body to
+    /// take the address of (the real implementation lives in an external
+    /// library, reached by name at link time, not by a pointer eBasic
+    /// itself can produce).
+    bool isExtern = false;
     /// Methods only (meaningless for free/namespace procedures): true if
     /// declared Virtual, or Override (an override necessarily participates
     /// in the vtable too). Codegen emits literal `virtual`/`override`.

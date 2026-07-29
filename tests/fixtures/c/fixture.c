@@ -61,3 +61,14 @@ void eb_fixture_handle_add(struct eb_fixture_handle* h, int delta) {
 void eb_fixture_handle_destroy(struct eb_fixture_handle* h) {
     free(h);
 }
+
+/** Invokes a caller-supplied callback (a GLib GCallback-shaped function
+ * pointer: a value plus an opaque user_data pointer) - exercises a real C
+ * library calling back into eBasic-compiled code via a function pointer
+ * eBasic itself produced (`@ProcName`), the same pattern GTK's own
+ * g_signal_connect-family APIs use for every widget signal. */
+typedef void (*eb_fixture_callback)(int value, void* user_data);
+
+void eb_fixture_invoke_callback(eb_fixture_callback cb, int value, void* user_data) {
+    cb(value, user_data);
+}

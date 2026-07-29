@@ -983,6 +983,69 @@ hardware via `scripts/haiku_verify.sh` (34/34, including all 6 `lsp_*`
 tests). `docs/guide/lsp.md` updated to reflect this (no longer "work in
 progress").
 
+## Post-1.0: Function Pointers for C Callback APIs (`@ProcName`)
+
+Prompted by a downstream project (`eb-gtk4`, a GTK4 binding library) that
+needed to bind `g_signal_connect`-style APIs: GTK/GLib's whole signal
+system is callback-driven, and every `Extern`/`Declare` before this point
+could only let eBasic *call into* external code, never let external code
+*call back into* eBasic. Confirmed by direct inspection (not assumed) that
+this was a genuine, complete gap: `TypeKind` had no function-pointer kind,
+no `ADDRESSOF`/`CALLBACK` keyword existed, and `@` (AddressOf) only
+accepted an lvalue operand (`compiler/src/sema/sema.cpp`'s `isLvalue`) -
+matching the M3 roadmap note above that explicitly deferred "function
+pointers" with no later milestone ever reintroducing them.
+
+**Deliberately narrow scope, decided before implementation**: rather than
+building a full structurally-typed function-pointer *type* (its own
+`TypeKind`, parsed `SUB(...)`/`FUNCTION(...) AS T` syntax, and matching
+Sema/Codegen machinery throughout), `@ProcName` produces plain `ANY PTR` -
+reusing the pointer type this language already has, and the "ANY PTR is
+universally compatible with any pointer type" Sema rule it already
+enforces (`isAssignCompatible`, unchanged). This matches how the real C
+callback APIs motivating this feature actually work in practice (GLib's
+own `GCallback` is itself just a generic function-pointer typedef, always
+cast at the call site) and how eBasic already treats `Extern` bindings in
+general (it never parses a real header - only the *value* needs to line
+up at the ABI level, not a matching declared type on the eBasic side).
+Verified concretely: converting a function pointer to `void*` is *not* an
+implicit conversion in C++ (confirmed by directly compiling a minimal
+reproduction with `g++ -std=c++17 -Wpedantic`, which hard-errors
+`-fpermissive` without a cast) - so Codegen must insert an explicit
+`reinterpret_cast<void*>` itself; a new `Expr::isProcAddress` flag (set by
+Sema, read by Codegen) marks exactly this case.
+
+**What's addressable**: only a plain, bodied, top-level `SUB`/`FUNCTION` -
+`Extern`-declared procedures are rejected (no eBasic-compiled body to take
+the address of) and so are `TYPE` methods (implicit `This` has no room in
+a plain C function pointer), both with clear diagnostics. Every
+parameter's type, and the return type for a `FUNCTION`, must be
+C-ABI-compatible - `STRING` (a C++ class, not a C-layout value) is
+rejected the same way M4b's `Extern` signature checks already reject it
+elsewhere, pointing the user at `ZSTRING` instead.
+
+Implementation: `ProcedureInfo` gained `isExtern` (`sema.hpp`/`.cpp`, set
+from the existing `Stmt::isExtern`, needed to reject `@`-of-`Extern`); the
+`AddressOf` case in `Sema::checkExpr` gained an early branch recognizing
+an `Ident` operand that names a known top-level procedure, before falling
+through to the ordinary lvalue path unchanged; Codegen's `AddressOf` case
+gained a matching `isProcAddress` branch emitting the explicit cast. No
+`ast.hpp` `TypeKind`/`Type` changes at all - the entire feature fits
+inside `Expr::isProcAddress` (new) plus `ProcedureInfo::isExtern` (new).
+
+New e2e test `tests/e2e/function_pointers` mirrors M4's own real-library
+pattern: the C fixture library (`tests/fixtures/c/fixture.c`) gained
+`eb_fixture_invoke_callback`, a real separately-compiled C function taking
+a `void(*)(int,void*)`-shaped callback and invoking it - genuinely
+verifies a real, external C call *back into* eBasic-compiled code, not
+just a parse/compile check. Verified: this new test plus the full existing
+suite (35/35) passing, and a clean `-Wall -Wextra` rebuild from scratch
+with zero new warnings.
+
+`docs/reference/extern-interop.md` gained a `@ProcName` section
+documenting the feature, cross-linked from the existing `Pointers`
+reference page.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

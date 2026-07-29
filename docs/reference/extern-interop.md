@@ -146,6 +146,45 @@ PRINT HandleGet(h)     ' 10
 CALL HandleDestroy(h)
 ```
 
+## `@ProcName` - a function pointer for a C callback API
+
+```basic
+SUB OnFixtureCallback(value AS INTEGER, user_data AS ANY PTR)
+    PRINT "callback fired"
+    PRINT value
+End Sub
+
+Extern "C" Lib "ebfixturec"
+    Declare Sub eb_fixture_invoke_callback(ByVal cb AS ANY PTR, ByVal value AS INTEGER, ByVal user_data AS ANY PTR)
+End Extern
+
+CALL eb_fixture_invoke_callback(@OnFixtureCallback, 42, 0)
+```
+
+`@` (AddressOf) accepts a top-level, non-`Extern`, non-method `SUB`/
+`FUNCTION` name (not just an lvalue, its ordinary use - see [Pointers](
+namespaces-pointers-unions.md#pointers-ptr--)) and produces a real C
+function pointer, typed as `ANY PTR` - matching how C callback-style APIs
+conventionally take a callback as an untyped pointer (e.g. GLib's own
+`GCallback`, used by every `g_signal_connect`-family GTK function). This
+lets separately-compiled C/C++ code call back into eBasic-compiled code,
+the mirror image of an ordinary `Extern` `Declare` (which lets eBasic call
+into external code).
+
+- Only a **plain, bodied, top-level** `SUB`/`FUNCTION` is addressable this
+  way - not an `Extern`-declared one (it has no eBasic-compiled body to
+  take the address of) and not a `TYPE` method (which needs an implicit
+  `This` a plain C function pointer has no room for).
+- Every parameter, and the return type (for a `FUNCTION`), must be
+  C-ABI-compatible - `STRING` isn't (it's a C++ class, not a C-layout
+  value); use `ZSTRING` instead, same as an ordinary `Extern` signature.
+- Deliberately narrow scope: produces `ANY PTR`, not a distinct,
+  structurally-checked function-pointer *type* - the receiving C parameter
+  can be typed however that library's own real header declares it (a
+  function-pointer typedef, `void*`, ...); eBasic never inspects real
+  headers regardless (see above), so only the *value* needs to line up,
+  not a matching declared type on the eBasic side.
+
 ## See also
 
 - [Types and Literals](types-and-literals.md) - `ZSTRING`

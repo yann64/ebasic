@@ -580,6 +580,7 @@ void Sema::collectProcedures(std::vector<StmtPtr>& stmts, const std::string& pre
         info.isFunction = stmt->kind == StmtKind::FunctionDecl;
         info.returnType = stmt->declaredType;
         info.params = stmt->params;
+        info.isExtern = stmt->isExtern;
         info.declLoc = stmt->loc;
         procedures_[key] = std::move(info);
     }
@@ -1488,6 +1489,43 @@ Type Sema::checkExpr(Expr& expr) {
             return expr.type;
         }
         case ExprKind::AddressOf: {
+            /// `@ProcName` - takes a real C function pointer to a
+            /// top-level, non-extern SUB/FUNCTION, needed to satisfy a C
+            /// callback-style API (e.g. GLib's GCallback for
+            /// `g_signal_connect`). Checked before the ordinary lvalue path
+            /// since a bare procedure name is never itself a valid Ident
+            /// expression (checkExpr(Ident) only knows about
+            /// variables/fields, not procedures). Deliberately narrow
+            /// scope: produces ANY PTR (matching how such APIs take the
+            /// callback as an untyped pointer) rather than a distinct
+            /// function-pointer type - see Expr::isProcAddress for the
+            /// Codegen side.
+            if (expr.lhs->kind == ExprKind::Ident) {
+                std::string key = canonicalName(expr.lhs->stringValue);
+                if (const ProcedureInfo* proc = findProcedure(key)) {
+                    if (proc->isExtern) {
+                        diags_.error(expr.loc,
+                                     "'@' cannot take the address of EXTERN-declared '" +
+                                         expr.lhs->stringValue +
+                                         "' (it has no eBasic-compiled body to take the address of)");
+                    }
+                    bool abiSafe = proc->returnType.kind != TypeKind::StringT;
+                    for (const Param& p : proc->params) {
+                        if (p.type.kind == TypeKind::StringT) abiSafe = false;
+                    }
+                    if (!abiSafe) {
+                        diags_.error(expr.loc, "'@" + expr.lhs->stringValue +
+                                                    "' is not C-ABI-compatible (STRING parameters/"
+                                                    "return aren't - use ZSTRING instead)");
+                    }
+                    expr.isProcAddress = true;
+                    Type result;
+                    result.kind = TypeKind::Pointer;
+                    result.pointee = nullptr; // ANY PTR
+                    expr.type = result;
+                    return expr.type;
+                }
+            }
             if (!isLvalue(*expr.lhs)) {
                 diags_.error(expr.loc,
                              "'@' requires an addressable value (a variable, field, or array element)");
