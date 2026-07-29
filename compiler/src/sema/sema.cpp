@@ -30,6 +30,22 @@ bool pointeesIdentical(const Type& a, const Type& b) {
     return true;
 }
 
+/// After a successful isAssignCompatible(target, value.type) check
+/// involving a pointer, stash `target` on `value` when the bridge that made
+/// them compatible was `value` being a bare ANY PTR - see Expr::
+/// pointerCastTo's own doc comment for why Codegen needs this (C++ has no
+/// implicit void* -> T* conversion, unlike this language's own ANY PTR
+/// bridging rule). Safe to call unconditionally right after any
+/// isAssignCompatible check regardless of its result - a no-op when neither
+/// operand needs it, and harmless dead data when the check failed, since
+/// Codegen never runs on a program with reported Sema errors.
+void annotatePointerBridge(const Type& target, Expr& value) {
+    if (target.kind == TypeKind::Pointer && value.type.kind == TypeKind::Pointer &&
+        !value.type.pointee) {
+        value.pointerCastTo = std::make_shared<Type>(target);
+    }
+}
+
 
 /// Recursively checks whether `type` is, or (for a `UserDefined` field)
 /// transitively contains, a `STRING`. Used to enforce FreeBASIC's UNION
@@ -752,6 +768,7 @@ void Sema::checkCallArgs(const ProcedureInfo& proc, std::vector<ExprPtr>& args, 
             diags_.error(arg.loc, "argument " + std::to_string(i + 1) +
                                        " type does not match parameter '" + param.name + "'");
         }
+        annotatePointerBridge(param.type, arg);
         if (param.byRef) {
             bool isConstVar = false;
             if (arg.kind == ExprKind::Ident) {
@@ -864,6 +881,7 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                 diags_.error(stmt.loc, "CONST '" + stmt.name + "' initializer type does not match its "
                                        "declared type");
             }
+            annotatePointerBridge(constType, *stmt.expr);
             if (!isConstantExpr(*stmt.expr)) {
                 diags_.error(stmt.expr->loc,
                              "CONST initializer must be a constant expression (literals and "
@@ -908,6 +926,7 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                     diags_.error(stmt.loc, "return value type does not match FUNCTION '" + stmt.name +
                                                "'s declared return type");
                 }
+                annotatePointerBridge(currentFunctionReturnType_, *stmt.expr);
                 return;
             }
             if (stmt.target) {
@@ -920,6 +939,7 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                 if (!isAssignCompatible(targetType, exprType)) {
                     diags_.error(stmt.loc, "assigned value's type does not match the target's type");
                 }
+                annotatePointerBridge(targetType, *stmt.expr);
                 return;
             }
             std::string key = canonicalName(stmt.name);
@@ -936,6 +956,7 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                             diags_.error(stmt.loc, "assigned value's type does not match "
                                                         "member '" + stmt.name + "'");
                         }
+                        annotatePointerBridge(field->type, *stmt.expr);
                         return;
                     }
                 }
@@ -970,6 +991,7 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                                                stmt.name + "'");
                 }
             }
+            annotatePointerBridge(info.type, *stmt.expr);
             return;
         }
         case StmtKind::Print: {
@@ -1217,6 +1239,7 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                                  "RETURN value type does not match the FUNCTION's declared return "
                                  "type");
                 }
+                annotatePointerBridge(currentFunctionReturnType_, *stmt.expr);
             } else if (stmt.expr) {
                 diags_.error(stmt.expr->loc,
                              "a SUB or GOSUB target cannot RETURN a value; use a bare RETURN");

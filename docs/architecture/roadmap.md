@@ -1164,33 +1164,68 @@ original `eb-gtk4` build now succeeds past this point; the new test plus
 the full suite (38/38) passing; a clean rebuild from scratch, zero new
 warnings.
 
-## Known Issue (confirmed, not yet fixed): `ANY PTR` -> typed `PTR` doesn't compile
+## Fixed: `ANY PTR` -> typed `PTR` doesn't compile
 
-Found immediately after the two fixes above, still building `eb-gtk4`:
-assigning or passing an `ANY PTR`-typed *value* where a specific typed
-`PTR` is expected (a `DIM`/plain `Assign`, or a call argument) fails
-backend compilation, even though `Sema::isAssignCompatible` explicitly
-allows it and `docs/reference/namespaces-pointers-unions.md` documents
-`ANY PTR` as "implicitly converted to and from other pointer types" -
-only the *other* direction (a typed pointer into an `ANY PTR` slot) is
-actually implicit in the generated C++ (`T*` -> `void*` is a real
-implicit C++ conversion; `void*` -> `T*` is not, in C++, unlike C).
-Reproduced with a minimal, GTK-independent case before doing anything
-else: `DIM np AS Node PTR : np = anyP` and `CALL TakesNodePtr(anyP)` both
-fail with `g++`'s own `invalid conversion from 'void*' to 'eb_node*'`.
+Previously logged just below as a confirmed-but-deferred known issue
+(found while building `eb-gtk4`): assigning or passing an `ANY PTR`-typed
+*value* where a specific typed `PTR` is expected (`DIM`/plain `Assign`, a
+call argument, a `CONST` initializer, or a `RETURN`/implicit-return value)
+failed backend compilation, even though `Sema::isAssignCompatible`
+explicitly allows it and the docs describe `ANY PTR` as "implicitly
+converted to and from other pointer types" - only the *other* direction
+(a typed pointer into an `ANY PTR` slot) was actually implicit in the
+generated C++ (`T*` -> `void*` is a real implicit C++ conversion; `void*`
+-> `T*` is not, in C++, unlike C).
 
-**Not fixed this session** - a real, correct general fix needs Codegen to
-gain target-type awareness it doesn't have today at every one of
-`isAssignCompatible`'s several call sites in Sema (`Assign` in its
-various forms, `Return`, `CONST` initializers, and - the one most call
-sites actually need - function-call arguments, which would require
-threading each callee's resolved parameter types into Codegen, itself
-requiring Codegen to gain access to Sema's `procedures_`/`structs_`
-tables it doesn't hold today). Worked around in `eb-gtk4` itself instead
-(using `ANY PTR` uniformly rather than a distinct opaque handle TYPE,
-sidestepping the gap by construction) rather than taking on that
-larger change under time pressure - left here as a confirmed, reproduced,
-correctly-scoped starting point for whoever picks it up next.
+The previous attempt's stated blocker - "Codegen has no target-type
+awareness at Sema's several `isAssignCompatible` call sites" - turned out
+to be avoidable rather than fundamental: instead of threading target
+types *into* Codegen, `Sema` now annotates the *value expression itself*
+at the exact moment it decides the bridge is legal. A new free helper,
+`annotatePointerBridge(target, value)` (sema.cpp, next to the existing
+`pointeesIdentical`), is called once at all 7 real call sites (found by
+grepping every `isAssignCompatible` invocation in sema.cpp: `checkCallArgs`
+- the single funnel for every call/method-call argument; `CONST`
+initializers; both `Assign` forms of return-assignment and the real
+`RETURN expr`; `Assign` with an explicit Member/Call-chain target
+(covering PROPERTY setters too, since codegen routes them through the
+same value expression); the implicit `This.field = value` fallback; and
+the plain variable/array-element `Assign` case). It sets a new
+`Expr::pointerCastTo` field (`ast.hpp`) - a `shared_ptr<Type>` snapshot of
+the target type - whenever the *value*'s own resolved type is a bare ANY
+PTR (`Pointer` with a null pointee, i.e. genuinely `void*` in the
+generated C++, at any nesting depth of the *target*). `Codegen::genExpr`
+was split into a thin public wrapper plus the original body (renamed
+`genExprBase`); the wrapper checks `pointerCastTo` and wraps the rendered
+text in `static_cast<T*>(...)` when set. Because every one of the 7 Sema
+sites' corresponding Codegen emission already called `genExpr(*stmt.expr)`
+/ `genExpr(arg)` on exactly the annotated node, this one choke point fixed
+all 7 call sites with zero further per-site Codegen changes.
+
+`static_cast<T*>(voidExpr)` is always well-formed here regardless of how
+nested `T` is (including `T` itself being a pointer, e.g. bridging into a
+`Node PTR PTR` target) - the C++ standard permits `static_cast` from a
+prvalue of type "pointer to void" to any object pointer type. The
+annotation only ever fires when the *value*'s type is single-indirection
+ANY PTR (a leaf case in `Codegen::cppType`, always exactly `void*`), so
+the deeper `void**` vs `T**` case (a bare `ANY PTR PTR` value bridged
+into a deeper typed target) never reaches this code path - correctly out
+of scope, since that conversion was never valid in C either.
+
+One confirmed, pre-existing, still-out-of-scope edge (found during design
+review, not a regression from this fix): a BYREF pointer parameter is
+codegen'd as a genuine C++ reference (`T*&`), and neither a `static_cast`
+prvalue nor a bare `void*` lvalue can bind to it - BYREF pointer
+parameters bridging from ANY PTR were, and remain, unsupported.
+
+Verified: extended `tests/e2e/pointers` (previously only exercised the
+*working* typed->ANY direction) to cover the fixed direction across a
+plain variable assignment, a member/field assignment, a BYVAL
+call-argument, and a return-assignment, all reusing the file's existing
+`Node` linked-list fixture; full suite (38/38) passing; a clean
+`-Wall -Wextra -Werror` rebuild, zero warnings; the original minimal
+GTK-independent repro (`DIM np AS Node PTR : np = anyP`) recompiles and
+runs correctly.
 
 ## Testing Strategy
 

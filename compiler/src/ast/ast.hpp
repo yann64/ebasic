@@ -236,6 +236,19 @@ struct Expr {
     SourceLoc loc;
     Type type;
 
+    /// Set by Sema exactly when this expression's own resolved type is a
+    /// bare ANY PTR (Pointer with a null pointee - C++'s void*) but it's
+    /// being used somewhere a specific pointer type is required (an
+    /// assignment target, a CONST initializer, a function/method argument,
+    /// or a RETURN value) - isAssignCompatible's ANY-PTR bridging rule
+    /// permits this (matching FreeBASIC's own documented "implicitly
+    /// converted to and from other pointer types" behavior), but C++ has no
+    /// implicit void* -> T* conversion (only the reverse, T* -> void*, is
+    /// implicit). Codegen::genExpr wraps this expression's rendered text in
+    /// an explicit static_cast<T*>(...) when this is set; null whenever no
+    /// cast is needed.
+    std::shared_ptr<Type> pointerCastTo;
+
     long long intValue = 0;
     double doubleValue = 0.0;
     std::string stringValue; // StringLiteral text, or Ident/Call/Member name

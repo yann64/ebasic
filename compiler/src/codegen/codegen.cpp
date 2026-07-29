@@ -135,6 +135,14 @@ void Codegen::collectExternProcNames(const std::vector<StmtPtr>& stmts, const st
 }
 
 std::string Codegen::genExpr(const Expr& expr) {
+    std::string result = genExprBase(expr);
+    if (expr.pointerCastTo) {
+        result = "static_cast<" + cppType(*expr.pointerCastTo) + ">(" + result + ")";
+    }
+    return result;
+}
+
+std::string Codegen::genExprBase(const Expr& expr) {
     switch (expr.kind) {
         case ExprKind::IntLiteral:
             return std::to_string(expr.intValue);

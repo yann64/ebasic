@@ -82,7 +82,20 @@ private:
     /// being reopenable, and needs no qualified-name bookkeeping in Codegen
     /// beyond the namespaces_ set (real C++ namespaces do the rest).
     void genNamespaceDecl(const Stmt& stmt);
+    /// Renders `expr` into C++, then wraps the result in an explicit
+    /// `static_cast<T*>(...)` when Sema set `expr.pointerCastTo` (an ANY PTR
+    /// value being bridged into a typed pointer context - C++, unlike this
+    /// language, has no implicit void* -> T* conversion). The actual
+    /// per-ExprKind rendering lives in genExprBase; every recursive call for
+    /// a sub-expression goes through this wrapper too, so the cast is never
+    /// missed regardless of where in a larger expression the annotated node
+    /// sits.
     std::string genExpr(const Expr& expr);
+    /// The real per-ExprKind rendering that genExpr wraps - never call this
+    /// directly except from within genExpr itself or genExprBase's own
+    /// recursive sub-expression calls (which intentionally go through
+    /// genExpr, not this).
+    std::string genExprBase(const Expr& expr);
     std::string genCondition(const Expr& expr);
     /// Renders the `recv.`/`this->`/`eb_base::` prefix for a Member/Call
     /// whose receiver is `lhs` - shared by genExpr's Member/Call cases and

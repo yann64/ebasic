@@ -57,3 +57,32 @@ DIM ip2 AS INTEGER PTR
 ip0 = @arr(0)
 ip2 = @arr(2)
 PRINT ip2 - ip0
+
+' ANY PTR -> typed PTR: Sema documents/permits this bridge (see
+' docs/reference/namespaces-pointers-unions.md), but it needs Codegen to
+' emit an explicit static_cast (C++ has no implicit void* -> T* conversion,
+' unlike the reverse T* -> void* direction already exercised above).
+anyP = @n1
+
+' Variable assignment
+DIM typedFromAny AS Node PTR
+typedFromAny = anyP
+PRINT typedFromAny->value
+
+' Member/field assignment
+n3.nxt = anyP
+PRINT n3.nxt->value
+
+' Call-argument bridging
+FUNCTION TakesTyped(BYVAL n AS Node PTR) AS INTEGER
+    TakesTyped = n->value
+END FUNCTION
+PRINT TakesTyped(anyP)
+
+' Return-assign bridging (FB's implicit `FuncName = value` return form)
+FUNCTION MakeTyped() AS Node PTR
+    MakeTyped = anyP
+END FUNCTION
+DIM viaReturn AS Node PTR
+viaReturn = MakeTyped()
+PRINT viaReturn->value
