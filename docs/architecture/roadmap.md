@@ -1308,6 +1308,29 @@ shared checkout thrashed between refs on every `git checkout` call. Restored
 the fix, confirmed the same test passes; full suite (39/39) green, clean
 `-Wall -Wextra -Werror` rebuild.
 
+### REG-1 Implementation Notes (SemVer + VersionReq library, done)
+
+New `pkg/src/semver.hpp/.cpp` - a strict `MAJOR.MINOR.PATCH` `SemVer` type
+(comparable, no pre-release/build-metadata by deliberate scope cut) plus a
+`VersionReq` type parsing a manifest requirement string's optional
+`^`/`~`/`=` prefix and 1-3 dot-separated components, implementing the exact
+Caret/Tilde/Exact table from the approved plan (including the `0.x.y`
+caret edge cases - a `0.x` minor bump and a `0.0.x` patch bump are each
+treated as breaking, matching real Cargo semantics) and `pickBestSatisfying`
+(highest version in a list matching a requirement).
+
+No existing unit-test-binary precedent exists in this codebase (every
+other test drives a real compiled tool end-to-end via bash) - SemVer has no
+CLI surface of its own until REG-4/REG-6 land, so a small, plain
+assertion-based standalone binary (`pkg/src/semver_test.cpp`, registered as
+ctest's `semver_unit`) was the simplest honest way to verify it in
+isolation first, per the plan's "verify standalone before touching
+anything else" instruction for this slice. Covers the full Caret/Tilde/
+Exact table plus parse-error cases (partial exact requirement, 4-component
+input, leading zeros, empty string) - all passed on the first run, no bugs
+found needing a fix. Verified: full suite (40/40), clean `-Wall -Wextra
+-Werror` rebuild.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

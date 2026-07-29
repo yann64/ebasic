@@ -215,6 +215,12 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/cli/version_help.sh $<TARGET_FILE:ebc> $<TARGET_FILE:ebpm> $<TARGET_FILE:docgen>
 )
 
+# REG-1: standalone SemVer/VersionReq unit test - see semver_test.cpp.
+add_test(
+    NAME semver_unit
+    COMMAND $<TARGET_FILE:semver_test>
+)
+
 # LSP-1: a protocol-level smoke test - speaks real Content-Length-framed
 # JSON-RPC over ebasic_lsp's stdio (initialize/didOpen/didChange/didClose/
 # shutdown/exit, plus the unimplemented-method and unclean-disconnect exit-
