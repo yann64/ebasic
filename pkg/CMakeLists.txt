@@ -18,6 +18,7 @@ add_library(ebasic_pkg STATIC
     src/lockfile.cpp
     src/gitdep.cpp
     src/semver.cpp
+    src/index.cpp
 )
 target_link_libraries(ebasic_pkg PUBLIC tomlplusplus ebasic_process)
 target_include_directories(ebasic_pkg PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -38,3 +39,7 @@ install(TARGETS ebpm RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 # simplest honest way to verify it before anything else depends on it.
 add_executable(semver_test src/semver_test.cpp)
 target_link_libraries(semver_test PRIVATE ebasic_pkg)
+
+# REG-3: likewise for index.{hpp,cpp} - see index_test.cpp's own doc comment.
+add_executable(index_test src/index_test.cpp)
+target_link_libraries(index_test PRIVATE ebasic_pkg)

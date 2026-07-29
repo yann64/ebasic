@@ -1362,6 +1362,41 @@ rebuild - fully backward compatible (no existing manifest anywhere in this
 repo's tests uses `version` in `[dependencies]`, so the three-way
 exclusivity check never changes behavior for any of them).
 
+### REG-3 Implementation Notes (index format + fetch/cache, done)
+
+New `pkg/src/index.hpp/.cpp`: one TOML file per package
+(`<indexDir>/<name>.toml`, a `[package]` name/description plus one
+`[[versions]]` entry per published version, each a `SemVer` + a real git
+source shaped exactly like a hand-written git dependency - `git` plus at
+most one of `branch`/`tag`/`rev`). `indexUrl()` resolves in priority order:
+the `EBASIC_INDEX_URL` env var (naming matches the `EBASIC_LIBRARY_PATH`
+precedent from the earlier Haiku fix), then `~/.ebpm/config.toml`'s
+`[registry] index = "..."`, then a hardcoded default pointing at this
+project's own starter index repo (REG-8). `fetchIndexDir` clones/fetches
+that repo into `~/.ebpm/cache/index/<sanitized-url>/`; `lookupPackage`/
+`listAllPackages` parse it (the latter skips a malformed entry rather than
+failing the whole listing, so `search` stays resilient to one bad file).
+
+Also landed, as its own commit within this slice per the plan: factored
+`gitdep.cpp`'s clone-or-fetch subprocess logic out into a shared
+`cloneOrFetch()` (plus `homeDir()`/`sanitizeForDirName()`, both now
+exported from `gitdep.hpp`) - a pure refactor with no behavior change,
+verified by re-running the existing git-dependency e2e cases unchanged
+before writing a single line of `index.cpp`.
+
+Like SemVer (REG-1), the index has no CLI surface of its own yet (that's
+REG-6/REG-7) - verified via a small standalone binary (`pkg/src/
+index_test.cpp`) driven by a new `tests/e2e_pkg/run_index_case.sh`, which
+stands up a real local bare "index" repo (the same technique
+`run_git_case.sh` already uses for a fake git-dependency remote) seeded
+with one well-formed package (two versions) and one deliberately malformed
+one (missing its own `git` URL) - confirming `lookupPackage` succeeds/
+fails exactly as expected for each, and `listAllPackages` finds the good
+one while silently skipping the bad one.
+
+Verified: full suite (42/42) passing, clean `-Wall -Wextra -Werror`
+rebuild.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

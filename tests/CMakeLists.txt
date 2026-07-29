@@ -202,6 +202,12 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/manifest_version_errors.sh $<TARGET_FILE:ebpm>
 )
 
+# REG-3: index fetch/cache/parse against a real local bare "index" repo.
+add_test(
+    NAME e2e_pkg_index_fetch
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_index_case.sh $<TARGET_FILE:index_test>
+)
+
 # M5e: `ebpm test` on a [lib] package with one passing tests/*.bas file.
 add_test(
     NAME e2e_pkg_lib_with_tests

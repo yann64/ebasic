@@ -6,6 +6,31 @@
 
 namespace ebpm {
 
+/// The current user's home directory (`HOME`, falling back to
+/// `USERPROFILE` on Windows, which doesn't always set `HOME` - `"."` if
+/// neither is set) - the base every `~/.ebpm/...` cache/config path is
+/// computed from (git dependency cache, package index cache, and the
+/// registry config file).
+std::string homeDir();
+
+/// A filesystem-safe cache-directory name for a URL - every character
+/// that isn't alphanumeric/`-`/`_`/`.` becomes `_`. Deliberately readable
+/// rather than an opaque hash, so a `~/.ebpm/cache/...` directory stays
+/// inspectable by hand. Shared by the git-dependency cache (keyed by URL,
+/// see resolveGitDependency) and the package index cache (keyed by index
+/// URL, `index.cpp`).
+std::string sanitizeForDirName(const std::string& s);
+
+/// Clones `url` into `cacheDir` if it doesn't already look like a git
+/// checkout (no `.git` subdirectory yet), else fetches to refresh it -
+/// shared by resolveGitDependency (below, for a `git`-typed dependency) and
+/// the package index fetch (`index.cpp`, for the registry itself), so
+/// there's exactly one place that knows how to keep a cached clone
+/// up to date. Prints the same "Cloning .../Fetching ..." progress line
+/// either way. Caller is responsible for creating cacheDir's *parent*
+/// directory first.
+bool cloneOrFetch(const std::string& url, const std::string& cacheDir, std::string& err);
+
 /// Resolves a `git`-typed Dependency into a local, checked-out working
 /// directory - cloning into a per-URL subdirectory of a global cache
 /// (`~/.ebpm/cache/git/`) if not already present, else fetching to refresh

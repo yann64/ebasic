@@ -10,12 +10,15 @@ namespace fs = std::filesystem;
 
 namespace ebpm {
 
-namespace {
+std::string homeDir() {
+    /// M8a: Windows doesn't set HOME by default (some shells/environments
+    /// do, but it isn't guaranteed) - USERPROFILE is its real equivalent,
+    /// checked as a fallback rather than assumed unnecessary.
+    const char* home = std::getenv("HOME");
+    if (!home) home = std::getenv("USERPROFILE");
+    return home ? home : ".";
+}
 
-/// A filesystem-safe cache-directory name for a git URL - every character
-/// that isn't alphanumeric/`-`/`_`/`.` becomes `_`. Deliberately readable
-/// rather than an opaque hash, so `~/.ebpm/cache/git/` stays inspectable by
-/// hand.
 std::string sanitizeForDirName(const std::string& s) {
     std::string r;
     r.reserve(s.size());
@@ -29,18 +32,32 @@ std::string sanitizeForDirName(const std::string& s) {
     return r;
 }
 
+bool cloneOrFetch(const std::string& url, const std::string& cacheDir, std::string& err) {
+    std::error_code ec;
+    bool alreadyCloned = fs::exists(fs::path(cacheDir) / ".git", ec);
+    if (!alreadyCloned) {
+        std::cerr << "    Cloning " << url << std::endl;
+        if (ebasic::runProcess(ebasic::hostExecArgs({"git", "clone", url, cacheDir})) != 0) {
+            err = "failed to clone '" + url + "'";
+            return false;
+        }
+    } else {
+        std::cerr << "    Fetching " << url << std::endl;
+        if (ebasic::runProcess(ebasic::hostExecArgs({"git", "-C", cacheDir, "fetch"})) != 0) {
+            err = "failed to fetch '" + url + "'";
+            return false;
+        }
+    }
+    return true;
+}
+
+namespace {
+
 /// The global cache root every git dependency is cloned/fetched into
 /// (`<home>/.ebpm/cache/git/`), shared across every package on the machine
 /// rather than per-package - the same URL cloned by two different packages
 /// reuses one clone.
-fs::path gitCacheRoot() {
-    /// M8a: Windows doesn't set HOME by default (some shells/environments
-    /// do, but it isn't guaranteed) - USERPROFILE is its real equivalent,
-    /// checked as a fallback rather than assumed unnecessary.
-    const char* home = std::getenv("HOME");
-    if (!home) home = std::getenv("USERPROFILE");
-    return fs::path(home ? home : ".") / ".ebpm" / "cache" / "git";
-}
+fs::path gitCacheRoot() { return fs::path(homeDir()) / ".ebpm" / "cache" / "git"; }
 
 std::string trimTrailingNewline(std::string s) {
     while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
@@ -69,22 +86,7 @@ bool resolveGitDependency(const Dependency& dep, const std::string& pinnedCommit
     std::error_code ec;
     fs::create_directories(gitCacheRoot(), ec);
 
-    bool alreadyCloned = fs::exists(cacheDir / ".git", ec);
-    if (!alreadyCloned) {
-        std::cerr << "    Cloning " << dep.git << std::endl;
-        if (ebasic::runProcess(ebasic::hostExecArgs({"git", "clone", dep.git, cacheDir.string()})) !=
-            0) {
-            err = "failed to clone '" + dep.git + "'";
-            return false;
-        }
-    } else {
-        std::cerr << "    Fetching " << dep.git << std::endl;
-        if (ebasic::runProcess(ebasic::hostExecArgs({"git", "-C", cacheDir.string(), "fetch"})) !=
-            0) {
-            err = "failed to fetch '" + dep.git + "'";
-            return false;
-        }
-    }
+    if (!cloneOrFetch(dep.git, cacheDir.string(), err)) return false;
 
     /// A pinned commit (from a prior ebasic.lock entry) always wins - this
     /// is what keeps a repeat build reproducible even if the remote branch
