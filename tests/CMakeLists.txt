@@ -160,6 +160,13 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/lib_and_app_extends myapp
 )
 
+# A top-level CONST/ENUM must be exported across a --lib boundary too - see
+# generateLibraryInterface's new CONST/ENUM branch in codegen.cpp.
+add_test(
+    NAME e2e_pkg_lib_and_app_consts
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/lib_and_app_consts myapp
+)
+
 # OS-conditional dependencies: [target.<os>.dependencies] resolves only the
 # current platform's own section (proven by only its lib actually getting
 # built - see collectTransitiveDeps/effectiveDependencies in build.cpp/

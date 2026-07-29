@@ -1138,6 +1138,60 @@ no fields of its own) - verified: the original two-package reproduction
 now succeeds; the new test plus the full suite (37/37) passing; a clean
 rebuild.
 
+## Post-1.0: `--lib`'s Interface Generator Drops top-level `CONST`/`ENUM`
+
+Found alongside the `EXTENDS`-export fix above, building `eb-gtk4`'s
+orientation/flag constants (`CONST GTK_ORIENTATION_VERTICAL = 1`, needed
+by nearly every real GTK4 call): `generateLibraryInterface` had no branch
+for `StmtKind::Const`/`StmtKind::Enum` at all - a downstream consumer got
+`variable 'GTK_ORIENTATION_VERTICAL' is not declared` the moment it used
+one, confirmed live before fixing.
+
+Fix: a `CONST` whose initializer is a plain integer or double literal is
+now re-emitted verbatim (`CONST Name = <literal>`) - deliberately
+restricted to literals only (not any general constant expression, e.g. one
+referencing another `CONST`/`ENUM` member or an operator), since safely
+re-deriving those would need re-serializing arbitrary expression text back
+into `.bas` syntax, a distinctly larger feature; skipped with a comment in
+the same `skippedText` stream the existing STRING-signature skip already
+uses, not silently dropped. An `ENUM`'s members need no such restriction -
+Sema has already fully resolved every member's value (`resolvedValue`,
+computed for auto-increment among other things) regardless of how it was
+originally written, so the whole `ENUM` is always re-emitted from those
+resolved values directly. New e2e test `tests/e2e_pkg/lib_and_app_consts`
+(a `CONST` and an `ENUM`, both consumed downstream) - verified: the
+original `eb-gtk4` build now succeeds past this point; the new test plus
+the full suite (38/38) passing; a clean rebuild from scratch, zero new
+warnings.
+
+## Known Issue (confirmed, not yet fixed): `ANY PTR` -> typed `PTR` doesn't compile
+
+Found immediately after the two fixes above, still building `eb-gtk4`:
+assigning or passing an `ANY PTR`-typed *value* where a specific typed
+`PTR` is expected (a `DIM`/plain `Assign`, or a call argument) fails
+backend compilation, even though `Sema::isAssignCompatible` explicitly
+allows it and `docs/reference/namespaces-pointers-unions.md` documents
+`ANY PTR` as "implicitly converted to and from other pointer types" -
+only the *other* direction (a typed pointer into an `ANY PTR` slot) is
+actually implicit in the generated C++ (`T*` -> `void*` is a real
+implicit C++ conversion; `void*` -> `T*` is not, in C++, unlike C).
+Reproduced with a minimal, GTK-independent case before doing anything
+else: `DIM np AS Node PTR : np = anyP` and `CALL TakesNodePtr(anyP)` both
+fail with `g++`'s own `invalid conversion from 'void*' to 'eb_node*'`.
+
+**Not fixed this session** - a real, correct general fix needs Codegen to
+gain target-type awareness it doesn't have today at every one of
+`isAssignCompatible`'s several call sites in Sema (`Assign` in its
+various forms, `Return`, `CONST` initializers, and - the one most call
+sites actually need - function-call arguments, which would require
+threading each callee's resolved parameter types into Codegen, itself
+requiring Codegen to gain access to Sema's `procedures_`/`structs_`
+tables it doesn't hold today). Worked around in `eb-gtk4` itself instead
+(using `ANY PTR` uniformly rather than a distinct opaque handle TYPE,
+sidestepping the gap by construction) rather than taking on that
+larger change under time pressure - left here as a confirmed, reproduced,
+correctly-scoped starting point for whoever picks it up next.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

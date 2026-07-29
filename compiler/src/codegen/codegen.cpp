@@ -1084,6 +1084,36 @@ std::string Codegen::generateLibraryInterface(const Module& module, const std::s
             declsText << ")";
             if (isFunction) declsText << " AS " << basicTypeName(stmt.declaredType);
             declsText << "\n";
+        } else if (stmt.kind == StmtKind::Const) {
+            /// Only a literal-valued CONST is re-emitted - safe, since
+            /// re-declaring a literal crosses no ABI boundary at all
+            /// (unlike a call). A CONST initialized from a more general
+            /// constant expression (referencing another CONST/ENUM member,
+            /// an operator, ...) isn't re-derived here, to avoid silently
+            /// emitting the wrong value - skipped instead, same pattern as
+            /// the STRING-signature skip above.
+            std::string literalText;
+            if (stmt.expr && stmt.expr->kind == ExprKind::IntLiteral) {
+                literalText = std::to_string(stmt.expr->intValue);
+            } else if (stmt.expr && stmt.expr->kind == ExprKind::DoubleLiteral) {
+                literalText = std::to_string(stmt.expr->doubleValue);
+            }
+            if (literalText.empty()) {
+                skippedText << "' (not exported: '" << stmt.name
+                            << "' CONST initializer isn't a plain integer/double literal)\n";
+                continue;
+            }
+            typesText << "CONST " << stmt.name << " = " << literalText << "\n";
+        } else if (stmt.kind == StmtKind::Enum) {
+            /// Unlike CONST, every member's value is already fully
+            /// resolved by Sema (resolvedValue) regardless of how it was
+            /// originally written (an explicit value or auto-increment) -
+            /// no literal-only restriction needed here.
+            typesText << "ENUM " << stmt.name << "\n";
+            for (const EnumMember& member : stmt.enumMembers) {
+                typesText << "    " << member.name << " = " << member.resolvedValue << "\n";
+            }
+            typesText << "END ENUM\n\n";
         }
     }
 
