@@ -1,0 +1,3 @@
+FUNCTION RegValue() AS INTEGER
+    RegValue = 1
+END FUNCTION

@@ -1442,6 +1442,51 @@ needs no live index/branch lookup at all) - because the lockfile doesn't
 yet record which `git`/`tag` a registry pick resolved to, only `resolve.
 cpp`'s in-memory synthetic `Dependency` knows that. REG-5 closes this gap.
 
+### REG-5 Implementation Notes (lockfile extension, done)
+
+`ResolvedPackage` gained `registryGit`/`registryRef` (alongside REG-4's
+`sourceKind`/`version`); `writeLockfile` now emits `version =`/`git =`/
+(if any) `ref =` for a `Registry`-sourced `[[package]]` entry, and
+`readLockfilePins`'s return type grew from a bare `name -> commit` map to
+`name -> Pin{commit, version, git, ref}`. `resolve.cpp`'s registry branch
+now checks the pin *before* consulting the index: if a pinned version still
+satisfies the *current* manifest requirement, it's reused directly (a
+synthetic `Dependency` built straight from the pin, `resolveGitDependency`
+called with zero index involvement) - if the requirement has since been
+edited to something the pin no longer satisfies, it falls through to a
+fresh index lookup instead, so a manifest edit always takes effect rather
+than silently sticking to a stale pin.
+
+**Real bug found and fixed while writing this slice's own test** (not a
+regression from REG-0-4, but only reachable once something re-fetches an
+already-cloned repo more than once - which none of REG-0/REG-3/REG-4's own
+tests happened to exercise): `cloneOrFetch`'s `git fetch` branch only
+updated the remote-tracking refs, never the actual checked-out working
+tree - a git dependency's own caller (`resolveGitDependency`) always
+performs its own explicit `git checkout <ref>` right after, masking this
+completely, but the package index's caller (`fetchIndexDir`) does not, so
+`lookupPackage` kept reading whatever content existed at the *first* clone
+forever after, never seeing anything pushed later. Fixed by having
+`cloneOrFetch` itself bring the working tree in line with `origin/HEAD`
+after a fetch (`git reset -q --hard origin/HEAD` - the `-q` needed because
+a first attempt leaked `reset`'s own "HEAD is now at ..." confirmation
+message onto stdout, corrupting two unrelated git-dependency e2e tests'
+captured output; caught immediately by the full suite and fixed before
+moving on). Always safe for the git-dependency caller too, since its own
+subsequent explicit checkout simply overrides it.
+
+Verified via a new `tests/e2e_pkg/run_registry_lock_case.sh`, which
+performs four builds against one evolving fake index/library: (1) a fresh
+resolution picks the only available version; (2) after the library/index
+both gain a newer, still-compatible release, a repeat build stays pinned
+to the original version; (3) the same repeat build still succeeds with
+`EBASIC_INDEX_URL` pointed at a nonexistent path, proving zero index
+consultation happens once pinned; (4) editing the manifest's own
+requirement to something the pin no longer satisfies re-resolves to the
+newer version on the very next build, and the rebuilt program's real
+output confirms it. All four passed after the `cloneOrFetch` fix above.
+Full suite (44/44), clean `-Wall -Wextra -Werror` rebuild.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

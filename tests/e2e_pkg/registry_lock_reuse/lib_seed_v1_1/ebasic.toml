@@ -1,0 +1,6 @@
+[package]
+name = "mylib"
+version = "1.1.0"
+
+[lib]
+path = "src/lib.bas"

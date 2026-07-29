@@ -47,6 +47,21 @@ bool cloneOrFetch(const std::string& url, const std::string& cacheDir, std::stri
             err = "failed to fetch '" + url + "'";
             return false;
         }
+        /// A plain `git fetch` only updates the remote-tracking refs, not
+        /// the checked-out working tree - a caller that doesn't
+        /// immediately check out something specific afterward (the
+        /// package index, unlike a git dependency's own explicit
+        /// branch/tag/rev/pinned-commit checkout in resolveGitDependency)
+        /// would otherwise keep reading stale content forever after the
+        /// first clone. Bringing the working tree in line with the
+        /// remote's default branch here is always safe even for the git-
+        /// dependency caller: its own subsequent explicit checkout simply
+        /// overrides it.
+        if (ebasic::runProcess(ebasic::hostExecArgs(
+                {"git", "-C", cacheDir, "reset", "-q", "--hard", "origin/HEAD"})) != 0) {
+            err = "failed to update local checkout for '" + url + "'";
+            return false;
+        }
     }
     return true;
 }

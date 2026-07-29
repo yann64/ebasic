@@ -17,13 +17,27 @@ namespace {
 /// The one version REG-4's resolver picked for a registry package *name*,
 /// the first time it was encountered anywhere in the graph - see
 /// resolveDependencyGraph's own doc comment on why this is memoized by
-/// name rather than by directory (unlike everything else here).
+/// name rather than by directory (unlike everything else here). `git`/
+/// `ref` are carried alongside so REG-5's lockfile writer can record them
+/// without needing to look anything back up.
 struct RegistryPick {
     SemVer version;
     std::string dir;
     std::string gitCommit;
+    std::string git;
+    std::string ref;
     std::string requirement; ///< the requirement string that won this pick
     std::string requirer;    ///< which package name asked for it first
+};
+
+/// Everything about *how* a dependency edge was resolved, threaded into
+/// `visit` alongside `dir`/`gitCommit` - bundled into one struct rather
+/// than four more positional parameters once REG-5 added the last two.
+struct EdgeInfo {
+    SourceKind sourceKind = SourceKind::Root;
+    std::string version;     // only meaningful for SourceKind::Registry
+    std::string registryGit; // only meaningful for SourceKind::Registry
+    std::string registryRef; // only meaningful for SourceKind::Registry
 };
 
 } // namespace
@@ -36,12 +50,12 @@ bool resolveDependencyGraph(const std::string& rootDir, std::vector<ResolvedPack
         err = "cannot resolve package directory '" + rootDir + "': " + rootEc.message();
         return false;
     }
-    /// Read once, up front, from the root's own ebasic.lock - a git
-    /// dependency anywhere in the graph consults this by name (see
-    /// resolveGitDependency's `pinnedCommit` parameter) so a repeat build
-    /// stays reproducible instead of re-resolving whatever `branch` says
-    /// right now.
-    std::unordered_map<std::string, std::string> pins = readLockfilePins(canonicalRoot.string());
+    /// Read once, up front, from the root's own ebasic.lock - a git or
+    /// registry dependency anywhere in the graph consults this by name (see
+    /// resolveGitDependency's `pinnedCommit` parameter, and the registry
+    /// branch below) so a repeat build stays reproducible instead of
+    /// re-resolving whatever `branch`/the index currently says.
+    std::unordered_map<std::string, Pin> pins = readLockfilePins(canonicalRoot.string());
 
     /// canonical dir -> its already-resolved manifest (also serves as the
     /// "fully resolved" memo, so a diamond dependency is only loaded once).
@@ -53,9 +67,8 @@ bool resolveDependencyGraph(const std::string& rootDir, std::vector<ResolvedPack
     /// own doc comment.
     std::unordered_map<std::string, RegistryPick> resolvedRegistryVersions;
 
-    std::function<bool(const std::string&, const std::string&, SourceKind, const std::string&)> visit =
-        [&](const std::string& dir, const std::string& gitCommit, SourceKind sourceKind,
-            const std::string& version) -> bool {
+    std::function<bool(const std::string&, const std::string&, const EdgeInfo&)> visit =
+        [&](const std::string& dir, const std::string& gitCommit, const EdgeInfo& edge) -> bool {
         std::error_code ec;
         fs::path canonicalDir = fs::canonical(dir, ec);
         if (ec) {
@@ -80,16 +93,15 @@ bool resolveDependencyGraph(const std::string& rootDir, std::vector<ResolvedPack
         for (const Dependency& dep : effectiveDependencies(manifest)) {
             std::string depDir;
             std::string depGitCommit;
-            SourceKind depSourceKind;
-            std::string depVersion;
+            EdgeInfo depEdge;
             if (!dep.path.empty()) {
                 depDir = (canonicalDir / dep.path).string();
-                depSourceKind = SourceKind::Path;
+                depEdge.sourceKind = SourceKind::Path;
             } else if (!dep.git.empty()) {
                 auto pinIt = pins.find(dep.name);
-                std::string pinnedCommit = pinIt != pins.end() ? pinIt->second : std::string();
+                std::string pinnedCommit = pinIt != pins.end() ? pinIt->second.commit : std::string();
                 if (!resolveGitDependency(dep, pinnedCommit, depDir, depGitCommit, err)) return false;
-                depSourceKind = SourceKind::Git;
+                depEdge.sourceKind = SourceKind::Git;
             } else {
                 /// A registry (`version`) dependency: pick a concrete
                 /// version once per package *name*, not once per edge -
@@ -109,44 +121,84 @@ bool resolveDependencyGraph(const std::string& rootDir, std::vector<ResolvedPack
                     }
                     depDir = already->second.dir;
                     depGitCommit = already->second.gitCommit;
-                    depVersion = toString(already->second.version);
+                    depEdge.version = toString(already->second.version);
+                    depEdge.registryGit = already->second.git;
+                    depEdge.registryRef = already->second.ref;
                 } else {
-                    PackageIndex pkgIndex;
-                    if (!lookupPackage(dep.name, pkgIndex, err)) return false;
-                    VersionReq req;
-                    if (!parseVersionReq(dep.version, req, err)) return false;
-                    std::vector<SemVer> available;
-                    for (const IndexVersionEntry& v : pkgIndex.versions) available.push_back(v.version);
-                    auto chosen = pickBestSatisfying(available, req);
-                    if (!chosen) {
-                        err = "no version of '" + dep.name + "' in the index satisfies " + dep.version;
-                        return false;
-                    }
-                    const IndexVersionEntry* chosenEntry = nullptr;
-                    for (const IndexVersionEntry& v : pkgIndex.versions) {
-                        if (v.version == *chosen) {
-                            chosenEntry = &v;
-                            break;
+                    /// REG-5: a pinned rebuild whose pinned version still
+                    /// satisfies the *current* requirement skips the index
+                    /// entirely - reconstructs the exact same synthetic
+                    /// git dependency straight from the lockfile, exactly
+                    /// like a plain `git` dependency's own pinned rebuild
+                    /// never re-resolves `branch`/`tag`/`rev` live. If the
+                    /// manifest has since been edited to a requirement the
+                    /// pin no longer satisfies, falls through to a fresh
+                    /// index lookup below instead (a manifest edit must
+                    /// always take effect, not silently stick to a stale
+                    /// pin).
+                    auto pinIt = pins.find(dep.name);
+                    SemVer chosen;
+                    std::string chosenGit, chosenRef, chosenCommit;
+                    bool haveChoice = false;
+                    if (pinIt != pins.end() && !pinIt->second.git.empty() &&
+                        !pinIt->second.version.empty()) {
+                        SemVer pinnedVersion;
+                        std::string pinParseErr;
+                        VersionReq req;
+                        std::string reqParseErr;
+                        if (parseSemVer(pinIt->second.version, pinnedVersion, pinParseErr) &&
+                            parseVersionReq(dep.version, req, reqParseErr) && matches(req, pinnedVersion)) {
+                            chosen = pinnedVersion;
+                            chosenGit = pinIt->second.git;
+                            chosenRef = pinIt->second.ref;
+                            chosenCommit = pinIt->second.commit;
+                            haveChoice = true;
                         }
+                    }
+                    if (!haveChoice) {
+                        PackageIndex pkgIndex;
+                        if (!lookupPackage(dep.name, pkgIndex, err)) return false;
+                        VersionReq req;
+                        if (!parseVersionReq(dep.version, req, err)) return false;
+                        std::vector<SemVer> available;
+                        for (const IndexVersionEntry& v : pkgIndex.versions) {
+                            available.push_back(v.version);
+                        }
+                        auto pick = pickBestSatisfying(available, req);
+                        if (!pick) {
+                            err = "no version of '" + dep.name + "' in the index satisfies " +
+                                  dep.version;
+                            return false;
+                        }
+                        const IndexVersionEntry* chosenEntry = nullptr;
+                        for (const IndexVersionEntry& v : pkgIndex.versions) {
+                            if (v.version == *pick) {
+                                chosenEntry = &v;
+                                break;
+                            }
+                        }
+                        chosen = *pick;
+                        chosenGit = chosenEntry->git;
+                        chosenRef = !chosenEntry->branch.empty()
+                                        ? chosenEntry->branch
+                                        : (!chosenEntry->tag.empty() ? chosenEntry->tag : chosenEntry->rev);
                     }
                     Dependency synthetic;
                     synthetic.name = dep.name;
-                    synthetic.git = chosenEntry->git;
-                    synthetic.branch = chosenEntry->branch;
-                    synthetic.tag = chosenEntry->tag;
-                    synthetic.rev = chosenEntry->rev;
-                    auto pinIt = pins.find(dep.name);
-                    std::string pinnedCommit = pinIt != pins.end() ? pinIt->second : std::string();
-                    if (!resolveGitDependency(synthetic, pinnedCommit, depDir, depGitCommit, err)) {
+                    synthetic.git = chosenGit;
+                    synthetic.tag = chosenRef;
+                    if (!resolveGitDependency(synthetic, chosenCommit, depDir, depGitCommit, err)) {
                         return false;
                     }
-                    resolvedRegistryVersions[dep.name] =
-                        RegistryPick{*chosen, depDir, depGitCommit, dep.version, manifest.name};
-                    depVersion = toString(*chosen);
+                    resolvedRegistryVersions[dep.name] = RegistryPick{
+                        chosen, depDir, depGitCommit, chosenGit, chosenRef, dep.version, manifest.name};
+                    depEdge.version = toString(chosen);
+                    depEdge.registryGit = chosenGit;
+                    depEdge.registryRef = chosenRef;
                 }
-                depSourceKind = SourceKind::Registry;
+                depEdge.sourceKind = SourceKind::Registry;
             }
-            if (!visit(depDir, depGitCommit, depSourceKind, depVersion)) return false;
+            if (!visit(depDir, depGitCommit, depEdge)) return false;
 
             std::error_code depEc;
             std::string depKey = fs::canonical(depDir, depEc).string();
@@ -163,12 +215,13 @@ bool resolveDependencyGraph(const std::string& rootDir, std::vector<ResolvedPack
         }
         visiting.pop_back();
 
-        order.push_back(ResolvedPackage{manifest.name, key, manifest, gitCommit, sourceKind, version});
+        order.push_back(ResolvedPackage{manifest.name, key, manifest, gitCommit, edge.sourceKind,
+                                         edge.version, edge.registryGit, edge.registryRef});
         resolvedByDir[key] = std::move(manifest);
         return true;
     };
 
-    return visit(canonicalRoot.string(), "", SourceKind::Root, "");
+    return visit(canonicalRoot.string(), "", EdgeInfo{});
 }
 
 } // namespace ebpm

@@ -1,0 +1,10 @@
+[package]
+name = "lockapp"
+version = "0.1.0"
+
+[bin]
+name = "lockapp"
+path = "src/main.bas"
+
+[dependencies]
+mylib = "^1.0"

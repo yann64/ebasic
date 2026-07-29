@@ -215,6 +215,15 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_registry_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/registry_dep
 )
 
+# REG-5: a registry dependency's lockfile reproducibility guarantee - a
+# repeat build stays pinned even as the index/upstream move, a pinned
+# rebuild needs no index consultation at all, and a manifest requirement
+# edit that no longer fits the pin re-resolves on the next build.
+add_test(
+    NAME e2e_pkg_registry_lock_reuse
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_registry_lock_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/registry_lock_reuse
+)
+
 # M5e: `ebpm test` on a [lib] package with one passing tests/*.bas file.
 add_test(
     NAME e2e_pkg_lib_with_tests

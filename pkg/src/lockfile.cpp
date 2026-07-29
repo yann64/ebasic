@@ -25,6 +25,13 @@ bool writeLockfile(const std::string& rootDir, const std::vector<ResolvedPackage
         if (!pkg.gitCommit.empty()) {
             out << "commit = \"" << pkg.gitCommit << "\"\n";
         }
+        if (pkg.sourceKind == SourceKind::Registry) {
+            out << "version = \"" << pkg.version << "\"\n";
+            out << "git = \"" << pkg.registryGit << "\"\n";
+            if (!pkg.registryRef.empty()) {
+                out << "ref = \"" << pkg.registryRef << "\"\n";
+            }
+        }
     }
 
     std::ofstream file(lockPath);
@@ -36,8 +43,8 @@ bool writeLockfile(const std::string& rootDir, const std::vector<ResolvedPackage
     return true;
 }
 
-std::unordered_map<std::string, std::string> readLockfilePins(const std::string& rootDir) {
-    std::unordered_map<std::string, std::string> pins;
+std::unordered_map<std::string, Pin> readLockfilePins(const std::string& rootDir) {
+    std::unordered_map<std::string, Pin> pins;
     fs::path lockPath = fs::path(rootDir) / "ebasic.lock";
     if (!fs::exists(lockPath)) return pins;
 
@@ -54,8 +61,13 @@ std::unordered_map<std::string, std::string> readLockfilePins(const std::string&
             auto entryTbl = entry.as_table();
             if (!entryTbl) continue;
             auto name = (*entryTbl)["name"].value<std::string>();
-            auto commit = (*entryTbl)["commit"].value<std::string>();
-            if (name && commit && !commit->empty()) pins[*name] = *commit;
+            if (!name) continue;
+            Pin pin;
+            pin.commit = (*entryTbl)["commit"].value<std::string>().value_or("");
+            pin.version = (*entryTbl)["version"].value<std::string>().value_or("");
+            pin.git = (*entryTbl)["git"].value<std::string>().value_or("");
+            pin.ref = (*entryTbl)["ref"].value<std::string>().value_or("");
+            if (!pin.commit.empty() || !pin.git.empty()) pins[*name] = std::move(pin);
         }
     }
     return pins;

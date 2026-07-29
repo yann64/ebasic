@@ -18,16 +18,21 @@ enum class SourceKind { Root, Path, Git, Registry };
 /// A package that's part of a resolved dependency graph: its manifest, the
 /// canonical absolute directory it was resolved to, how it was reached
 /// (`sourceKind`), and (only for `Git`/`Registry`) the exact commit it was
-/// checked out at. `version` is only set for `Registry` - the concrete
-/// version REG-4's resolver picked to satisfy whichever requirement
-/// reached it first.
+/// checked out at. `version`/`registryGit`/`registryRef` are only
+/// meaningful when `sourceKind == Registry` - the concrete version REG-4's
+/// resolver picked (to satisfy whichever requirement reached it first) and
+/// the resolved git URL/ref behind it, both needed by REG-5's lockfile so
+/// a pinned rebuild never has to consult the index again (a registry
+/// dependency has no URL in the manifest itself, unlike `git`).
 struct ResolvedPackage {
     std::string name;
     std::string dir; // canonical absolute path
     Manifest manifest;
     std::string gitCommit;
     SourceKind sourceKind = SourceKind::Root;
-    std::string version; // only meaningful when sourceKind == Registry
+    std::string version;
+    std::string registryGit;
+    std::string registryRef;
 };
 
 /// Resolves the full transitive dependency graph rooted at `rootDir`,
