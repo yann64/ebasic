@@ -142,6 +142,16 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/lib_and_app myapp
 )
 
+# A [lib] package's own Extern "C" Lib clause (wrapping a real, separately-
+# compiled C library) must reach a downstream *consumer*'s final link step
+# too, even though the consumer only ever #includes the auto-generated
+# wraplib.iface.bas (which never mentions "ebfixturec" itself - see ebc's
+# own .libs sidecar file and build.cpp's appendLibsSidecar).
+add_test(
+    NAME e2e_pkg_lib_and_app_extern_lib
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/lib_and_app_extern_lib myapp run ${EBASIC_FIXTURE_LIB_DIR}
+)
+
 # OS-conditional dependencies: [target.<os>.dependencies] resolves only the
 # current platform's own section (proven by only its lib actually getting
 # built - see collectTransitiveDeps/effectiveDependencies in build.cpp/

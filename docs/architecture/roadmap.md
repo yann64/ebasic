@@ -1046,6 +1046,71 @@ with zero new warnings.
 documenting the feature, cross-linked from the existing `Pointers`
 reference page.
 
+## Post-1.0: `ebpm` Forwards a Dependency's Own `Lib` Clauses Transitively
+
+Found while building `eb-gtk4` (the same downstream project that motivated
+`@ProcName` above): a `[lib]` package wrapping a native C library (e.g.
+`Extern "C" Lib "gtk-4"`) built and linked *itself* just fine, but any
+package depending on it failed the final link with undefined references to
+every raw C symbol - confirmed live with a minimal two-package reproduction
+(a `mygtk` lib wrapping one real `gtk_get_major_version()` call, consumed
+by a `consumer` app via a path dependency) before writing any fix, not
+assumed. Root cause, confirmed by reading `<output>.iface.bas`'s real
+generated content: `ebc --lib`'s auto-generated interface only ever names
+*that package's own* archive (`Extern "C++" Lib "mygtk" ... End Extern`) -
+a raw system library the package's own `Extern` declarations need
+contributes no new symbol to the archive for the interface generator to
+notice, so that information had nowhere to go at all. The existing
+`-l <name>` / `Options::extraLibNames` plumbing in `ebc` (added for M5c's
+transitive-linking case) was already exactly the right mechanism - it
+just had no way to learn a dependency's raw lib names, only its package
+name.
+
+**Also found, while probing why this hadn't already broken every existing
+test**: `ebpm test`'s own fixtures happened to dodge this gap entirely by
+`#include`-ing a package's *raw source* directly rather than its generated
+interface (this project's own `eb-gtk4` test suite did the same, by
+choice) - a real, working pattern, but not the one `ebpm`'s documented
+dependency mechanism (`[dependencies]` + the generated `.iface.bas`) is
+built around, so the gap was real for any genuine cross-package consumer
+despite every existing golden test passing.
+
+Fix: `ebc --lib` now also writes `<output>.libs` (plain text, one `Lib
+"name"` per line - see `ebc`'s own updated usage text and
+`docs/guide/ebc.md`) alongside the archive and interface file. `ebpm`
+(`pkg/src/build.cpp`) gained `appendLibsSidecar`, called from both
+`buildPackageWithDeps` (a real downstream package's own build) and
+`computeConsumerDirs` (`ebpm run`/`test`'s dependency-graph resolution) for
+every transitive dependency (and, in `computeConsumerDirs`, the root
+package's own sidecar too, for a test that includes the root's generated
+interface rather than its raw source) - each dependency's raw lib names
+are merged in, deduplicated, alongside its package name, in the same
+`extraLibNames` list `ebc` already consumes.
+
+New e2e test `tests/e2e_pkg/lib_and_app_extern_lib` (a `wraplib` package
+wrapping the same real `ebfixturec` C library the plain `e2e/extern_c`
+test already links against, consumed by an app via a path dependency) -
+deliberately reuses existing, already-CI-available fixture infrastructure
+rather than requiring GTK4 (not installed on this project's own CI
+runners) just to prove the general mechanism. `tests/e2e_pkg/run_case.sh`
+gained an optional 6th argument (a fixture lib directory), exported as
+`LIBRARY_PATH` (a real `g++`/`clang++` environment variable adding extra
+`-L` search directories) before invoking `ebpm`, since `ebpm` itself has
+no `-L`-equivalent of its own to thread through.
+
+Verified: the original two-package reproduction now succeeds end-to-end
+(`consumer` prints `4`, GTK4's real installed major version, through two
+package boundaries); the new e2e test plus the full existing suite
+(36/36) passing; a clean `-Wall -Wextra` rebuild from scratch with zero
+new warnings.
+
+**Still open, deliberately deferred** (per the plan's own Linux-first
+platform scoping): this closes the `-l` gap on every platform, but not the
+separate `-L` (search *path*) gap for a library installed somewhere other
+than the linker's default search path (e.g. Homebrew's `/opt/homebrew/lib`
+on macOS) - `ebpm` still has no manifest field for that, tracked as a
+distinct follow-on if/when it actually blocks a real build.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

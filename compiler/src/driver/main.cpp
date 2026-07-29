@@ -122,8 +122,10 @@ void printUsage(std::ostream& os) {
     os << "           [-l <name>]... [--keep-cpp] [--lib]\n";
     os << "       ebc [-v | --version] [-h | --help]\n";
     os << "  --lib: build a library instead of an executable - <output> is a bare\n";
-    os << "  name; produces lib<output>.a (a static archive) and <output>.iface.bas\n";
-    os << "  (an auto-generated interface for dependent packages to #include).\n";
+    os << "  name; produces lib<output>.a (a static archive), <output>.iface.bas\n";
+    os << "  (an auto-generated interface for dependent packages to #include), and\n";
+    os << "  <output>.libs (this archive's own Lib \"name\" clauses, one per line -\n";
+    os << "  for a build tool to forward to a downstream consumer's own link step).\n";
     os << "  -I <dir>: extra #include search path, consulted only after the\n";
     os << "  includer-relative lookup fails.\n";
     os << "  -l <name>: extra library to link, alongside any already named by the\n";
@@ -378,6 +380,15 @@ int main(int argc, char** argv) {
         fs::path objPath = opts.outputPath + ".o";
         fs::path archivePath = outDir / ("lib" + libName + ".a");
         fs::path ifacePath = outDir / (libName + ".iface.bas");
+        /// Sidecar file (M5c fast-follow): the archive's own `Lib "name"`
+        /// clauses (M4), one per line - `.iface.bas`'s own `Extern "C++"`
+        /// block only ever names *this* package's own archive, never a raw
+        /// system library a package's Extern declarations (rather than a
+        /// bodied SUB/FUNCTION) merely re-declare, so that information would
+        /// otherwise be lost the moment a *different* package `ebpm build`s
+        /// against this one - see pkg/src/build.cpp's own use of this file
+        /// for why a downstream consumer needs it forwarded transitively.
+        fs::path libsPath = outDir / (libName + ".libs");
 
         std::vector<std::string> compileArgs = {cxx, "-std=c++17"};
         for (const std::string& a : runtimeIncludeArgs(argv[0])) compileArgs.push_back(a);
@@ -393,6 +404,8 @@ int main(int argc, char** argv) {
         if (rc == 0) {
             std::ofstream ifaceOut(ifacePath);
             ifaceOut << codegen.generateLibraryInterface(module, libName);
+            std::ofstream libsOut(libsPath);
+            for (const std::string& lib : codegen.externLibs()) libsOut << lib << "\n";
         }
         std::error_code ec;
         fs::remove(objPath, ec);

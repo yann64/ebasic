@@ -1,0 +1,10 @@
+[package]
+name = "myapp"
+version = "0.1.0"
+
+[bin]
+name = "myapp"
+path = "src/main.bas"
+
+[dependencies]
+wraplib = { path = "../wraplib" }

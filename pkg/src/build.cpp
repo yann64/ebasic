@@ -4,6 +4,7 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <unordered_map>
 #include <unordered_set>
@@ -11,6 +12,29 @@
 namespace fs = std::filesystem;
 
 namespace ebpm {
+
+namespace {
+
+/// Reads `<targetDir>/<pkgName>.libs` (ebc --lib's sidecar of that
+/// package's own `Lib "name"` clauses, one per line - see ebc's own
+/// doc comment) if present, appending each into `out` (deduplicated
+/// against what's already there). Absent for a dependency built by an
+/// older ebc that predates this file, or one with no Extern Lib clauses
+/// at all - either way, nothing to add, not an error.
+void appendLibsSidecar(const std::string& targetDir, const std::string& pkgName,
+                        std::vector<std::string>& out, std::unordered_set<std::string>& seen) {
+    fs::path libsPath = fs::path(targetDir) / (pkgName + ".libs");
+    std::ifstream in(libsPath);
+    if (!in) return;
+    std::string line;
+    while (std::getline(in, line)) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
+        if (line.empty()) continue;
+        if (seen.insert(line).second) out.push_back(line);
+    }
+}
+
+} // namespace
 
 std::string ebcCommand() {
     const char* envEbc = std::getenv("EBC");
@@ -173,11 +197,19 @@ int buildPackageWithDeps(const std::string& rootDir, std::string& err) {
         std::vector<std::string> extraIncludeDirs;
         std::vector<std::string> extraLibDirs;
         std::vector<std::string> extraLibNames;
+        std::unordered_set<std::string> seenLibNames;
+        for (const std::string& lib : extraLibNames) seenLibNames.insert(lib);
         for (const ResolvedPackage* dep : transitiveDeps) {
             std::string depTargetDir = (fs::path(dep->dir) / "target").string();
             extraIncludeDirs.push_back(depTargetDir);
             extraLibDirs.push_back(depTargetDir);
-            extraLibNames.push_back(dep->name);
+            if (seenLibNames.insert(dep->name).second) extraLibNames.push_back(dep->name);
+            /// A dependency's own raw system-library needs (e.g. a GTK4
+            /// binding's `Lib "gtk-4"`) never show up in its own name
+            /// (`-l<dep->name>` above only links *that dependency's own
+            /// archive*) - see appendLibsSidecar's doc comment for why this
+            /// needs a separate file at all.
+            appendLibsSidecar(depTargetDir, dep->name, extraLibNames, seenLibNames);
         }
         int rc = buildPackage(pkg.manifest, pkg.dir, extraIncludeDirs, extraLibDirs, extraLibNames, err);
         if (rc != 0) return rc;
@@ -208,11 +240,13 @@ bool computeConsumerDirs(const std::string& rootDir, std::vector<std::string>& i
     std::vector<const ResolvedPackage*> transitiveDeps;
     collectTransitiveDeps(root, byName, seen, transitiveDeps);
 
+    std::unordered_set<std::string> seenLibNames;
     for (const ResolvedPackage* dep : transitiveDeps) {
         std::string depTargetDir = (fs::path(dep->dir) / "target").string();
         includeDirs.push_back(depTargetDir);
         libDirs.push_back(depTargetDir);
-        libNames.push_back(dep->name);
+        if (seenLibNames.insert(dep->name).second) libNames.push_back(dep->name);
+        appendLibsSidecar(depTargetDir, dep->name, libNames, seenLibNames);
     }
     /// The root's *own* target dir/name too - unlike buildPackageWithDeps's
     /// per-package loop (which never needs a package to see its own output
@@ -223,7 +257,8 @@ bool computeConsumerDirs(const std::string& rootDir, std::vector<std::string>& i
         std::string rootTargetDir = (fs::path(root.dir) / "target").string();
         includeDirs.push_back(rootTargetDir);
         libDirs.push_back(rootTargetDir);
-        libNames.push_back(root.name);
+        if (seenLibNames.insert(root.name).second) libNames.push_back(root.name);
+        appendLibsSidecar(rootTargetDir, root.name, libNames, seenLibNames);
     }
     return true;
 }
