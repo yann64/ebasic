@@ -1,0 +1,11 @@
+[package]
+name = "multiref_app"
+version = "0.1.0"
+
+[bin]
+name = "multiref_app"
+path = "src/main.bas"
+
+[dependencies]
+libv1 = { git = "@GIT_URL@", tag = "v1" }
+libv2 = { git = "@GIT_URL@", tag = "v2" }

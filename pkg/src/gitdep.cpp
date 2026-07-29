@@ -51,7 +51,21 @@ std::string trimTrailingNewline(std::string s) {
 
 bool resolveGitDependency(const Dependency& dep, const std::string& pinnedCommit,
                           std::string& resolvedDir, std::string& resolvedCommit, std::string& err) {
-    fs::path cacheDir = gitCacheRoot() / sanitizeForDirName(dep.git);
+    /// Cache-directory key: the URL, plus (if the manifest names one) the
+    /// declared branch/tag/rev - deliberately NOT the pinned commit, which
+    /// differs between an unpinned first resolution and a pinned repeat
+    /// build of the exact same edge and would otherwise force a needless
+    /// re-clone the moment a lockfile pin appears. Widening the key at all
+    /// (beyond the URL alone, as before) fixes a real collision: two
+    /// different dependency edges naming the *same* URL at *different*
+    /// refs (e.g. two versions of one registry-published package, tagged
+    /// v1.0.0/v1.1.0 in one repo) used to share a single mutable checkout,
+    /// so the second edge's checkout silently mutated the first edge's
+    /// already-resolved working tree out from under it - never exercised
+    /// by any single-ref e2e case until the registry made it likely.
+    std::string selector = !dep.branch.empty() ? dep.branch : (!dep.tag.empty() ? dep.tag : dep.rev);
+    std::string cacheKey = dep.git + (selector.empty() ? "" : ("@" + selector));
+    fs::path cacheDir = gitCacheRoot() / sanitizeForDirName(cacheKey);
     std::error_code ec;
     fs::create_directories(gitCacheRoot(), ec);
 

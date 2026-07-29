@@ -186,6 +186,14 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_git_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/lib_and_app_git
 )
 
+# REG-0: two dependency edges naming the same git URL at different refs
+# (tags) must resolve independently, not silently share one mutable
+# checkout - see gitdep.cpp's resolveGitDependency cache-key comment.
+add_test(
+    NAME e2e_pkg_git_same_url_diff_refs
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_git_multiref_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/git_same_url_diff_refs
+)
+
 # M5e: `ebpm test` on a [lib] package with one passing tests/*.bas file.
 add_test(
     NAME e2e_pkg_lib_with_tests

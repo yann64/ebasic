@@ -1,0 +1,3 @@
+FUNCTION LibV2Value() AS INTEGER
+    LibV2Value = 2
+END FUNCTION

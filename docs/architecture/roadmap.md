@@ -1265,6 +1265,49 @@ both confirmed no longer crash with `EBASIC_LIBRARY_PATH` set to the same
 directory that broke `LIBRARY_PATH`, and the full suite green on Haiku
 including `e2e_pkg_lib_and_app_extern_lib`.
 
+## `ebpm` central package index/registry (REG-0 through REG-9, in progress)
+
+A Cargo-like `ebpm add <name>` experience: a central index of published
+packages (each with real, multiple versions), real SemVer constraint
+matching, and dependency-management commands (`add`/`remove`/`list`/
+`search`/`update`) - un-deferring two design decisions this project made
+early on ("central registry deferred indefinitely", "SemVer range
+resolution deferred indefinitely"). See the approved plan for the full
+design (resolver integration, lockfile reproducibility guarantee, index
+format) - Implementation Notes land here per slice as each one completes.
+
+### REG-0 Implementation Notes (gitdep.cpp cache-key fix, done)
+
+Found and fixed *before* building anything registry-specific on top of it:
+`gitdep.cpp`'s cache directory was keyed by git URL only
+(`gitCacheRoot() / sanitizeForDirName(dep.git)`), with no ref/tag/commit
+component. Two dependency edges naming the *same* URL at *different* refs
+collided - the second `resolveGitDependency` call mutated the first edge's
+already-checked-out working tree in place, and `resolve.cpp`'s
+directory-keyed dedup meant the second edge's manifest was never even
+re-read, silently leaving it pointed at stale, wrong-version content on
+disk. Already a latent bug (no prior e2e case ever exercised two refs of
+one URL), but the registry makes it *likely*: an index author naturally
+publishes multiple versions of one package as multiple tags in one repo.
+
+Fixed by widening the cache-directory key to include the manifest's
+*declared* selector (`branch`/`tag`/`rev` - deliberately not the resolved
+*pinned commit*, which differs between an unpinned first resolution and a
+pinned repeat build of the exact same edge, and would otherwise force a
+needless extra clone the moment a lockfile pin appears). Each distinct
+`(url, declared ref)` pair now gets its own clone; the common "no ref at
+all" case is untouched (same cache dir as before, fully backward
+compatible).
+
+Verified empirically before *and* after: temporarily reverted the fix and
+confirmed the new `e2e_pkg_git_same_url_diff_refs` test (two path-adjacent
+dependencies, `libv1`/`libv2`, both pointing at one fake bare repo tagged
+`v1`/`v2`) fails exactly as predicted - the second library is never even
+built, main.bas's `#include "libv2.iface.bas"` fails outright, because the
+shared checkout thrashed between refs on every `git checkout` call. Restored
+the fix, confirmed the same test passes; full suite (39/39) green, clean
+`-Wall -Wextra -Werror` rebuild.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
