@@ -1,0 +1,11 @@
+[package]
+name = "app2"
+version = "0.1.0"
+
+[bin]
+name = "app2"
+path = "src/main.bas"
+
+[dependencies]
+regmathlib = "^1.0"
+wrapper = { path = "../wrapper" }

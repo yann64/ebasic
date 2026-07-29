@@ -208,6 +208,13 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_index_case.sh $<TARGET_FILE:index_test>
 )
 
+# REG-4: a real registry dependency end to end (happy path + conflict
+# detection), against real fake "index" and "library" bare repos.
+add_test(
+    NAME e2e_pkg_registry_dep
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_registry_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/registry_dep
+)
+
 # M5e: `ebpm test` on a [lib] package with one passing tests/*.bas file.
 add_test(
     NAME e2e_pkg_lib_with_tests

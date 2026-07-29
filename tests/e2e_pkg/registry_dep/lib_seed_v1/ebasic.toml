@@ -1,0 +1,6 @@
+[package]
+name = "regmathlib"
+version = "1.0.0"
+
+[lib]
+path = "src/lib.bas"

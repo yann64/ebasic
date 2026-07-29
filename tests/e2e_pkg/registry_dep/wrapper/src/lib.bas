@@ -1,0 +1,3 @@
+FUNCTION Noop() AS INTEGER
+    Noop = 0
+END FUNCTION

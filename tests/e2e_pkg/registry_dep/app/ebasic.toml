@@ -1,0 +1,10 @@
+[package]
+name = "regapp"
+version = "0.1.0"
+
+[bin]
+name = "regapp"
+path = "src/main.bas"
+
+[dependencies]
+regmathlib = "^1.0"

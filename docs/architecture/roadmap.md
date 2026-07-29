@@ -1397,6 +1397,51 @@ one while silently skipping the bad one.
 Verified: full suite (42/42) passing, clean `-Wall -Wextra -Werror`
 rebuild.
 
+### REG-4 Implementation Notes (resolver integration, done - the crux slice)
+
+`resolve.cpp`'s DFS gains a third per-dependency branch (alongside `path`
+and `git`) for a `version`-only `Dependency`: look up the package in the
+index (REG-3), pick the highest version satisfying the requirement
+(REG-1's `pickBestSatisfying`), then resolve that version's own `git`/`tag`
+via the *existing*, unmodified `resolveGitDependency` (a synthetic
+`Dependency` built from the chosen `IndexVersionEntry` - identical shape to
+a hand-written git dependency) - exactly the "zero changes to `gitdep.cpp`,
+zero changes to `visit`'s own recursion" design the plan called for. A
+registry-resolved package's own transitive dependencies (which might
+themselves be path/git/further-registry) are walked by the exact same DFS
+loop with no special-casing needed deeper in, since `visit` already reads
+`ebasic.toml` fresh *after* a directory is concretely resolved, uniformly
+for every dependency kind.
+
+A new memo map, `resolvedRegistryVersions` (keyed by package **name**, not
+directory - deliberately separate from `resolvedByDir`), makes this
+deliberately non-backtracking: the first requirer of a given package name
+picks its version; a later requirer elsewhere in the graph reuses that pick
+if it's still compatible with their own requirement, or gets a hard,
+clearly-messaged error naming both requirers and both requirements if not
+("no version of 'regmathlib' satisfies both ^1.0 (required by app2) and
+^2.0 (required by wrapper)"). `ResolvedPackage` gained `SourceKind` (`Root`/
+`Path`/`Git`/`Registry`) and `version` fields, threaded through `visit`'s
+signature itself (not derived after the fact), since a diamond dependency's
+node is only ever pushed to `order` once, by whichever edge reaches it
+first.
+
+Verified via a new `tests/e2e_pkg/run_registry_case.sh`, standing up real
+local bare "index" and "library" repos (the library tagged `v1.0.0`/
+`v2.0.0` - a major bump) and exercising two scenarios against the same
+seed: a happy path (`regmathlib = "^1.0"` correctly resolves to `1.0.0`,
+excluding `2.0.0`, builds, and runs) and a genuine conflict (a diamond -
+`app2` wants `regmathlib ^1.0` directly and `^2.0` transitively via
+`wrapper` - rejected with the exact expected error). Both passed on the
+first run. Full suite (43/43), clean `-Wall -Wextra -Werror` rebuild.
+
+Known, deliberate gap left for REG-5: a registry dependency still consults
+the index on *every* resolution, even when `ebasic.lock` already pins a
+commit for it (unlike a plain `git` dependency's pinned rebuild, which
+needs no live index/branch lookup at all) - because the lockfile doesn't
+yet record which `git`/`tag` a registry pick resolved to, only `resolve.
+cpp`'s in-memory synthetic `Dependency` knows that. REG-5 closes this gap.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
