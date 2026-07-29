@@ -152,6 +152,14 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/lib_and_app_extern_lib myapp run ${EBASIC_FIXTURE_LIB_DIR}
 )
 
+# A derived, plain-data TYPE (EXTENDS, no methods anywhere in its chain)
+# must be exported across a --lib boundary along with its base(s) - see
+# generateLibraryInterface's isExportablePlainData/emitType in codegen.cpp.
+add_test(
+    NAME e2e_pkg_lib_and_app_extends
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/lib_and_app_extends myapp
+)
+
 # OS-conditional dependencies: [target.<os>.dependencies] resolves only the
 # current platform's own section (proven by only its lib actually getting
 # built - see collectTransitiveDeps/effectiveDependencies in build.cpp/

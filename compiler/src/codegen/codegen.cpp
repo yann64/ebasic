@@ -1,6 +1,7 @@
 #include "codegen/codegen.hpp"
 
 #include <cctype>
+#include <functional>
 #include <stdexcept>
 
 namespace ebasic {
@@ -996,20 +997,56 @@ std::string Codegen::generateLibraryInterface(const Module& module, const std::s
     std::ostringstream declsText;
     std::ostringstream skippedText;
 
+    /// Canonical TYPE/UNION name -> its own Stmt, so a derived record's
+    /// EXTENDS chain can be walked without a second pass over module.stmts.
+    std::unordered_map<std::string, const Stmt*> typesByName;
+    for (const auto& stmtPtr : module.stmts) {
+        if (stmtPtr->kind == StmtKind::TypeDecl || stmtPtr->kind == StmtKind::UnionDecl) {
+            typesByName[canonicalName(stmtPtr->name)] = stmtPtr.get();
+        }
+    }
+
+    /// A plain-data or opaque record (no methods/ctor/dtor anywhere in its
+    /// own EXTENDS chain, transitively) is safe to duplicate verbatim
+    /// across translation units, exactly like a C header's struct
+    /// definition is - a record with methods is not (yet) exportable
+    /// across a library boundary (no equivalent mechanism exists yet for
+    /// calling a method across it), and neither is a record that EXTENDS
+    /// one, even if it adds no methods of its own: the generated `EXTENDS
+    /// Base` line would otherwise reference a TYPE this interface never
+    /// declares.
+    std::function<bool(const Stmt&)> isExportablePlainData = [&](const Stmt& s) -> bool {
+        if (!s.methods.empty()) return false;
+        if (s.baseTypeName.empty()) return true;
+        auto it = typesByName.find(canonicalName(s.baseTypeName));
+        return it != typesByName.end() && isExportablePlainData(*it->second);
+    };
+
+    /// Emits `s` (and, first, its base - EXTENDS's dependency, exactly like
+    /// genTypeDecl's own field/base handling) at most once, regardless of
+    /// how many derived types or plain field references reach it first.
+    std::unordered_set<std::string> typesEmitted;
+    std::function<void(const Stmt&)> emitType = [&](const Stmt& s) {
+        std::string key = canonicalName(s.name);
+        if (!typesEmitted.insert(key).second) return;
+        if (!s.baseTypeName.empty()) {
+            auto it = typesByName.find(canonicalName(s.baseTypeName));
+            if (it != typesByName.end()) emitType(*it->second);
+        }
+        typesText << (s.kind == StmtKind::UnionDecl ? "UNION " : "TYPE ") << s.name;
+        if (!s.baseTypeName.empty()) typesText << " EXTENDS " << s.baseTypeName;
+        typesText << "\n";
+        for (const FieldDecl& field : s.fields) {
+            typesText << "    " << field.name << " AS " << basicTypeName(field.type) << "\n";
+        }
+        typesText << (s.kind == StmtKind::UnionDecl ? "END UNION" : "END TYPE") << "\n\n";
+    };
+
     for (const auto& stmtPtr : module.stmts) {
         const Stmt& stmt = *stmtPtr;
         if ((stmt.kind == StmtKind::TypeDecl || stmt.kind == StmtKind::UnionDecl) &&
-            stmt.methods.empty() && stmt.baseTypeName.empty()) {
-            /// A plain-data or opaque record (no methods/ctor/dtor, no
-            /// EXTENDS) - safe to duplicate verbatim across translation
-            /// units, exactly like a C header's struct definition is. A
-            /// record with methods is not (yet) exportable across a
-            /// library boundary - skipped here, deferred.
-            typesText << (stmt.kind == StmtKind::UnionDecl ? "UNION " : "TYPE ") << stmt.name << "\n";
-            for (const FieldDecl& field : stmt.fields) {
-                typesText << "    " << field.name << " AS " << basicTypeName(field.type) << "\n";
-            }
-            typesText << (stmt.kind == StmtKind::UnionDecl ? "END UNION" : "END TYPE") << "\n\n";
+            isExportablePlainData(stmt)) {
+            emitType(stmt);
         } else if ((stmt.kind == StmtKind::SubDecl || stmt.kind == StmtKind::FunctionDecl) &&
                    stmt.ownerType.empty() && !stmt.isExtern) {
             /// Only export a signature whose C++ representation is

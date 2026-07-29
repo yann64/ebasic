@@ -1111,6 +1111,33 @@ than the linker's default search path (e.g. Homebrew's `/opt/homebrew/lib`
 on macOS) - `ebpm` still has no manifest field for that, tracked as a
 distinct follow-on if/when it actually blocks a real build.
 
+## Post-1.0: `--lib`'s Interface Generator Drops a Derived (EXTENDS) TYPE
+
+Found immediately after the `Lib`-forwarding fix above, building
+`eb-gtk4`'s actual wrapper-type hierarchy (`TYPE Widget EXTENDS Obj`,
+`TYPE Button EXTENDS Widget`, ...): `generateLibraryInterface` required
+`stmt.baseTypeName.empty()` to export a TYPE at all, so *every* derived
+TYPE - even one with zero fields of its own beyond what it inherits, the
+exact shape a wrapper hierarchy has - was silently dropped from
+`.iface.bas` entirely, while the free functions taking/returning it were
+still exported and now referenced a TYPE the interface never declared.
+Confirmed live before fixing: a real two-package reproduction
+(`gtk4`/`gtk4consumer`) failed with `unknown TYPE 'Button'` the moment the
+consumer tried to use it.
+
+Fix: `generateLibraryInterface` (`compiler/src/codegen/codegen.cpp`) now
+exports a derived TYPE too, as long as it (and, transitively, every TYPE
+in its own `EXTENDS` chain) is still method/ctor/dtor-free -
+`isExportablePlainData` checks the whole chain, and `emitType` emits a
+base before the derived TYPE that extends it (mirroring `genTypeDecl`'s
+own established "dependency first" pattern in the same file), each TYPE
+emitted at most once regardless of how many derived types or plain field
+references reach it. New e2e test `tests/e2e_pkg/lib_and_app_extends`
+(a two-level `Shape` -> `Colored` -> `Circle` chain, the last link adding
+no fields of its own) - verified: the original two-package reproduction
+now succeeds; the new test plus the full suite (37/37) passing; a clean
+rebuild.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
