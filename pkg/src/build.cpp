@@ -34,6 +34,37 @@ void appendLibsSidecar(const std::string& targetDir, const std::string& pkgName,
     }
 }
 
+/// Splits a PATH-style, `:`-separated list of directories (empty segments
+/// skipped) - the format `EBASIC_LIBRARY_PATH` below uses.
+std::vector<std::string> splitPathList(const std::string& value) {
+    std::vector<std::string> out;
+    size_t start = 0;
+    while (start <= value.size()) {
+        size_t pos = value.find(':', start);
+        if (pos == std::string::npos) pos = value.size();
+        if (pos > start) out.push_back(value.substr(start, pos - start));
+        start = pos + 1;
+    }
+    return out;
+}
+
+/// A real, external (non-ebpm) system library's own search directory - e.g.
+/// wherever `libgtk-4` lives, or this project's own e2e fixtures' hand-built
+/// `libebfixturec.a` - has no manifest/CLI representation today, only a
+/// dependency *package*'s own target dir does (see the transitive-deps loop
+/// below). `EBASIC_LIBRARY_PATH` (a `:`-separated list, read once here) is
+/// the escape hatch: forwarded as `-L` to every `ebc` invocation, exactly
+/// like a dependency's target dir already is. Deliberately a distinct,
+/// ebasic-specific name, never the real `LIBRARY_PATH` - on Haiku, that
+/// exact name is also consulted by the OS's own runtime_loader, and
+/// pointing it at a directory holding only unrelated static archives
+/// silently breaks *any* process on that platform, not just `ebc`
+/// (confirmed by direct reproduction: even a bare `ls` crashed).
+std::vector<std::string> externalLibraryDirs() {
+    const char* envPath = std::getenv("EBASIC_LIBRARY_PATH");
+    return envPath ? splitPathList(envPath) : std::vector<std::string>{};
+}
+
 } // namespace
 
 std::string ebcCommand() {
@@ -189,13 +220,15 @@ int buildPackageWithDeps(const std::string& rootDir, std::string& err) {
     std::unordered_map<std::string, const ResolvedPackage*> byName;
     for (const ResolvedPackage& pkg : order) byName[pkg.name] = &pkg;
 
+    std::vector<std::string> externalLibDirs = externalLibraryDirs();
+
     for (const ResolvedPackage& pkg : order) {
         std::unordered_set<std::string> seen;
         std::vector<const ResolvedPackage*> transitiveDeps;
         collectTransitiveDeps(pkg, byName, seen, transitiveDeps);
 
         std::vector<std::string> extraIncludeDirs;
-        std::vector<std::string> extraLibDirs;
+        std::vector<std::string> extraLibDirs = externalLibDirs;
         std::vector<std::string> extraLibNames;
         std::unordered_set<std::string> seenLibNames;
         for (const std::string& lib : extraLibNames) seenLibNames.insert(lib);
@@ -239,6 +272,8 @@ bool computeConsumerDirs(const std::string& rootDir, std::vector<std::string>& i
     std::unordered_set<std::string> seen;
     std::vector<const ResolvedPackage*> transitiveDeps;
     collectTransitiveDeps(root, byName, seen, transitiveDeps);
+
+    for (const std::string& dir : externalLibraryDirs()) libDirs.push_back(dir);
 
     std::unordered_set<std::string> seenLibNames;
     for (const ResolvedPackage* dep : transitiveDeps) {

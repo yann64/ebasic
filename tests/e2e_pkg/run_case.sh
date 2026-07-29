@@ -21,10 +21,12 @@ EBPM_COMMAND="${5:-run}"
 # Optional (M5c fast-follow): a directory holding a real, separately-built
 # system-style library (e.g. the shared ebfixturec used by the plain e2e/
 # extern_* tests) that a fixture package's own Extern "C" Lib clause needs
-# to actually link against - exported as LIBRARY_PATH (a genuine g++/
-# clang++ environment variable adding extra -L search dirs to every
-# invocation) rather than threaded through ebpm's own CLI, since ebpm has
-# no manifest/CLI mechanism for extra linker search paths at all.
+# to actually link against - exported as EBASIC_LIBRARY_PATH, ebpm's own
+# extra-linker-search-path mechanism (see build.cpp's externalLibraryDirs).
+# Deliberately not the real LIBRARY_PATH: on Haiku, that exact name is also
+# consulted by the OS's own runtime_loader, and pointing it at a directory
+# holding only unrelated static archives silently breaks any process on
+# that platform, not just ebc (confirmed by direct reproduction).
 FIXTURE_LIB_DIR="${6:-}"
 
 WORKDIR="$(mktemp -d)"
@@ -38,7 +40,7 @@ rm -f "$WORKDIR/expected.stdout"
 
 export EBC="$EBC"
 if [ -n "$FIXTURE_LIB_DIR" ]; then
-    export LIBRARY_PATH="$FIXTURE_LIB_DIR${LIBRARY_PATH:+:$LIBRARY_PATH}"
+    export EBASIC_LIBRARY_PATH="$FIXTURE_LIB_DIR${EBASIC_LIBRARY_PATH:+:$EBASIC_LIBRARY_PATH}"
 fi
 ACTUAL="$WORKDIR/.actual.stdout"
 RUN_LOG="$WORKDIR/.ebpm_run.log"

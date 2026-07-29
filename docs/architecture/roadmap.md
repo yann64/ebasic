@@ -1227,6 +1227,44 @@ call-argument, and a return-assignment, all reusing the file's existing
 GTK-independent repro (`DIM np AS Node PTR : np = anyP`) recompiles and
 runs correctly.
 
+## Fixed: `ebpm`'s `LIBRARY_PATH` workaround broke every process on real Haiku hardware
+
+Found while running the real Haiku verification for the fix above:
+`e2e_pkg_lib_and_app_extern_lib` (added by the "forward a dependency's own
+`Lib` clauses transitively" work, never previously checked on real Haiku
+hardware) failed there, but nowhere else. Root cause had nothing to do with
+that feature or with the `ANY PTR` fix - `tests/e2e_pkg/run_case.sh` passed
+a fixture library's directory to `ebpm` via the real `LIBRARY_PATH`
+environment variable (the one genuine mechanism available, since `ebpm`
+itself had no manifest/CLI concept of an external system library's search
+directory - see the two "Post-1.0" entries above). On Linux/macOS that's a
+harmless, g++/clang++-only, link-time-only convention. On Haiku, the exact
+same name is *also* consulted by the OS's own runtime_loader for dynamic
+library resolution - pointing it at a directory holding only unrelated
+static archives broke process startup entirely, confirmed by direct
+reproduction on real Haiku hardware: even a bare `ls` crashed silently
+(exit 3, zero output) with that `LIBRARY_PATH` set.
+
+Fix: gave `ebpm` a real, first-class mechanism instead of relying on the
+compiler's own environment-variable convention at all. A new
+`EBASIC_LIBRARY_PATH` environment variable (`:`-separated, read once in
+`build.cpp`'s new `externalLibraryDirs()`) is forwarded as `-L` to every
+`ebc` invocation, in both `buildPackageWithDeps` (every package in the
+graph) and `computeConsumerDirs` (`ebpm test`'s consumer-side compile) -
+deliberately a distinct, ebasic-specific name so it can never collide with
+anything OS- or toolchain-reserved, on any platform. `tests/e2e_pkg/
+run_case.sh` now exports `EBASIC_LIBRARY_PATH` instead of `LIBRARY_PATH`;
+documented in `docs/guide/ebpm.md`. This is also a genuine capability
+improvement for real users, not just a test-only workaround - previously
+there was no way at all for an `ebpm` package (e.g. a real GTK4 binding) to
+tell `ebpm build` where its wrapped system library actually lives.
+
+Verified: full suite (38/38) passing locally, a clean `-Wall -Wextra
+-Werror` rebuild, and a second real Haiku hardware run - `ebpm build`/`ls`
+both confirmed no longer crash with `EBASIC_LIBRARY_PATH` set to the same
+directory that broke `LIBRARY_PATH`, and the full suite green on Haiku
+including `e2e_pkg_lib_and_app_extern_lib`.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

@@ -41,23 +41,28 @@ int buildPackage(const Manifest& manifest, const std::string& packageDir,
 /// direct dependencies (needed so a chain like app -> mid -> base still links
 /// `base` into `app`'s final binary even though `app`'s own source never
 /// `#include`s `base`'s interface file directly) - and writes/updates
-/// `<rootDir>/ebasic.lock`. Returns the first non-zero ebc exit code
-/// encountered (0 on success); `err` is set for a resolution/orchestration
-/// failure that never reaches ebc at all (an unresolvable path, a cycle, a
-/// dependency with no [lib] target, a git dependency - not supported until
-/// M5d).
+/// `<rootDir>/ebasic.lock`. Every package also receives `-L` for each
+/// directory named in the `EBASIC_LIBRARY_PATH` environment variable (a
+/// `:`-separated list, read once) - the one mechanism for a real, external
+/// (non-ebpm) system library's search directory, e.g. a `Lib "gtk-4"`
+/// binding's actual `libgtk-4` location (see docs/guide/ebpm.md). Returns
+/// the first non-zero ebc exit code encountered (0 on success); `err` is set
+/// for a resolution/orchestration failure that never reaches ebc at all (an
+/// unresolvable path, a cycle, a dependency with no [lib] target, a git
+/// dependency - not supported until M5d).
 int buildPackageWithDeps(const std::string& rootDir, std::string& err);
 
 /// Computes the `-I`/`-L`/`-l` a *consumer* of the root package would need -
 /// its entire transitive dependency closure (same as buildPackageWithDeps
-/// gives the root itself), plus, if the root has a [lib] target, the root's
-/// *own* target directory/name too (so a consumer can `#include` and link
-/// the root's own interface, exactly like an external dependent package
-/// would). Used by `ebpm test` (M5e): each `tests/*.bas` file is compiled as
-/// a *consumer* of the package under test, not as another build target of
-/// the package itself. Does not build anything - call buildPackageWithDeps
-/// first if the package/its dependencies aren't already built. `err` is set
-/// for a resolution failure (same causes as resolveDependencyGraph).
+/// gives the root itself, including `EBASIC_LIBRARY_PATH`), plus, if the
+/// root has a [lib] target, the root's *own* target directory/name too (so a
+/// consumer can `#include` and link the root's own interface, exactly like
+/// an external dependent package would). Used by `ebpm test` (M5e): each
+/// `tests/*.bas` file is compiled as a *consumer* of the package under test,
+/// not as another build target of the package itself. Does not build
+/// anything - call buildPackageWithDeps first if the package/its
+/// dependencies aren't already built. `err` is set for a resolution failure
+/// (same causes as resolveDependencyGraph).
 bool computeConsumerDirs(const std::string& rootDir, std::vector<std::string>& includeDirs,
                           std::vector<std::string>& libDirs, std::vector<std::string>& libNames,
                           std::string& err);
