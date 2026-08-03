@@ -1,0 +1,3 @@
+FUNCTION LibValue() AS INTEGER
+    LibValue = 12
+END FUNCTION

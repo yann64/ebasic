@@ -238,6 +238,13 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_add_remove_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/add_remove_dep
 )
 
+# REG-7: `ebpm list`/`ebpm search`/`ebpm update` end to end (dependency-tree
+# output, index-browse output, re-resolve-ignoring-the-pin behavior).
+add_test(
+    NAME e2e_pkg_list_search_update
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_list_search_update_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/list_search_update
+)
+
 # M5e: `ebpm test` on a [lib] package with one passing tests/*.bas file.
 add_test(
     NAME e2e_pkg_lib_with_tests

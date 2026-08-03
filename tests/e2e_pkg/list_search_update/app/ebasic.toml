@@ -1,0 +1,10 @@
+[package]
+name = "listsearchupdateapp"
+version = "0.1.0"
+
+[bin]
+name = "listsearchupdateapp"
+path = "src/main.bas"
+
+[dependencies]
+mylib = "^1.0"

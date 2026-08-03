@@ -1,6 +1,7 @@
 #include "build.hpp"
 #include "driver/process.hpp"
 #include "index.hpp"
+#include "lockfile.hpp"
 #include "manifest.hpp"
 #include "resolve.hpp"
 #include "semver.hpp"
@@ -13,6 +14,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -34,6 +36,11 @@ void printUsage(std::ostream& os) {
     os << "                            to [dependencies] (highest version, or the\n";
     os << "                            highest satisfying <req> if given)\n";
     os << "  remove <name>             remove <name> from [dependencies]\n";
+    os << "  list                      show the resolved dependency tree\n";
+    os << "  search <term>             search the package index by name/description\n";
+    os << "  update [<name>]           re-resolve a registry dependency (or all of\n";
+    os << "                            them) to its current highest satisfying\n";
+    os << "                            version, ignoring any existing lockfile pin\n";
 }
 
 /// Loads "ebasic.toml" from the current directory - every command below
@@ -368,6 +375,81 @@ bool dependencyNameExists(const ebpm::Manifest& manifest, const std::string& nam
     return false;
 }
 
+/// REG-7: whether `name` is specifically a *registry* ("version")
+/// dependency somewhere in the manifest - `ebpm update <name>` only makes
+/// sense for one of these (a `path`/`git` dependency has no index-picked
+/// version to re-pick), so this drives that command's own validation.
+bool isRegistryDependency(const ebpm::Manifest& manifest, const std::string& name) {
+    for (const ebpm::Dependency& d : manifest.dependencies) {
+        if (d.name == name && !d.version.empty()) return true;
+    }
+    for (const auto& [os, deps] : manifest.targetDependencies) {
+        for (const ebpm::Dependency& d : deps) {
+            if (d.name == name && !d.version.empty()) return true;
+        }
+    }
+    return false;
+}
+
+/// Every distinct registry dependency name in the manifest, across
+/// `[dependencies]` and every `[target.*.dependencies]` section - what
+/// `ebpm update` (with no name given) updates all of.
+std::vector<std::string> registryDependencyNames(const ebpm::Manifest& manifest) {
+    std::vector<std::string> names;
+    auto add = [&](const ebpm::Dependency& d) {
+        if (d.version.empty()) return;
+        if (std::find(names.begin(), names.end(), d.name) == names.end()) names.push_back(d.name);
+    };
+    for (const ebpm::Dependency& d : manifest.dependencies) add(d);
+    for (const auto& [os, deps] : manifest.targetDependencies) {
+        for (const ebpm::Dependency& d : deps) add(d);
+    }
+    return names;
+}
+
+/// Deletes each named package's whole `[[package]]` block from
+/// `ebasic.lock` (including the blank line `writeLockfile` always emits
+/// before one), rather than rewriting it via `readLockfilePins` +
+/// `writeLockfile` - the latter needs a full, freshly-resolved
+/// `ResolvedPackage`, which is exactly what doesn't exist yet: the whole
+/// point is to make the *next* `resolveDependencyGraph` call see no pin at
+/// all for these names, forcing a fresh index lookup instead of reusing a
+/// stale pin - exactly as if they'd never been built before. A no-op (not
+/// an error) if the lockfile doesn't exist yet.
+bool removeLockfilePinBlocks(const std::string& path, const std::vector<std::string>& names,
+                             std::string& err) {
+    if (!fs::exists(path)) return true;
+    std::vector<std::string> lines = readLines(path, err);
+    if (!err.empty()) return false;
+
+    std::vector<std::string> kept;
+    size_t i = 0;
+    while (i < lines.size()) {
+        if (trimSpaces(lines[i]) != "[[package]]") {
+            kept.push_back(lines[i]);
+            ++i;
+            continue;
+        }
+        size_t blockStart = i;
+        size_t j = i + 1;
+        std::string blockName;
+        while (j < lines.size() && trimSpaces(lines[j]) != "[[package]]") {
+            std::string t = trimSpaces(lines[j]);
+            if (t.rfind("name = \"", 0) == 0 && t.size() >= 9 && t.back() == '"') {
+                blockName = t.substr(8, t.size() - 9);
+            }
+            ++j;
+        }
+        if (std::find(names.begin(), names.end(), blockName) != names.end()) {
+            if (!kept.empty() && kept.back().empty()) kept.pop_back();
+        } else {
+            for (size_t k = blockStart; k < j; ++k) kept.push_back(lines[k]);
+        }
+        i = j;
+    }
+    return writeLines(path, kept, err);
+}
+
 /// Inserts `line` as the [dependencies] section's first entry - a
 /// text-level edit, not a parse+reserialize round-trip (toml++ is
 /// read-only in this codebase, and a round-trip could reformat or drop a
@@ -533,6 +615,142 @@ int cmdRemove(const std::vector<std::string>& args) {
     return 0;
 }
 
+/// REG-7: `ebpm list` - the *current project's* resolved dependency tree
+/// (cargo-tree-style, but a flat annotated list rather than a nested ASCII
+/// tree - bounds scope; see the plan's own REG-7 notes), reusing
+/// `resolveDependencyGraph`'s already-computed `order` directly rather
+/// than re-deriving anything. `order`'s own last entry is always the root
+/// package itself (see resolveDependencyGraph's doc comment), so it's
+/// skipped here - `list` shows dependencies, not the project itself.
+int cmdList(const std::vector<std::string>& args) {
+    if (!args.empty()) {
+        std::cerr << "ebpm: error: 'list' takes no arguments\n";
+        return 1;
+    }
+    std::vector<ebpm::ResolvedPackage> order;
+    std::string err;
+    if (!ebpm::resolveDependencyGraph(".", order, err)) {
+        std::cerr << "ebpm: error: " << err << "\n";
+        return 1;
+    }
+    if (order.size() <= 1) {
+        std::cout << "no dependencies\n";
+        return 0;
+    }
+    for (size_t i = 0; i + 1 < order.size(); ++i) {
+        const ebpm::ResolvedPackage& pkg = order[i];
+        std::string shortCommit = pkg.gitCommit.substr(0, std::min<size_t>(12, pkg.gitCommit.size()));
+        std::cout << pkg.name;
+        switch (pkg.sourceKind) {
+            case ebpm::SourceKind::Path:
+                std::cout << " (path: " << pkg.dir << ")";
+                break;
+            case ebpm::SourceKind::Git:
+                std::cout << " (git, commit " << shortCommit << ")";
+                break;
+            case ebpm::SourceKind::Registry:
+                std::cout << " v" << pkg.version << " (registry, commit " << shortCommit << ")";
+                break;
+            case ebpm::SourceKind::Root:
+                break; // unreachable: only order's skipped last entry is ever Root
+        }
+        std::cout << "\n";
+    }
+    return 0;
+}
+
+/// REG-7: `ebpm search <term>` - browses the *index* (every published
+/// package, regardless of whether the current project depends on it),
+/// unlike `list` above - a substring match against name/description,
+/// matching Cargo's own `cargo search` output shape (`name - description`).
+int cmdSearch(const std::vector<std::string>& args) {
+    if (args.size() != 1) {
+        std::cerr << "ebpm: error: 'search' requires exactly one search term\n";
+        return 1;
+    }
+    const std::string& term = args[0];
+    std::vector<ebpm::PackageIndex> all;
+    std::string err;
+    if (!ebpm::listAllPackages(all, err)) {
+        std::cerr << "ebpm: error: " << err << "\n";
+        return 1;
+    }
+    int matches = 0;
+    for (const ebpm::PackageIndex& pkg : all) {
+        if (pkg.name.find(term) != std::string::npos || pkg.description.find(term) != std::string::npos) {
+            std::cout << pkg.name << " - " << pkg.description << "\n";
+            ++matches;
+        }
+    }
+    if (matches == 0) {
+        std::cout << "no packages found matching '" << term << "'\n";
+    }
+    return 0;
+}
+
+/// REG-7: `ebpm update [<name>]` - the deliberate, explicit way to pick up
+/// a newer compatible registry-dependency release, since an ordinary
+/// `build`/`run`/`test` never re-consults the index once a version is
+/// pinned (REG-5's whole point). Re-resolves the named registry dependency
+/// (or every registry dependency, if no name given), ignoring its existing
+/// lockfile pin, by deleting just that pin's `[[package]]` block up front -
+/// `resolveDependencyGraph` then sees no pin at all for it and falls
+/// through to a fresh index lookup exactly as if it had never been built.
+int cmdUpdate(const std::vector<std::string>& args) {
+    if (args.size() > 1) {
+        std::cerr << "ebpm: error: 'update' takes at most one package name\n";
+        return 1;
+    }
+    ebpm::Manifest manifest;
+    std::string err;
+    if (!loadCurrentManifest(manifest, err)) {
+        std::cerr << "ebpm: error: " << err << "\n";
+        return 1;
+    }
+
+    std::vector<std::string> targets;
+    if (!args.empty()) {
+        if (!isRegistryDependency(manifest, args[0])) {
+            std::cerr << "ebpm: error: '" << args[0] << "' is not a registry dependency\n";
+            return 1;
+        }
+        targets.push_back(args[0]);
+    } else {
+        targets = registryDependencyNames(manifest);
+        if (targets.empty()) {
+            std::cout << "no registry dependencies to update\n";
+            return 0;
+        }
+    }
+
+    std::unordered_map<std::string, ebpm::Pin> oldPins = ebpm::readLockfilePins(".");
+    if (!removeLockfilePinBlocks("ebasic.lock", targets, err)) {
+        std::cerr << "ebpm: error: " << err << "\n";
+        return 1;
+    }
+
+    int rc = ebpm::buildPackageWithDeps(".", err);
+    if (!err.empty()) {
+        std::cerr << "ebpm: error: " << err << "\n";
+        return 1;
+    }
+    if (rc != 0) return rc;
+
+    std::unordered_map<std::string, ebpm::Pin> newPins = ebpm::readLockfilePins(".");
+    for (const std::string& name : targets) {
+        std::string oldVersion = oldPins.count(name) ? oldPins[name].version : "";
+        std::string newVersion = newPins.count(name) ? newPins[name].version : "";
+        if (!oldVersion.empty() && oldVersion == newVersion) {
+            std::cout << name << " is already up to date (v" << newVersion << ")\n";
+        } else if (oldVersion.empty()) {
+            std::cout << "Locked " << name << " v" << newVersion << "\n";
+        } else {
+            std::cout << "Updating " << name << " v" << oldVersion << " -> v" << newVersion << "\n";
+        }
+    }
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -563,6 +781,9 @@ int main(int argc, char** argv) {
     if (command == "test") return cmdTest(rest);
     if (command == "add") return cmdAdd(rest);
     if (command == "remove") return cmdRemove(rest);
+    if (command == "list") return cmdList(rest);
+    if (command == "search") return cmdSearch(rest);
+    if (command == "update") return cmdUpdate(rest);
 
     std::cerr << "ebpm: error: unknown command '" << command << "'\n";
     printUsage(std::cerr);

@@ -1528,6 +1528,50 @@ running, `remove` deleting the entry, re-remove rejection, a
 an unknown package name failing clearly. Full suite (46/46), clean
 `-Wall -Wextra -Werror` rebuild.
 
+### REG-7 Implementation Notes (`ebpm list` / `ebpm search` / `ebpm update`, done)
+
+`main.cpp` gained `cmdList`, `cmdSearch`, `cmdUpdate`. `list` reuses
+`resolveDependencyGraph`'s already-computed `order` directly - one line per
+resolved dependency (its own last entry, always the root package itself, is
+skipped), annotated by `SourceKind`: a path shows its directory, a git or
+registry dependency shows a short commit prefix, and a registry dependency
+additionally shows its picked version. Deliberately a flat annotated list
+rather than a nested ASCII tree, matching the plan's own stated scope cut.
+`search <term>` calls `listAllPackages` and substring-matches name/
+description, Cargo's own `cargo search` output shape (`name - description`).
+
+`update [<name>]` is the one genuinely new mechanism: with no existing way
+to make `resolveDependencyGraph` ignore a specific pin, a new
+`removeLockfilePinBlocks` helper deletes just the named package(s)'
+`[[package]]` block(s) (plus the blank line `writeLockfile` always emits
+before one) straight out of `ebasic.lock` at the text level - the same
+"never round-trip through toml++, since the file may need to keep some
+entries verbatim" reasoning as `add`/`remove`'s manifest edits, applied to
+the lockfile instead. With no pin left for that name,
+`resolveDependencyGraph`'s existing registry branch falls through to a
+fresh index lookup exactly as if the dependency had never been built
+before - no resolver changes needed at all. `update` with a name validates
+that name is actually a registry ("version") dependency somewhere in the
+manifest first (a `path`/`git` dependency has no index-picked version to
+re-pick); with no name, it targets every registry dependency in the
+manifest. Reports each target's before/after version by reading
+`readLockfilePins` both before removing the pin and after the
+`buildPackageWithDeps` rebuild that follows - "Updating X vA -> vB",
+"X is already up to date (vB)", or "Locked X vB" (no prior pin existed at
+all, e.g. right after `ebpm add` but before any build).
+
+Verified via a new `tests/e2e_pkg/run_list_search_update_case.sh`, against
+a real fake index + two-tag library repo, with the app declaring
+`mylib = "^1.0"` directly (independent of REG-6's own `add`/`remove`
+coverage): `search` finds/doesn't-find; `list` shows the resolved version
+before any build even exists; a real build pins v1.0.0; after the index
+gains v1.2.0, `list` stays pinned to v1.0.0 (proving `list` itself honors
+REG-5's reproducibility guarantee, not just `build`); `update mylib`
+reports the v1.0.0 -> v1.2.0 transition and the rebuilt program's real
+output confirms it; a second `update` (no name) reports "already up to
+date"; `update` on a non-registry name fails clearly. Full suite (47/47),
+clean `-Wall -Wextra -Werror` rebuild.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
