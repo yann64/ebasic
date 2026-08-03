@@ -1793,6 +1793,102 @@ haiku_verify.sh` - REG-6 and REG-7 in particular each confirmed the exact
 Windows-lockfile-escaping fix and pin-reuse behavior on real Windows CI,
 not just inferred from local Linux testing.
 
+## Post-1.0: Default Parameter Values + a FreeBASIC-style String Standard Library
+
+Prompted by the user's own explicit request, right after `ebasic-editor`
+was completed: eBasic's `STRING` type had no manipulation functions
+whatsoever (only `+`, comparisons, and `ZSTRING` conversion - noted
+repeatedly in this roadmap, e.g. M6/M7's own retrospectives, as
+deferred, not-yet-scoped stdlib content) - add the real thing, matching
+FreeBASIC's own `LEN`/`MID$`/`LEFT$`/`INSTR`/etc.
+
+**Default parameter values first, as a real prerequisite.** FreeBASIC's
+own string functions lean on optional/overloaded arguments (`MID$` with
+2 or 3 args, `INSTR`'s optional leading start position, `STR$` for both
+int and double) that eBasic had no way to express - decided (via
+`AskUserQuestion`, choosing the larger-scope option over a narrower
+"fixed arity, separate names per variant" fallback) to add real default
+parameter values as a genuine, general new language feature first,
+rather than a string-library-specific workaround. `Param` gained a
+`defaultValue` (a `Param`/`ProcedureInfo` copy, so `shared_ptr<Expr>`, not
+`unique_ptr` - `std::vector<Param>` is copied around, e.g. when Sema
+registers a signature). Scope, decided up front: `BYVAL`-only (no
+addressable temporary for a missing `BYREF` argument to bind to),
+trailing-only (once one parameter has a default, every parameter after
+it must too - matches real FreeBASIC/C++ default-argument rules exactly),
+literal-only (not an arbitrary per-call-site expression - covers
+everything the string library needs without opening up expression-
+scope-at-declaration-point questions with no concrete need behind them
+yet). Maps directly onto a real C++ default argument in Codegen -
+`buildParamList` gained an `includeDefaults` flag, since a C++ default
+argument may only appear on the *first* signature a translation unit
+sees (a forward-declared prototype and its own later body definition
+repeating an identical default is a hard "redefinition of default
+argument" compile error) - `genProcedure`/`genMethodDefinition` now
+render two separate parameter-list strings where a body follows its own
+prototype. Applies uniformly to a free `SUB`/`FUNCTION`, an `Extern`/
+`Declare` signature, and a `TYPE` method.
+
+**The string library itself**
+(`Len`/`Left`/`Right`/`Mid`/`InStr`/`InStrRev`/`UCase`/`LCase`/`LTrim`/
+`RTrim`/`Trim`/`Str`/`Val`/`Chr`/`Asc`/`Space`/`Repeat` - see
+`docs/reference/string-library.md`) is real C++ in a new
+`runtime/include/ebasic/runtime/stringlib.hpp`, always `#include`d by
+`runtime.hpp` - the runtime is 100% header-only (confirmed directly:
+`runtime/CMakeLists.txt` declares it `INTERFACE`, no `.cpp`/`.a`/`.so` at
+all), so a new function added there needs zero linking changes for any
+program. Made *always available, no `#include` needed* via a genuinely
+new mechanism: a hardcoded eBasic-source "prelude"
+(`compiler/src/preprocessor/builtin_prelude.hpp`, one `Extern "C++"`
+block, no `Lib` clause - nothing to link, no `Namespace` block - callable
+bare) spliced into every compiled program's source *before* the user's
+own file, via the exact same `expandSource` mechanism `#include` itself
+already uses (`preprocess()`, under a dedicated synthetic file registered
+as `"<builtin>"`). This needed one narrow, deliberately-scoped `Sema`
+exemption: `STRING` is normally rejected in *any* `Extern`/`Declare`
+signature (not C-ABI-compatible, `collectExternSignatureChecks`) - the
+prelude's own signatures are exempted (checked by comparing the
+statement's own `loc.fileId` against the prelude's registered name), since
+unlike a real external library, these bind to real, fully project-
+controlled C++ functions that take `BString` directly; a real user-written
+`Extern` keeps the exact same restriction as before (verified directly -
+a throwaway `Extern "C++" ... STRING ...` still gets the exact same
+rejection). `docgen` needed a matching fix, caught by its own existing
+`e2e_docgen_simple` golden test going red the moment the prelude started
+being spliced into *every* parsed program (including that test's tiny
+fixture) - it now filters out any statement sourced from the prelude's
+own file before rendering, so only real user/package content is ever
+documented.
+
+Where FreeBASIC's own optional/overloaded forms don't map cleanly onto
+eBasic's new trailing-only defaults: `INSTR([start,] s1, s2)`'s optional
+leading `start` moved to trail instead (documented as a deliberate
+deviation); a single `Str(DOUBLE)` covers `INTEGER` arguments too via
+this language's own pre-existing implicit numeric widening (no type-based
+overloading needed, since eBasic still doesn't have any); `STRING$(n,
+char)` (repeat) is renamed `Repeat` (`STRING` is already the reserved
+type keyword, a genuine naming collision - confirmed via `AskUserQuestion`)
+and generalized to repeat a whole string, not just one character.
+
+A real bug found and fixed before any of this reached the compiler-
+injected prelude: `Trim`'s first implementation
+(`RTrim(LTrim(s, chars), std::move(chars))`) relied on C++'s own
+unspecified function-argument evaluation order - `std::move(chars)`
+could be evaluated (and thus move-construct RTrim's own parameter)
+*before* the `LTrim(...)` call even ran, leaving `LTrim` reading an
+already-moved-from `chars` - caught by a direct, throwaway standalone
+C++ comparison against the real expected output, not assumed correct
+from reading the code.
+
+Verified: `tests/e2e/default_params` (+ `default_params_errors.sh`,
+following `tests/e2e_pkg/manifest_version_errors.sh`'s own
+`check_rejected` pattern - a non-defaulted parameter following a
+defaulted one, a missing required argument, too many arguments, a
+`BYREF` default, a non-literal default, each a real compile-time
+rejection) and `tests/e2e/string_library` (every function's normal case
+plus its documented clamping/edge-case behavior) all green, alongside the
+full existing suite (50/50) and a from-clean strict rebuild.
+
 ## eBasic code editor (`ebasic-editor`) - ecosystem repos
 
 A real eBasic code editor, using `gtk4` (this repo's own registry
