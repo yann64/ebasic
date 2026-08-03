@@ -1782,7 +1782,16 @@ in each sibling repo's own README/commit history.
   documented above under their own "Fixed:" headings): `ANY PTR` not
   bridging to `ZSTRING`, and a string literal assigned to `ZSTRING`
   dangling once it outlives its own statement. Added to `ebpm-index` as
-  `gtk4` `v0.2.0`.
+  `gtk4` `v0.2.0`; a follow-up `v0.2.1` fixed a real, more mundane bug -
+  `TextBufferGetText`/`FileChooserGetFilePath`/`DataInputStreamReadLine`/
+  `Finish` were all declared `AS STRING`, but no top-level `STRING`-
+  returning function can cross this package's own `--lib` boundary at
+  all (confirmed directly, not assumed - the generated interface
+  silently drops any that try), so they were unusable by any actual
+  consumer; found the moment `ebasic-editor` tried to call one. Each now
+  returns the raw allocation instead (freed via a newly exported
+  `FreeGMallocString`, since raw `g_free` itself isn't part of the
+  public interface either).
 - **`eb-cjson` v0.1.0** (`https://github.com/yann64/eb-cjson`) - a cJSON
   wrapper (JSON parsing/building) for the LSP client's JSON-RPC wire
   format, since eBasic's own `STRING` type has no manipulation functions
@@ -1794,7 +1803,14 @@ in each sibling repo's own README/commit history.
   library's linker name (`-lcjson` -> `libcjson.so`) on the same `-L`
   search path, silently shadowing it (confirmed by direct reproduction).
   Added to `ebpm-index` as `eb-cjson` `v0.1.0`.
-- **`ebasic-editor`**: not yet started (next up).
+- **`ebasic-editor`** (`https://github.com/yann64/ebasic-editor`) -
+  scaffolded as an `ebpm [bin]` package depending on `gtk4 ^0.2` and
+  `eb-cjson ^0.1` (a real, zero-config registry resolution, both fetched
+  straight from GitHub); a minimal window with a `GtkSourceView`, and a
+  real eBasic `GtkSourceView` language-spec file
+  (`data/language-specs/ebasic.lang`, keywords pulled from the real
+  lexer's own table) wired in for actual syntax highlighting. LSP/`ebpm`/
+  `git` integration still to come.
 
 ## Testing Strategy
 
