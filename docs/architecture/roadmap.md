@@ -1824,30 +1824,63 @@ in each sibling repo's own README/commit history.
   returns the raw allocation instead (freed via a newly exported
   `FreeGMallocString`, since raw `g_free` itself isn't part of the
   public interface either).
-- **`eb-cjson` v0.1.0** (`https://github.com/yann64/eb-cjson`) - a cJSON
-  wrapper (JSON parsing/building) for the LSP client's JSON-RPC wire
-  format, since eBasic's own `STRING` type has no manipulation functions
-  yet. `CJson` mirrors cJSON's own public struct field-for-field (direct
-  field access, verified byte-for-byte correct empirically before
+- **`eb-cjson` v0.1.0 -> v0.2.0** (`https://github.com/yann64/eb-cjson`) -
+  a cJSON wrapper (JSON parsing/building) for the LSP client's JSON-RPC
+  wire format, since eBasic's own `STRING` type has no manipulation
+  functions yet. `CJson` mirrors cJSON's own public struct field-for-field
+  (direct field access, verified byte-for-byte correct empirically before
   committing to it) rather than an accessor call per read. Named
   `eb-cjson`, not the shorter `cjson` - that name would make `ebpm`'s own
   build output (`target/libcjson.a`) collide with the real system
   library's linker name (`-lcjson` -> `libcjson.so`) on the same `-L`
   search path, silently shadowing it (confirmed by direct reproduction).
-  Added to `ebpm-index` as `eb-cjson` `v0.1.0`.
+  `v0.2.0` fixed the same `--lib`-boundary `STRING` bug `eb-gtk4` already
+  hit: `JsonStringify`/`JsonGetString` were declared `AS STRING`, silently
+  unusable by any external consumer - found the moment `ebasic-editor`'s
+  LSP client tried to call them. `JsonStringify` now returns the raw,
+  owned allocation (freed via a new `JsonFreeString`); `JsonGetString` now
+  returns a borrowed `ZSTRING` straight from the value's own tree. Added
+  to `ebpm-index` as `eb-cjson` `v0.1.0`/`v0.2.0`.
+- **`eb-gtk4` v0.4.0** (`https://github.com/yann64/eb-gtk4`) - adds
+  `GtkTextTag`-based diagnostics highlighting and `gtk_widget_set_tooltip_text`,
+  for `ebasic-editor`'s LSP client. Setting a `GtkTextTag`'s appearance
+  (`gtk_text_buffer_create_tag`, `g_object_set`) is real, variadic C -
+  eBasic has no variadic-call support, so this instead looks up the
+  target property's `GType` at runtime (`g_type_from_name`) and builds a
+  `GValue` by hand (a heap-allocated opaque blob, exactly like
+  `GtkTextIter`), set via the non-variadic `g_object_set_property`
+  (`TextBufferCreateUnderlineTag`/`ApplyTagRange`/`ClearTag`, using
+  `PANGO_UNDERLINE_ERROR` for error squiggles). Also adds the blocking
+  `InputStreamReadAll` (the sync counterpart of the existing async pair) -
+  the shape a `Content-Length`-framed JSON-RPC body needs (a fixed byte
+  count, not line-terminated). Added to `ebpm-index` as `gtk4` `v0.4.0`.
 - **`ebasic-editor`** (`https://github.com/yann64/ebasic-editor`) -
-  scaffolded as an `ebpm [bin]` package depending on `gtk4 ^0.3` and
-  `eb-cjson ^0.1` (a real, zero-config registry resolution, both fetched
+  scaffolded as an `ebpm [bin]` package depending on `gtk4 ^0.4` and
+  `eb-cjson ^0.2` (a real, zero-config registry resolution, both fetched
   straight from GitHub); a window with a `GtkSourceView` and a real
   eBasic `GtkSourceView` language-spec file (`data/language-specs/
   ebasic.lang`, keywords pulled from the real lexer's own table) for
   actual syntax highlighting; Open/Save (`GtkFileChooserNative` + plain-
   path file I/O, plus `Ctrl+S`), undo/redo, and a modified-indicator in
-  the window title. `eb-gtk4` itself grew to `v0.3.0` along the way
-  (`FileChooserNative`/`EventControllerKey`/file-I/O bindings, plus the
-  negative-literal-`CONST` compiler fix above, found via its own
-  `GTK_RESPONSE_ACCEPT`/`CANCEL` constants). LSP/`ebpm`/`git` integration
-  still to come.
+  the window title; and now a real `ebasic_lsp` client (`src/lsp.bas`) -
+  live diagnostics (`GtkTextTag` squiggles + a status-bar problem count),
+  hover (`F1`), go-to-definition (`F12`), and completion (`Ctrl+Space`),
+  all shown in a status bar rather than an interactive tooltip/popover
+  (a deliberate scope cut - `gtk4` has no popover bindings yet, and
+  building one just for this would be new, unverifiable-in-this-sandbox
+  GTK surface). Speaks `ebasic_lsp`'s real `Content-Length`-framed
+  JSON-RPC over stdio via `gtk4`'s `GSubprocess` bindings and `eb-cjson`
+  for the wire format - a self-perpetuating async read chain (header
+  line, blank line, exact-byte-count body), since a single `didOpen`/
+  `didChange` can trigger any number of `publishDiagnostics` notifications
+  with no batch-end marker. Found and fixed two real bugs while building
+  it: reading a `GSubprocess`'s stdout partway through a buffered
+  `GDataInputStream` line-read via the *raw* stream instead of the same
+  buffered object hangs forever (bytes already pulled into its internal
+  buffer never reach the raw read); and `eb-cjson`'s own `--lib`-boundary
+  `STRING` bug above. `tests/lsp_client_smoke.bas` drives the whole
+  client against a real spawned `ebasic_lsp` headlessly, verified under
+  `ebpm test`. `ebpm`/`git` integration still to come.
 
 ## Testing Strategy
 
