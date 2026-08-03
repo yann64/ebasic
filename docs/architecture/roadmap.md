@@ -1761,6 +1761,30 @@ haiku_verify.sh` - REG-6 and REG-7 in particular each confirmed the exact
 Windows-lockfile-escaping fix and pin-reuse behavior on real Windows CI,
 not just inferred from local Linux testing.
 
+## eBasic code editor (`ebasic-editor`, in progress) - ecosystem repos
+
+A real eBasic code editor, using `gtk4` (this repo's own registry
+package) as its GUI toolkit, `gtksourceview` for syntax highlighting,
+`ebasic_lsp` for diagnostics/hover/go-to-def/completion, and real `git`
+integration - meaning the editor itself is a new eBasic program, not a
+tool written in another language. Full plan, decisions, and scope cuts
+recorded when it was approved; brief pointers only here, matching REG-8's
+own "ecosystem repo" tracking precedent - the real technical detail lives
+in each sibling repo's own README/commit history.
+
+- **`eb-gtk4` v0.2.0** (`https://github.com/yann64/eb-gtk4`) - extends
+  the existing `gtk4` registry package with text-editing (`GtkTextBuffer`/
+  `GtkTextView`/`GtkScrolledWindow`), syntax highlighting
+  (`GtkSourceView`), a portable async subprocess primitive (`GSubprocess`,
+  reused for spawning `ebasic_lsp`/`ebpm`/`git` alike), and app-shell
+  widgets (`GtkHeaderBar`/`GtkPaned`/`GtkListBox`/`GtkFileChooserNative`).
+  Building it surfaced and fixed two real, general compiler bugs (both
+  documented above under their own "Fixed:" headings): `ANY PTR` not
+  bridging to `ZSTRING`, and a string literal assigned to `ZSTRING`
+  dangling once it outlives its own statement. Added to `ebpm-index` as
+  `gtk4` `v0.2.0`.
+- **`eb-cjson`, `ebasic-editor`**: not yet started (next up).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
