@@ -43,6 +43,15 @@ void annotatePointerBridge(const Type& target, Expr& value) {
     if (target.kind == TypeKind::Pointer && value.type.kind == TypeKind::Pointer &&
         !value.type.pointee) {
         value.pointerCastTo = std::make_shared<Type>(target);
+    } else if (target.kind == TypeKind::ZStringT && value.type.kind == TypeKind::Pointer &&
+               !value.type.pointee) {
+        /// The ANY-PTR-value-as-ZSTRING bridge (see isAssignCompatible's own
+        /// doc comment) - `static_cast<const char*>(...)` is exactly as
+        /// valid for a void* source as the typed-PTR case above (`cppType`
+        /// renders ZStringT as `const char*`), so this reuses the exact same
+        /// `pointerCastTo`/`genExpr` cast-insertion machinery with no
+        /// Codegen changes at all.
+        value.pointerCastTo = std::make_shared<Type>(target);
     }
 }
 
@@ -701,6 +710,24 @@ bool Sema::isAssignCompatible(const Type& targetType, const Type& valueType) con
     /// target is never allowed.
     bool targetIsPtr = targetType.kind == TypeKind::Pointer;
     bool valueIsPtr = valueType.kind == TypeKind::Pointer;
+
+    /// A bare ANY PTR value (a real void*, e.g. a malloc'd buffer an
+    /// external C function handed back) may also be read as a ZSTRING -
+    /// both are raw C-level pointers under the hood, and this is the only
+    /// way to safely turn such a value into a real STRING (via ZSTRING's
+    /// own existing STRING conversion below) without a dedicated CAST
+    /// operator, e.g. so it can be freed correctly afterward instead of
+    /// leaking. Deliberately one-directional (ZSTRING -> ANY PTR is not
+    /// bridged here) - the reverse needs a const_cast, not a static_cast
+    /// (removing const isn't implicit even via static_cast), a genuinely
+    /// different codegen shape nothing currently needs; add it only if a
+    /// real use case shows up. Also deliberately narrower than the
+    /// typed-PTR bridge below: only a bare ANY PTR bridges to ZSTRING, not
+    /// any other typed pointer.
+    if (targetType.kind == TypeKind::ZStringT && valueIsPtr && !valueType.pointee) {
+        return true;
+    }
+
     if (targetIsPtr || valueIsPtr) {
         if (targetIsPtr && valueIsPtr) {
             if (!targetType.pointee || !valueType.pointee) return true;

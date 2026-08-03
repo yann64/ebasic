@@ -1227,6 +1227,57 @@ call-argument, and a return-assignment, all reusing the file's existing
 GTK-independent repro (`DIM np AS Node PTR : np = anyP`) recompiles and
 runs correctly.
 
+## Fixed: `ANY PTR` -> `ZSTRING` doesn't compile
+
+Found while extending `eb-gtk4` with `GtkTextBuffer`/`GtkTextView` bindings
+(a new eBasic code editor effort - see `docs/guide/ebpm.md`'s registry
+section for `gtk4`): `gtk_text_buffer_get_text` returns a freshly
+`g_malloc`'d string the caller must `g_free` - unlike every other
+string-returning binding in `eb-gtk4` so far, whose C functions all return
+a *borrowed* string (safe to declare `AS ZSTRING`, auto-copied into a
+`STRING` with nothing to free). Declaring this one `AS ZSTRING` too would
+leak the original buffer (nothing holds a freeable handle to it once
+copied); declaring it `AS ANY PTR` instead (so it's trivially freeable via
+the already-bound `g_free(ByVal mem AS ANY PTR)`) left no way to read its
+bytes into a `STRING` - `ANY PTR` and `ZSTRING` were not assign-compatible
+in either direction, and the language has no `CAST` operator to force one.
+Confirmed by directly attempting the two obvious workarounds first: a
+second, ZSTRING-typed `Alias "g_free"` declaration (a hard C++
+redeclaration conflict - `Extern "C"`, unlike `"C++"`, gives one real
+symbol exactly one C++-visible signature, so two differently-typed
+declarations of the same `extern "C"` name can never coexist); and calling
+libc's own `free()` on a `g_malloc`'d pointer (unsafe - GLib's allocator
+isn't guaranteed to be libc's `malloc`/`free` under the hood).
+
+**Fix**: extended the exact same `pointerCastTo`/`annotatePointerBridge`
+mechanism the `ANY PTR` -> typed `PTR` fix above already built, adding one
+new, deliberately *one-directional* bridge: a bare `ANY PTR` value may
+also be read as a `ZSTRING` (`isAssignCompatible` in `sema.cpp`), with
+`annotatePointerBridge` stashing the same `Expr::pointerCastTo` annotation
+`Codegen::genExpr` already knows how to wrap - `cppType(ZStringT)` is
+`"const char*"`, and `static_cast<const char*>(voidExpr)` is exactly as
+well-formed as the existing `static_cast<T*>(voidExpr)` case (both are
+`void*` -> object-pointer-type conversions, explicitly permitted by the
+standard), so **zero Codegen changes** were needed beyond the one new
+`isAssignCompatible`/`annotatePointerBridge` condition. The reverse
+direction (a `ZSTRING` value written into an `ANY PTR` target) was
+deliberately left unbridged - `const char*` -> `void*` needs a
+`const_cast`, not a `static_cast` (removing `const` is never implicit,
+even via `static_cast`), a genuinely different codegen shape nothing
+building `eb-gtk4` so far actually needs; add it only if a real use case
+shows up, matching this project's own "don't add abstractions beyond
+what's needed" discipline.
+
+Verified via a new case appended to `tests/e2e/extern_c` (mirroring its
+own existing pattern of extending, not duplicating, the shared C fixture
+library): two new `ebfixturec` functions, `eb_fixture_malloc_string()`
+(returns a real `malloc`'d `void*` copy of a fixed string) and
+`eb_fixture_free(void*)`, exercise exactly the `ebasic_lsp`-motivating
+path - get an `ANY PTR`, bridge-read it as `ZSTRING`, copy that into a
+`STRING`, then free the *original* `ANY PTR` value (needing no bridge at
+all, since it was never re-typed). Full suite (47/47), clean
+`-Wall -Wextra -Werror` rebuild.
+
 ## Fixed: `ebpm`'s `LIBRARY_PATH` workaround broke every process on real Haiku hardware
 
 Found while running the real Haiku verification for the fix above:

@@ -83,9 +83,11 @@ private:
     /// beyond the namespaces_ set (real C++ namespaces do the rest).
     void genNamespaceDecl(const Stmt& stmt);
     /// Renders `expr` into C++, then wraps the result in an explicit
-    /// `static_cast<T*>(...)` when Sema set `expr.pointerCastTo` (an ANY PTR
-    /// value being bridged into a typed pointer context - C++, unlike this
-    /// language, has no implicit void* -> T* conversion). The actual
+    /// `static_cast<T*>(...)` (or `static_cast<const char*>(...)` for the
+    /// ANY-PTR-as-ZSTRING bridge) when Sema set `expr.pointerCastTo` (an ANY
+    /// PTR value being bridged into a typed pointer - or ZSTRING - context;
+    /// C++, unlike this language, has no implicit void* -> T*/const char*
+    /// conversion). The actual
     /// per-ExprKind rendering lives in genExprBase; every recursive call for
     /// a sub-expression goes through this wrapper too, so the cast is never
     /// missed regardless of where in a larger expression the annotated node

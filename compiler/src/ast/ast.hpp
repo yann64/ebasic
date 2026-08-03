@@ -238,15 +238,17 @@ struct Expr {
 
     /// Set by Sema exactly when this expression's own resolved type is a
     /// bare ANY PTR (Pointer with a null pointee - C++'s void*) but it's
-    /// being used somewhere a specific pointer type is required (an
+    /// being used somewhere a specific pointer type - or (a narrower,
+    /// one-directional extra bridge) a ZSTRING - is required (an
     /// assignment target, a CONST initializer, a function/method argument,
     /// or a RETURN value) - isAssignCompatible's ANY-PTR bridging rule
     /// permits this (matching FreeBASIC's own documented "implicitly
     /// converted to and from other pointer types" behavior), but C++ has no
-    /// implicit void* -> T* conversion (only the reverse, T* -> void*, is
-    /// implicit). Codegen::genExpr wraps this expression's rendered text in
-    /// an explicit static_cast<T*>(...) when this is set; null whenever no
-    /// cast is needed.
+    /// implicit void* -> T* (nor void* -> const char*) conversion (only the
+    /// reverse, T* -> void*, is implicit). Codegen::genExpr wraps this
+    /// expression's rendered text in an explicit static_cast<T*>(...) (or
+    /// static_cast<const char*>(...) for the ZSTRING case) when this is
+    /// set; null whenever no cast is needed.
     std::shared_ptr<Type> pointerCastTo;
 
     long long intValue = 0;

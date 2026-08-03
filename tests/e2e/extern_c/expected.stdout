@@ -3,3 +3,4 @@ hello from C
 11
 not null
 []
+malloc'd string

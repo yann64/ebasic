@@ -4,6 +4,7 @@
  * not just call into its own runtime. */
 
 #include <stdlib.h>
+#include <string.h>
 
 /** Integer addition - exercises basic EXTERN "C" scalar-argument calls. */
 int eb_fixture_add(int a, int b) {
@@ -71,4 +72,22 @@ typedef void (*eb_fixture_callback)(int value, void* user_data);
 
 void eb_fixture_invoke_callback(eb_fixture_callback cb, int value, void* user_data) {
     cb(value, user_data);
+}
+
+/** Returns a freshly malloc'd copy of a fixed string, as a plain void* (the
+ * same shape a real void*-returning C API - g_malloc/g_strdup, glib's
+ * gtk_text_buffer_get_text, etc. - hands back) - the caller must free it via
+ * eb_fixture_free. Exercises reading it back as ZSTRING (ANY PTR -> ZSTRING
+ * bridge) and freeing the original ANY PTR value (no bridge needed there). */
+void* eb_fixture_malloc_string(void) {
+    const char* text = "malloc'd string";
+    char* copy = (char*)malloc(strlen(text) + 1);
+    strcpy(copy, text);
+    return copy;
+}
+
+/** Frees a pointer returned by eb_fixture_malloc_string - a generic
+ * void*-only free, matching g_free's own signature. */
+void eb_fixture_free(void* p) {
+    free(p);
 }
