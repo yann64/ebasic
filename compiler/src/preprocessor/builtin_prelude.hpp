@@ -96,6 +96,27 @@ Extern "C++"
     Declare Function Hex(n AS LONGINT) AS STRING
     Declare Function Oct(n AS LONGINT) AS STRING
     Declare Function Bin(n AS LONGINT) AS STRING
+
+    ' The date/time library (DateSerial/Year/Month/Day/DateAdd/DateDiff/
+    ' etc., matching FreeBASIC's own set) - see
+    ' docs/reference/date-time-library.md. A date+time is a plain DOUBLE
+    ' "serial number" (whole days since 1899-12-30, fractional part =
+    ' time-of-day), matching real FreeBASIC's own internal convention.
+    Declare Function Now() AS DOUBLE
+    Declare Function Timer() AS DOUBLE
+    Declare Function Date() AS STRING
+    Declare Function Time() AS STRING
+    Declare Function DateSerial(year AS INTEGER, month AS INTEGER, day AS INTEGER) AS DOUBLE
+    Declare Function TimeSerial(hour AS INTEGER, minute AS INTEGER, second AS INTEGER) AS DOUBLE
+    Declare Function Year(serial AS DOUBLE) AS INTEGER
+    Declare Function Month(serial AS DOUBLE) AS INTEGER
+    Declare Function Day(serial AS DOUBLE) AS INTEGER
+    Declare Function Hour(serial AS DOUBLE) AS INTEGER
+    Declare Function Minute(serial AS DOUBLE) AS INTEGER
+    Declare Function Second(serial AS DOUBLE) AS INTEGER
+    Declare Function Weekday(serial AS DOUBLE) AS INTEGER
+    Declare Function DateAdd(BYVAL intervalCode AS STRING, number AS DOUBLE, serial AS DOUBLE) AS DOUBLE
+    Declare Function DateDiff(BYVAL intervalCode AS STRING, startSerial AS DOUBLE, endSerial AS DOUBLE) AS DOUBLE
 End Extern
 )EBASIC_PRELUDE";
 

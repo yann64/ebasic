@@ -17,6 +17,7 @@ it's actually documented.
 - [String Library](string-library.md)
 - [File Library](file-library.md)
 - [Math Library](math-library.md)
+- [Date/Time Library](date-time-library.md)
 
 ## Symbols
 
@@ -73,6 +74,10 @@ redeclare one of these names).
 | `Rnd` / `Randomize` | [Math Library](math-library.md#rnd--randomize) |
 | `CByte` / `CUByte` / `CShort` / `CUShort` / `CInt` / `CUInt` / `CLngInt` / `CULngInt` / `CSng` / `CDbl` / `CBool` | [Math Library](math-library.md#numeric-conversions-cxxx) |
 | `Hex` / `Oct` / `Bin` | [Math Library](math-library.md#base-conversions) |
+| `Now` / `Timer` / `Date` / `Time` | [Date/Time Library](date-time-library.md#now--timer--date--time) |
+| `DateSerial` / `TimeSerial` | [Date/Time Library](date-time-library.md#building-and-reading-a-serial) |
+| `Year` / `Month` / `Day` / `Hour` / `Minute` / `Second` / `Weekday` | [Date/Time Library](date-time-library.md#building-and-reading-a-serial) |
+| `DateAdd` / `DateDiff` | [Date/Time Library](date-time-library.md#dateadd--datediff) |
 
 ## Preprocessor directives
 

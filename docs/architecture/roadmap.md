@@ -2000,6 +2000,67 @@ and an out-of-range `CByte` wraparound), the same checks re-run through
 real `ebc`, `tests/e2e/math_library` (41 assertions), the full existing
 suite (52/52), and a from-clean strict rebuild.
 
+## Post-1.0: A FreeBASIC-style Date/Time Standard Library (Phase B of "the rest of the stdlib")
+
+Phase B of `/home/yann64/.claude/plans/lazy-bouncing-quasar.md` (Phase A,
+the math library, above). `DateSerial`/`TimeSerial`/`Year`/`Month`/`Day`/
+`Hour`/`Minute`/`Second`/`Weekday`/`DateAdd`/`DateDiff`/`Now`/`Timer`/
+`Date`/`Time` - see `docs/reference/date-time-library.md`. A date+time is
+a plain `DOUBLE` "serial number" - whole days since `1899-12-30`,
+matching real FreeBASIC's own internal convention exactly - so a date
+and a time combine, and day-level arithmetic works, via plain addition
+on the serial.
+
+The plan flagged `year`/`month`/`day`/`hour`/`minute`/`second`/`date`/
+`time` as this phase's own version of the `Name`-vs-`name` collision
+risk that renamed FreeBASIC's `Name` to `Rename` in the file library -
+a systematic grep of `tests`/`examples`/`docs` for every candidate name
+came back **clean** (the handful of hits were all inside comments/string
+literals - "second call", "now empty" - not real identifiers), so every
+name matches FreeBASIC's own naming exactly, no renames needed. Also
+confirmed none of these names are already-reserved lexer keywords.
+
+The real substance of this phase is calendar math, not prelude wiring:
+`daysFromCivil`/`civilFromDays` (Howard Hinnant's well-known, exact
+integer proleptic-Gregorian-calendar algorithms) convert between a y/m/d
+and a day count, since this project's C++17 baseline predates `<chrono>`'s
+own C++20 calendar types. `DateAdd`'s calendar units (`"yyyy"`/`"m"`)
+clamp the day-of-month when the target month is shorter (adding a month
+to Jan 31 lands on Feb 28/29, not Mar 3) and require a floor-correction
+for negative month totals (C++'s `/`/`%` truncate toward zero, not
+floor) - verified explicitly with a negative-months case that crosses a
+year boundary (`DateAdd("m", -13, Dec 1 2023)` = `Nov 1 2022`).
+`DateDiff`'s calendar units count boundaries *crossed*, not elapsed
+duration, matching real FreeBASIC/VB's own well-known `DateDiff`
+semantics (`DateDiff("yyyy", Dec 31 2020, Jan 1 2021)` = `1`, despite
+one day elapsing) - deliberately distinct from the fixed-length units
+(`"d"`/`"h"`/`"n"`/`"s"`), which are exact elapsed duration.
+
+`Date()`/`Time()` format the current local date/time as
+`"YYYY-MM-DD"`/`"HH:MM:SS"` - a deliberate ISO-8601-style choice, not a
+reproduction of real FreeBASIC's own locale-dependent legacy
+`mm-dd-yyyy` `Date$` format (not confidently known well enough to
+reproduce exactly, so not claimed).
+
+Hit and fixed a real **stale-precompiled-header** trap this session:
+`runtime/CMakeLists.txt`'s own `runtime.hpp.gch` (M6 PCH) doesn't
+reliably invalidate on a plain incremental `cmake --build` when only a
+leaf runtime header changes underneath it - a compiler warning fixed in
+`datetimelib.hpp` source still appeared in `ebc`'s own compiled output
+until the stale `.gch` was deleted and rebuilt explicitly. Worth
+remembering for any future runtime-header edit made mid-session.
+
+Verified: a standalone C++ program against `datetimelib.hpp` directly,
+checked against known real dates (`2000-01-01` is a Saturday,
+`2024-02-29` is a Thursday, the classic `25569`-day 1970-01-01 offset)
+and the tricky negative-months `DateAdd` corrections; the same checks
+re-run through real `ebc`; `tests/e2e/date_time_library` (deterministic
+serial-math assertions plus deterministic *invariant* checks on the
+non-deterministic `Now`/`Date`/`Time`/`Timer` - a plausible year, exact
+formatted-string lengths, an in-range `Timer()` - rather than a golden
+value for wall-clock output); the full existing suite (53/53); and a
+from-clean strict rebuild.
+
 ## eBasic code editor (`ebasic-editor`) - ecosystem repos
 
 A real eBasic code editor, using `gtk4` (this repo's own registry
