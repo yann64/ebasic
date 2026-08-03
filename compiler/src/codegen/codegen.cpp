@@ -2,6 +2,7 @@
 
 #include <cctype>
 #include <functional>
+#include <optional>
 #include <stdexcept>
 
 namespace ebasic {
@@ -60,6 +61,30 @@ std::string Codegen::escapeStringLiteral(const std::string& s) {
 }
 
 namespace {
+/// Recursively evaluates a compile-time-constant literal expression for
+/// generateLibraryInterface's CONST re-export (see its own doc comment) -
+/// a bare IntLiteral/DoubleLiteral, or one negated any number of times
+/// (`-3`, `--3`, ... - UnaryNeg is right-associative, see Parser::
+/// parseNegate) - returning its literal text with the correct sign, or
+/// std::nullopt if `expr` isn't one of these (some other, more general
+/// constant expression this function deliberately doesn't try to
+/// re-derive, to avoid silently emitting the wrong value). Found needed
+/// when a real negative-valued C enum constant (GTK_RESPONSE_ACCEPT = -3)
+/// was silently unexported - only a bare, non-negated literal was
+/// recognized before this.
+std::optional<std::string> tryEvalConstLiteralText(const Expr& expr, bool negate) {
+    if (expr.kind == ExprKind::IntLiteral) {
+        return std::to_string(negate ? -expr.intValue : expr.intValue);
+    }
+    if (expr.kind == ExprKind::DoubleLiteral) {
+        return std::to_string(negate ? -expr.doubleValue : expr.doubleValue);
+    }
+    if (expr.kind == ExprKind::UnaryNeg && expr.lhs) {
+        return tryEvalConstLiteralText(*expr.lhs, !negate);
+    }
+    return std::nullopt;
+}
+
 /// True for the six comparison operators - genExpr uses this to render their
 /// result as BASIC's own -1/0 boolean convention (via a ternary + explicit
 /// cast) rather than plain C++'s `true`/`false`.
@@ -1106,19 +1131,22 @@ std::string Codegen::generateLibraryInterface(const Module& module, const std::s
             /// constant expression (referencing another CONST/ENUM member,
             /// an operator, ...) isn't re-derived here, to avoid silently
             /// emitting the wrong value - skipped instead, same pattern as
-            /// the STRING-signature skip above.
-            std::string literalText;
-            if (stmt.expr && stmt.expr->kind == ExprKind::IntLiteral) {
-                literalText = std::to_string(stmt.expr->intValue);
-            } else if (stmt.expr && stmt.expr->kind == ExprKind::DoubleLiteral) {
-                literalText = std::to_string(stmt.expr->doubleValue);
+            /// the STRING-signature skip above. `tryEvalConstLiteralText`
+            /// also recognizes a negated literal (`-3`) - a real, negative-
+            /// valued C enum constant (GTK_RESPONSE_ACCEPT) would otherwise
+            /// be silently unexportable, since `-3` parses as
+            /// UnaryNeg(IntLiteral(3)), not a single literal node.
+            std::optional<std::string> literalText;
+            if (stmt.expr) {
+                literalText = tryEvalConstLiteralText(*stmt.expr, false);
             }
-            if (literalText.empty()) {
+            if (!literalText) {
                 skippedText << "' (not exported: '" << stmt.name
-                            << "' CONST initializer isn't a plain integer/double literal)\n";
+                            << "' CONST initializer isn't a plain (optionally negated) "
+                               "integer/double literal)\n";
                 continue;
             }
-            typesText << "CONST " << stmt.name << " = " << literalText << "\n";
+            typesText << "CONST " << stmt.name << " = " << *literalText << "\n";
         } else if (stmt.kind == StmtKind::Enum) {
             /// Unlike CONST, every member's value is already fully
             /// resolved by Sema (resolvedValue) regardless of how it was

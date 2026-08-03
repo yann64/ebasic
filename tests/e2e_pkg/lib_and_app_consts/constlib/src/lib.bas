@@ -4,6 +4,12 @@
 
 CONST MaxRetries = 3
 
+' A negative-literal CONST (e.g. a real GTK GtkResponseType value like
+' GTK_RESPONSE_ACCEPT = -3) must be exported too - it parses as
+' UnaryNeg(IntLiteral), not a single literal node, so this is a real,
+' distinct case from a bare positive literal.
+CONST MinBalance = -100
+
 ENUM Direction
     North
     East

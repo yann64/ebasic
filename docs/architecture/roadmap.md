@@ -1335,6 +1335,38 @@ instead of the correct `14` - reverted via `git stash` to check, restored
 afterward) and passes with it. Full suite (47/47), clean
 `-Wall -Wextra -Werror` rebuild.
 
+## Fixed: a negative-literal `CONST` isn't exported across a `--lib` boundary
+
+Found while extending `eb-gtk4` with `GtkFileChooserNative`'s "response"
+handling: `GTK_RESPONSE_ACCEPT`/`GTK_RESPONSE_CANCEL` are real GTK enum
+constants with negative values (`-3`/`-6`), declared as ordinary `CONST`s
+in the raw binding layer - but `generateLibraryInterface`'s CONST-export
+check (`codegen.cpp`, added back in M5 alongside `ENUM` export) only
+recognized a bare `ExprKind::IntLiteral`/`DoubleLiteral` initializer. A
+negative literal like `-3` doesn't parse as one of those - `Parser::
+parseNegate` wraps it in `ExprKind::UnaryNeg` instead (matching `- - x`'s
+own right-associative grammar) - so these two constants were silently
+skipped from every consumer's generated interface, the exact same "not
+exported" failure mode as the `STRING`-return case fixed just above, just
+for `CONST` instead of a function signature.
+
+**Fix**: added a small recursive helper, `tryEvalConstLiteralText`
+(`codegen.cpp`, next to `isRelational`), that also recognizes `UnaryNeg`
+wrapping a literal (recursively, so `--3`/`- - -3` etc. all resolve
+correctly too, matching the grammar's own right-associativity) and
+re-derives the correctly-signed literal text. Re-declaring this in the
+generated interface is exactly as safe as the existing positive-literal
+case - a compile-time constant crosses no ABI boundary at all, unlike a
+function call.
+
+Verified by extending the existing `tests/e2e_pkg/lib_and_app_consts`
+case (already covering positive-`CONST`/`ENUM` export) with a new
+negative-valued `CONST MinBalance = -100`. Confirmed the test fails
+without the fix (`'MinBalance' is not declared` in the consumer - the
+exact same failure shape `GTK_RESPONSE_ACCEPT` hit in the wild - reverted
+via `git stash` to check, restored afterward) and passes with it. Full
+suite (47/47), clean `-Wall -Wextra -Werror` rebuild.
+
 ## Fixed: `ebpm`'s `LIBRARY_PATH` workaround broke every process on real Haiku hardware
 
 Found while running the real Haiku verification for the fix above:
