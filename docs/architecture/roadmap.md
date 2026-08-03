@@ -1265,7 +1265,7 @@ both confirmed no longer crash with `EBASIC_LIBRARY_PATH` set to the same
 directory that broke `LIBRARY_PATH`, and the full suite green on Haiku
 including `e2e_pkg_lib_and_app_extern_lib`.
 
-## `ebpm` central package index/registry (REG-0 through REG-9, in progress)
+## `ebpm` central package index/registry (REG-0 through REG-9, done)
 
 A Cargo-like `ebpm add <name>` experience: a central index of published
 packages (each with real, multiple versions), real SemVer constraint
@@ -1611,6 +1611,47 @@ happens, which doesn't block anything else in this plan (REG-4/REG-5/REG-6/
 REG-7's own tests all use their own local fake index/library repos via
 `EBASIC_INDEX_URL`, never the real default).
 
+### REG-9 Implementation Notes (docs + final verification, done)
+
+`docs/guide/ebpm.md` gained a full "Registry dependencies" section
+(version requirement syntax and its caret/tilde/exact table, non-
+backtracking resolution, `add`/`remove`/`list`/`search`/`update` each with
+a real example transcript against `mathlib-demo`) and a "Configuring the
+index" subsection (the `EBASIC_INDEX_URL` > `~/.ebpm/config.toml` >
+hardcoded-default priority order, and why `EBASIC_INDEX_URL` follows the
+project's own `EBASIC_LIBRARY_PATH` naming rather than any third-party
+tool's variable) - the manifest's `[dependencies]`/lockfile sections and
+the top-level usage block were updated alongside it so every existing
+example stays accurate now that `version`/registry entries exist. Two
+stale planning notes this effort was built on top of ("central registry
+deferred indefinitely" in the Key Open Design Questions list) were updated
+to point at this section rather than left dangling.
+
+**Summary of the whole REG-0..REG-9 effort**: `ebpm` gained a Cargo-style
+central package index - real multiple published versions per package, real
+SemVer caret/tilde/exact constraint matching, a non-backtracking resolver
+(one version per name for the whole graph, hard errors on genuine
+conflicts, never silent multi-version support), a lockfile extended to
+carry a registry dependency's resolved `git`/`ref` directly (so a pinned
+rebuild is fully offline-capable, matching a plain git dependency's own
+guarantee), and five new commands (`add`/`remove`/`list`/`search`/
+`update`). Two real, pre-existing bugs were found and fixed along the way
+(REG-0's git-cache-key collision on two refs of the same URL; REG-5's
+Windows-only TOML-escaping lockfile corruption, root-caused via a real CI
+diagnostic run) - both with regression tests that reproduce the failure
+mode portably, without needing the platform that first exposed them. A
+real starter index + demo library (`ebpm-index`, `mathlib-demo`) were
+scaffolded and verified end-to-end; pushing them to a public GitHub remote
+is the one deliberately deferred step, left for whenever the user gives
+the go-ahead.
+
+Verified: full suite (47/47) passing locally, a clean `-Wall -Wextra
+-Werror` rebuild, and (per slice, not just at the end) real CI green on
+all 4 platforms plus a real Haiku hardware run via `scripts/
+haiku_verify.sh` - REG-6 and REG-7 in particular each confirmed the exact
+Windows-lockfile-escaping fix and pin-reuse behavior on real Windows CI,
+not just inferred from local Linux testing.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
@@ -1626,7 +1667,7 @@ REG-7's own tests all use their own local fake index/library repos via
 - **`ON ERROR GOTO` mapping**: C++ exceptions internally vs. manual error-state/`longjmp` — needs an ADR before M1/M2 since FB's error model doesn't map cleanly onto C++ stack unwinding.
 - **`GOTO` into scopes with non-trivial destructors**: C++ forbids this; needs a codegen strategy (hoisting/restructuring) decided before GOTO support lands in M1.
 - **Precompiled stdlib mechanics (M6)**: prebuilt static/shared libs at link time, precompiled headers, or both — has real distribution/release-pipeline implications, scope concretely with the user when M6 starts.
-- **`ebpm` manifest format/name**: TOML recommended (matches "cargo-like"); central registry deferred indefinitely (git/path deps sufficient for a long while).
+- **`ebpm` manifest format/name**: TOML recommended (matches "cargo-like"); central registry originally deferred indefinitely (git/path deps sufficient for a long while) - un-deferred and shipped, see the REG-0..REG-9 section above.
 - **Extended FFI ambition**: README says "C/C++ headers/libs" — plan targets C-only for M4 (assumption above); revisit whether arbitrary C++ class/template reuse is truly wanted as a later milestone, since that's substantially harder (mangling, templates, overload resolution across the FFI boundary).
 
 ## First Files to Create (Implementation Start)
