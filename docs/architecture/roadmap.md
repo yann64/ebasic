@@ -1836,13 +1836,18 @@ in each sibling repo's own README/commit history.
   search path, silently shadowing it (confirmed by direct reproduction).
   Added to `ebpm-index` as `eb-cjson` `v0.1.0`.
 - **`ebasic-editor`** (`https://github.com/yann64/ebasic-editor`) -
-  scaffolded as an `ebpm [bin]` package depending on `gtk4 ^0.2` and
+  scaffolded as an `ebpm [bin]` package depending on `gtk4 ^0.3` and
   `eb-cjson ^0.1` (a real, zero-config registry resolution, both fetched
-  straight from GitHub); a minimal window with a `GtkSourceView`, and a
-  real eBasic `GtkSourceView` language-spec file
-  (`data/language-specs/ebasic.lang`, keywords pulled from the real
-  lexer's own table) wired in for actual syntax highlighting. LSP/`ebpm`/
-  `git` integration still to come.
+  straight from GitHub); a window with a `GtkSourceView` and a real
+  eBasic `GtkSourceView` language-spec file (`data/language-specs/
+  ebasic.lang`, keywords pulled from the real lexer's own table) for
+  actual syntax highlighting; Open/Save (`GtkFileChooserNative` + plain-
+  path file I/O, plus `Ctrl+S`), undo/redo, and a modified-indicator in
+  the window title. `eb-gtk4` itself grew to `v0.3.0` along the way
+  (`FileChooserNative`/`EventControllerKey`/file-I/O bindings, plus the
+  negative-literal-`CONST` compiler fix above, found via its own
+  `GTK_RESPONSE_ACCEPT`/`CANCEL` constants). LSP/`ebpm`/`git` integration
+  still to come.
 
 ## Testing Strategy
 
