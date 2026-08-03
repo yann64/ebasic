@@ -9,6 +9,33 @@ namespace fs = std::filesystem;
 
 namespace ebpm {
 
+namespace {
+
+/// Escapes a value for a TOML basic string (`"` and `\` are the only
+/// characters that need it for the plain ASCII text ever written here).
+/// A real, previously-latent bug, not just defensive hygiene: `pkg.dir`
+/// is a canonicalized *native* filesystem path - on Windows, that means
+/// backslash-separated, unlike a URL or a Unix-style path - and writing
+/// it here unescaped means `\a`/`\_`/`\m`/... (not valid TOML escape
+/// sequences) silently corrupt the *entire* file. Every later
+/// `readLockfilePins` call then catches the resulting parse error and
+/// treats it as "nothing pinned yet" - breaking pin-reuse completely and
+/// invisibly on Windows, for every dependency kind (not just a registry
+/// one), confirmed live via real Windows CI: a temporary diagnostic build
+/// showed `readLockfilePins` returning zero pins despite the lockfile
+/// visibly containing pin data under a plain text search.
+std::string escapeTomlString(const std::string& s) {
+    std::string r;
+    r.reserve(s.size());
+    for (char c : s) {
+        if (c == '"' || c == '\\') r.push_back('\\');
+        r.push_back(c);
+    }
+    return r;
+}
+
+} // namespace
+
 bool writeLockfile(const std::string& rootDir, const std::vector<ResolvedPackage>& order,
                     std::string& err) {
     fs::path lockPath = fs::path(rootDir) / "ebasic.lock";
@@ -20,16 +47,16 @@ bool writeLockfile(const std::string& rootDir, const std::vector<ResolvedPackage
     for (size_t i = 0; i + 1 < order.size(); ++i) {
         const ResolvedPackage& pkg = order[i];
         out << "\n[[package]]\n";
-        out << "name = \"" << pkg.name << "\"\n";
-        out << "path = \"" << pkg.dir << "\"\n";
+        out << "name = \"" << escapeTomlString(pkg.name) << "\"\n";
+        out << "path = \"" << escapeTomlString(pkg.dir) << "\"\n";
         if (!pkg.gitCommit.empty()) {
-            out << "commit = \"" << pkg.gitCommit << "\"\n";
+            out << "commit = \"" << escapeTomlString(pkg.gitCommit) << "\"\n";
         }
         if (pkg.sourceKind == SourceKind::Registry) {
-            out << "version = \"" << pkg.version << "\"\n";
-            out << "git = \"" << pkg.registryGit << "\"\n";
+            out << "version = \"" << escapeTomlString(pkg.version) << "\"\n";
+            out << "git = \"" << escapeTomlString(pkg.registryGit) << "\"\n";
             if (!pkg.registryRef.empty()) {
-                out << "ref = \"" << pkg.registryRef << "\"\n";
+                out << "ref = \"" << escapeTomlString(pkg.registryRef) << "\"\n";
             }
         }
     }

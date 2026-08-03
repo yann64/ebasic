@@ -43,3 +43,8 @@ target_link_libraries(semver_test PRIVATE ebasic_pkg)
 # REG-3: likewise for index.{hpp,cpp} - see index_test.cpp's own doc comment.
 add_executable(index_test src/index_test.cpp)
 target_link_libraries(index_test PRIVATE ebasic_pkg)
+
+# Regression test for a real Windows-only TOML-escaping bug found via
+# REG-5's own testing - see lockfile_test.cpp's own doc comment.
+add_executable(lockfile_test src/lockfile_test.cpp)
+target_link_libraries(lockfile_test PRIVATE ebasic_pkg)

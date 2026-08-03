@@ -208,6 +208,13 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_index_case.sh $<TARGET_FILE:index_test>
 )
 
+# Regression test for the Windows-only lockfile TOML-escaping bug found
+# via REG-5's own testing - see lockfile_test.cpp.
+add_test(
+    NAME lockfile_toml_escaping
+    COMMAND $<TARGET_FILE:lockfile_test>
+)
+
 # REG-4: a real registry dependency end to end (happy path + conflict
 # detection), against real fake "index" and "library" bare repos.
 add_test(

@@ -6,7 +6,6 @@
 
 #include <filesystem>
 #include <functional>
-#include <iostream>
 #include <unordered_map>
 
 namespace fs = std::filesystem;
@@ -141,12 +140,6 @@ bool resolveDependencyGraph(const std::string& rootDir, std::vector<ResolvedPack
                     SemVer chosen;
                     std::string chosenGit, chosenRef, chosenCommit;
                     bool haveChoice = false;
-                    std::cerr << "TEMPDEBUG pins.size()=" << pins.size() << " found="
-                              << (pinIt != pins.end()) << " commit=["
-                              << (pinIt != pins.end() ? pinIt->second.commit : "?") << "] version=["
-                              << (pinIt != pins.end() ? pinIt->second.version : "?") << "] git=["
-                              << (pinIt != pins.end() ? pinIt->second.git : "?") << "] ref=["
-                              << (pinIt != pins.end() ? pinIt->second.ref : "?") << "]\n";
                     if (pinIt != pins.end() && !pinIt->second.git.empty() &&
                         !pinIt->second.version.empty()) {
                         SemVer pinnedVersion;
