@@ -1942,6 +1942,64 @@ dependency), cleaning up everything it creates using the very functions
 under test - alongside the full existing suite (51/51) and a from-clean
 strict rebuild.
 
+## Post-1.0: A FreeBASIC-style Math Standard Library (Phase A of "the rest of the stdlib")
+
+Asked to implement *all* of FreeBASIC's standard library procedures -
+large enough in scope (string/file already shipped; math, date/time,
+process/environment, and array-bounds introspection all still missing,
+plus real design questions around console I/O and error handling) that
+it's being delivered in phases, each committed independently, per
+`/home/yann64/.claude/plans/lazy-bouncing-quasar.md`. Locked in up front:
+console/terminal control (`Color`/`Locate`/`Cls`/`InKey$`/...) is out of
+scope entirely (a poor fit for this project's actual GTK4-editor
+direction, and `InKey$` needs real terminal-mode plumbing this project
+has never touched); `ON ERROR`/`RESUME`/`ERR` error handling is out of
+scope permanently (a control-flow language feature, not a library
+procedure); `UBound`/`LBound` get their own later phase since they can't
+be ordinary `Extern "C++"` prelude functions the way every scalar
+stdlib procedure is (dynamic arrays are plain `std::vector<T>`, with no
+generic/templated `Declare` mechanism to bind a single function to
+"any array").
+
+This phase (Phase A): trig/exponential (`Abs`/`Sgn`/`Sqr`/`Sin`/`Cos`/
+`Tan`/`Asin`/`Acos`/`Atn`/`Atan2`/`Exp`/`Log`), `Int`/`Fix`, `Rnd`/
+`Randomize`, one explicit numeric conversion per distinct eBasic
+primitive type (`CByte`/`CUByte`/`CShort`/`CUShort`/`CInt`/`CUInt`/
+`CLngInt`/`CULngInt`/`CSng`/`CDbl`/`CBool` - deliberately *not*
+FreeBASIC's full historical list, which names several functions for
+what are, in eBasic, the same underlying type), and base conversions
+(`Hex`/`Oct`/`Bin`) - see `docs/reference/math-library.md`. Reused the
+string/file libraries' own mechanism exactly, zero new compiler
+machinery: more `Declare` lines in the same `Extern "C++"` prelude
+(`builtin_prelude.hpp`), a new runtime header (`mathlib.hpp`,
+`#include`d from `runtime.hpp`) with real `<cmath>`/`<random>`
+implementations.
+
+Real implementation choices, each a deliberate, documented
+simplification rather than an exact FreeBASIC match: every `Cxxx`
+conversion truncates toward zero (a plain `static_cast`, matching `Fix`)
+rather than FreeBASIC's own round-to-nearest `CInt`/`CLng` behavior, for
+one uniform rule across all eleven conversions. `Rnd`/`Randomize` share
+one process-global `std::mt19937_64`, seeded from `std::random_device`
+by default or a caller-supplied seed for deterministic reseeding -
+FreeBASIC's own legacy `Rnd(n < 0)`/`Rnd(n = 0)` quirks (deterministic
+reseed / repeat-last-value) are not replicated. `Hex`/`Oct`/`Bin` format
+negative numbers as their full two's-complement bit pattern in the
+target width, not a minus sign, matching real FreeBASIC's own `Hex$`.
+Name-collision check (the same discipline that renamed `Name` to
+`Rename` in the file library) came back clean - `examples/
+extern_interop.bas` declares its own lowercase `abs` bound to libc, but
+identifier resolution in this compiler is case-sensitive (confirmed via
+the lexer, which preserves an identifier's original case rather than
+normalizing it - only keyword matching uppercases), so it doesn't
+collide with the prelude's `Abs`.
+
+Verified: a standalone C++ program against `mathlib.hpp` directly (every
+function's output hand-checked, including negative-number `Int`/`Fix`
+and an out-of-range `CByte` wraparound), the same checks re-run through
+real `ebc`, `tests/e2e/math_library` (41 assertions), the full existing
+suite (52/52), and a from-clean strict rebuild.
+
 ## eBasic code editor (`ebasic-editor`) - ecosystem repos
 
 A real eBasic code editor, using `gtk4` (this repo's own registry

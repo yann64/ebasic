@@ -16,6 +16,7 @@ it's actually documented.
 - [Preprocessor](preprocessor.md)
 - [String Library](string-library.md)
 - [File Library](file-library.md)
+- [Math Library](math-library.md)
 
 ## Symbols
 
@@ -62,6 +63,16 @@ redeclare one of these names).
 | `FileCopy` | [File Library](file-library.md#filecopy) |
 | `ReadFile` | [File Library](file-library.md#readfile) |
 | `WriteFile` | [File Library](file-library.md#writefile) |
+| `Abs` | [Math Library](math-library.md#trigonometric-and-exponential-functions) |
+| `Sgn` | [Math Library](math-library.md#trigonometric-and-exponential-functions) |
+| `Sqr` | [Math Library](math-library.md#trigonometric-and-exponential-functions) |
+| `Sin` / `Cos` / `Tan` | [Math Library](math-library.md#trigonometric-and-exponential-functions) |
+| `Asin` / `Acos` / `Atn` / `Atan2` | [Math Library](math-library.md#trigonometric-and-exponential-functions) |
+| `Exp` / `Log` | [Math Library](math-library.md#trigonometric-and-exponential-functions) |
+| `Int` / `Fix` | [Math Library](math-library.md#int--fix) |
+| `Rnd` / `Randomize` | [Math Library](math-library.md#rnd--randomize) |
+| `CByte` / `CUByte` / `CShort` / `CUShort` / `CInt` / `CUInt` / `CLngInt` / `CULngInt` / `CSng` / `CDbl` / `CBool` | [Math Library](math-library.md#numeric-conversions-cxxx) |
+| `Hex` / `Oct` / `Bin` | [Math Library](math-library.md#base-conversions) |
 
 ## Preprocessor directives
 
