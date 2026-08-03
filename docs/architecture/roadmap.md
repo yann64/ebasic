@@ -1793,7 +1793,7 @@ haiku_verify.sh` - REG-6 and REG-7 in particular each confirmed the exact
 Windows-lockfile-escaping fix and pin-reuse behavior on real Windows CI,
 not just inferred from local Linux testing.
 
-## eBasic code editor (`ebasic-editor`, in progress) - ecosystem repos
+## eBasic code editor (`ebasic-editor`) - ecosystem repos
 
 A real eBasic code editor, using `gtk4` (this repo's own registry
 package) as its GUI toolkit, `gtksourceview` for syntax highlighting,
@@ -1803,6 +1803,14 @@ tool written in another language. Full plan, decisions, and scope cuts
 recorded when it was approved; brief pointers only here, matching REG-8's
 own "ecosystem repo" tracking precedent - the real technical detail lives
 in each sibling repo's own README/commit history.
+
+**Status: all six planned slices (C0-C5) implemented and shipped** - a
+manual verification checklist (C6, `ebasic-editor`'s own README) is the
+one remaining step, since this sandbox has no real GTK4 display backend
+to run the finished app in. One real, deliberate gap vs. the original
+plan: the locked-in "flat file list" sidebar was never actually built -
+the editor only opens/saves one file at a time via
+`GtkFileChooserNative`, no browser/sidebar at all.
 
 - **`eb-gtk4` v0.2.0** (`https://github.com/yann64/eb-gtk4`) - extends
   the existing `gtk4` registry package with text-editing (`GtkTextBuffer`/
