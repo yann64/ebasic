@@ -1890,8 +1890,22 @@ in each sibling repo's own README/commit history.
   directory for an `ebasic.toml` (`gtk4` gained `TextBufferAppendLine` in
   a new `v0.5.0`, specifically for this streaming-output shape).
   `tests/buildrun_smoke.bas` drives a real `ebpm build` against
-  `ebasic-editor` itself end to end, headlessly. `git` integration still
-  to come.
+  `ebasic-editor` itself end to end, headlessly. And now Source Control
+  (`src/gitui.bas`) - status/diff/stage/unstage/push/pull buttons plus a
+  `Commit...` message dialog, spawning the real `git` CLI (never
+  `libgit2`) via the same `GSubprocess` plumbing, output in the same
+  shared panel; `git` needs no package-root walk the way `ebpm` does (any
+  cwd inside a repo works), matching the plan's own locked-in scope -
+  status + diff + stage/commit + push/pull, no branch management/merge
+  UI/commit-log view. A real bug found before shipping: every `RunGit*`
+  argv array was missing `"git"` itself as `argv(0)` (the program name,
+  per `SubprocessLauncherSpawnv`'s own convention) - `git status` spawned
+  a nonexistent program literally named `status`, and `git diff` spawned
+  the real, wrong `/usr/bin/diff` - caught by `tests/gitui_smoke.bas`
+  actually inspecting the captured output (against a throwaway, isolated
+  fixture repo, never this project's own working repo) rather than just
+  checking it didn't crash. This completes the editor's planned feature
+  set - a final manual verification pass (C6) is next.
 
 ## Testing Strategy
 
