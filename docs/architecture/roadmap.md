@@ -1783,7 +1783,18 @@ in each sibling repo's own README/commit history.
   bridging to `ZSTRING`, and a string literal assigned to `ZSTRING`
   dangling once it outlives its own statement. Added to `ebpm-index` as
   `gtk4` `v0.2.0`.
-- **`eb-cjson`, `ebasic-editor`**: not yet started (next up).
+- **`eb-cjson` v0.1.0** (`https://github.com/yann64/eb-cjson`) - a cJSON
+  wrapper (JSON parsing/building) for the LSP client's JSON-RPC wire
+  format, since eBasic's own `STRING` type has no manipulation functions
+  yet. `CJson` mirrors cJSON's own public struct field-for-field (direct
+  field access, verified byte-for-byte correct empirically before
+  committing to it) rather than an accessor call per read. Named
+  `eb-cjson`, not the shorter `cjson` - that name would make `ebpm`'s own
+  build output (`target/libcjson.a`) collide with the real system
+  library's linker name (`-lcjson` -> `libcjson.so`) on the same `-L`
+  search path, silently shadowing it (confirmed by direct reproduction).
+  Added to `ebpm-index` as `eb-cjson` `v0.1.0`.
+- **`ebasic-editor`**: not yet started (next up).
 
 ## Testing Strategy
 
