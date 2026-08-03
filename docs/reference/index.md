@@ -15,6 +15,7 @@ it's actually documented.
 - [Doc Comments (`'''`)](doc-comments.md)
 - [Preprocessor](preprocessor.md)
 - [String Library](string-library.md)
+- [File Library](file-library.md)
 
 ## Symbols
 
@@ -52,6 +53,15 @@ redeclare one of these names).
 | `Chr` / `Asc` | [String Library](string-library.md#chr--asc) |
 | `Space` | [String Library](string-library.md#space) |
 | `Repeat` | [String Library](string-library.md#repeat) |
+| `FileExists` | [File Library](file-library.md#fileexists) |
+| `FileLen` | [File Library](file-library.md#filelen) |
+| `Kill` | [File Library](file-library.md#kill) |
+| `MkDir` | [File Library](file-library.md#mkdir) |
+| `RmDir` | [File Library](file-library.md#rmdir) |
+| `Rename` | [File Library](file-library.md#rename) |
+| `FileCopy` | [File Library](file-library.md#filecopy) |
+| `ReadFile` | [File Library](file-library.md#readfile) |
+| `WriteFile` | [File Library](file-library.md#writefile) |
 
 ## Preprocessor directives
 

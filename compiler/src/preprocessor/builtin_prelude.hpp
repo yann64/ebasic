@@ -13,22 +13,24 @@ inline const char* kBuiltinPreludeFileName = "<builtin>";
 
 /// A hardcoded eBasic source string, spliced in (via the same
 /// `expandSource` mechanism `#include` itself uses - see preprocess())
-/// before every compiled program's own source - eBasic's standard string
-/// library (LEN/MID/LEFT/RIGHT/INSTR/etc., matching FreeBASIC's own set;
-/// see docs/reference/string-library.md), always available, no `#include`
-/// needed. Declares each function's signature only (`Extern "C++"`, no
-/// `Lib` clause - nothing to link, no `Namespace` block - callable bare);
-/// the real implementations are ordinary C++ functions in
-/// runtime/include/ebasic/runtime/stringlib.hpp, already `#include`d by
-/// every generated program's own runtime.hpp - so no linking step is
-/// needed for any of this either.
+/// before every compiled program's own source - eBasic's standard
+/// library, always available, no `#include` needed. Declares each
+/// function's signature only (`Extern "C++"`, no `Lib` clause - nothing
+/// to link, no `Namespace` block - callable bare); the real
+/// implementations are ordinary C++ functions in
+/// runtime/include/ebasic/runtime/{stringlib,filelib}.hpp, already
+/// `#include`d by every generated program's own runtime.hpp - so no
+/// linking step is needed for any of this either.
 ///
 /// Every `STRING` parameter is explicitly `BYVAL` - `STRING` defaults to
 /// `BYREF` otherwise, and a `BYREF` parameter can't have a default value
 /// (see docs/reference/procedures-and-arrays.md); `INTEGER`/`DOUBLE`
-/// already default to `BYVAL`, so they're left implicit here.
+/// already default to `BYVAL`, so they're left implicit here (except
+/// `ReadFile`'s own `ok` out-parameter, which needs `BYREF` explicitly).
 inline const std::string kBuiltinPreludeSource = R"EBASIC_PRELUDE(
 Extern "C++"
+    ' The string library (LEN/MID/LEFT/RIGHT/INSTR/etc., matching
+    ' FreeBASIC's own set) - see docs/reference/string-library.md.
     Declare Function Len(BYVAL s AS STRING) AS INTEGER
     Declare Function Left(BYVAL s AS STRING, count AS INTEGER) AS STRING
     Declare Function Right(BYVAL s AS STRING, count AS INTEGER) AS STRING
@@ -46,6 +48,21 @@ Extern "C++"
     Declare Function Asc(BYVAL s AS STRING) AS INTEGER
     Declare Function Space(n AS INTEGER) AS STRING
     Declare Function Repeat(n AS INTEGER, BYVAL s AS STRING) AS STRING
+
+    ' The file library (KILL/MKDIR/RMDIR/NAME-as-Rename/etc., matching
+    ' FreeBASIC's own filesystem-level set) - see
+    ' docs/reference/file-library.md. Every function returns a plain
+    ' INTEGER status (nonzero = success) - eBasic has no error-handling
+    ' construct to raise a real error into.
+    Declare Function FileExists(BYVAL path AS STRING) AS INTEGER
+    Declare Function FileLen(BYVAL path AS STRING) AS LONGINT
+    Declare Function Kill(BYVAL path AS STRING) AS INTEGER
+    Declare Function MkDir(BYVAL path AS STRING) AS INTEGER
+    Declare Function RmDir(BYVAL path AS STRING) AS INTEGER
+    Declare Function Rename(BYVAL oldPath AS STRING, BYVAL newPath AS STRING) AS INTEGER
+    Declare Function FileCopy(BYVAL source AS STRING, BYVAL destination AS STRING) AS INTEGER
+    Declare Function ReadFile(BYVAL path AS STRING, BYREF ok AS INTEGER) AS STRING
+    Declare Function WriteFile(BYVAL path AS STRING, BYVAL contents AS STRING, append AS INTEGER = 0) AS INTEGER
 End Extern
 )EBASIC_PRELUDE";
 
