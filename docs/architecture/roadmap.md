@@ -1900,13 +1900,23 @@ recorded when it was approved; brief pointers only here, matching REG-8's
 own "ecosystem repo" tracking precedent - the real technical detail lives
 in each sibling repo's own README/commit history.
 
-**Status: all six planned slices (C0-C5) implemented and shipped** - a
-manual verification checklist (C6, `ebasic-editor`'s own README) is the
-one remaining step, since this sandbox has no real GTK4 display backend
-to run the finished app in. One real, deliberate gap vs. the original
-plan: the locked-in "flat file list" sidebar was never actually built -
-the editor only opens/saves one file at a time via
-`GtkFileChooserNative`, no browser/sidebar at all.
+**Status: all six originally planned slices (C0-C5) shipped, plus a C7
+follow-up** - a manual verification checklist (`ebasic-editor`'s own
+README) is the one remaining step for all of it, since this sandbox has
+no real GTK4 display backend to run the finished app in. C7 closed the
+one real, deliberate gap left after C0-C6: the plan's own locked-in "flat
+file list" sidebar (`src/filebrowser.bas`) - a flat list of the currently
+browsed folder's immediate contents (never a recursive tree), each row
+decorated with its `git status --porcelain=v1` glyph, refreshed after
+Stage/Unstage/Commit. Split the same way `buildrun.bas`/`gitui.bas`
+already are: pure, headlessly-testable logic (directory listing, git-
+status-line parsing via the string standard library's own `Left`/`Mid`)
+versus widget-touching code that's manual-verify only. A real bug caught
+before it could crash an *existing* headless test: `gitui.bas`'s own
+`OnGitExit` started unconditionally refreshing the sidebar widget after
+every git action, which would have segfaulted the moment any git test
+ran in a context where the sidebar was never initialized - fixed with a
+guard on the sidebar actually being set up.
 
 - **`eb-gtk4` v0.2.0** (`https://github.com/yann64/eb-gtk4`) - extends
   the existing `gtk4` registry package with text-editing (`GtkTextBuffer`/
