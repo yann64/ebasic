@@ -1889,6 +1889,59 @@ rejection) and `tests/e2e/string_library` (every function's normal case
 plus its documented clamping/edge-case behavior) all green, alongside the
 full existing suite (50/50) and a from-clean strict rebuild.
 
+## Post-1.0: A FreeBASIC-style File Standard Library
+
+Asked directly whether eBasic already had FreeBASIC's file creation/
+modification/deletion procedures - confirmed it had **none at all**
+(zero file-related lexer keywords, and the runtime's three headers were
+`bstring.hpp`/`print.hpp`/`stringlib.hpp` only). Scoped to plain
+filesystem operations - create/delete/rename/copy a file, create/remove
+a directory, check existence/size, read/write a whole file's contents
+(`FileExists`/`FileLen`/`Kill`/`MkDir`/`RmDir`/`Rename`/`FileCopy`/
+`ReadFile`/`WriteFile` - see `docs/reference/file-library.md`) - not
+FreeBASIC's much larger `OPEN`/`PRINT #`/`INPUT #`/`GET`/`PUT`/`SEEK`
+streaming-file-handle API (a real statement-level feature with handle
+management and random/binary access, genuinely bigger scope than what
+was asked).
+
+Reused the string library's own mechanism exactly, with zero new
+compiler machinery: more `Declare` lines in the same compiler-injected
+`Extern "C++"` prelude (`builtin_prelude.hpp`), a new runtime header
+(`filelib.hpp`, `#include`d from `runtime.hpp`) with the real
+implementations - already covered by the existing `Sema` STRING-
+signature exemption and `docgen` filtering, unchanged. `WriteFile`'s
+optional `append` flag reuses the default-parameter feature shipped
+alongside the string library.
+
+Real implementation choices: `std::filesystem`'s non-throwing
+`std::error_code` overloads throughout (`remove`/`create_directory`/
+`rename`/`copy_file`/`exists`/`file_size`) - since eBasic has no
+exception/error-handling construct (`ON ERROR`/`TRY`) to raise a real
+error into, every function returns a plain `INTEGER` status instead
+(nonzero = success, matching this language's own `TRUE = -1`
+convention). FreeBASIC's own `Name oldfile As newfile` is renamed to
+`Rename` - `name` is already an extremely common identifier
+(`DIM name AS STRING` is everywhere) and reserving it globally as a
+pre-declared builtin would have broken existing code; every other
+candidate name was checked against `tests`/`examples` too (all clear).
+`RmDir` explicitly checks `is_directory` first, so calling it on a
+plain file fails cleanly rather than silently deleting the file; `MkDir`
+never creates missing parent directories ("mkdir -p" is out of scope,
+matching real FreeBASIC's own single-level `MkDir`).
+
+This is the runtime's *first* use of `<filesystem>` (the string library
+needed none) - flagged explicitly as a real, not-yet-CI-proven
+dependency surface, unlike `stringlib.hpp`'s plain `<string>`/
+`<sstream>`.
+
+Verified: `tests/e2e/file_library` - every normal case plus every
+documented failure case (a missing file/directory, a non-empty
+directory, `RmDir` on a plain file) via real filesystem operations
+against plain relative paths (no platform-specific temp-directory
+dependency), cleaning up everything it creates using the very functions
+under test - alongside the full existing suite (51/51) and a from-clean
+strict rebuild.
+
 ## eBasic code editor (`ebasic-editor`) - ecosystem repos
 
 A real eBasic code editor, using `gtk4` (this repo's own registry
