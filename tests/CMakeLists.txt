@@ -127,6 +127,21 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/function_pointers ${EBASIC_FIXTURE_LIB_DIR}
 )
 
+add_test(
+    NAME e2e_default_params
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/default_params
+)
+
+add_test(
+    NAME e2e_default_params_errors
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/default_params_errors.sh $<TARGET_FILE:ebc>
+)
+
+add_test(
+    NAME e2e_string_library
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/string_library
+)
+
 # M5: a parallel golden-test harness (tests/e2e_pkg/) driving ebpm rather
 # than ebc directly - each case dir is itself a fixture package (ebasic.toml
 # + src/) plus an expected.stdout, round-tripped through `ebpm run`.

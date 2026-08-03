@@ -1,5 +1,7 @@
 #include "preprocessor/preprocessor.hpp"
 
+#include "preprocessor/builtin_prelude.hpp"
+
 #include <cctype>
 #include <filesystem>
 #include <fstream>
@@ -309,6 +311,17 @@ PreprocessResult preprocess(const std::string& mainSource, const std::string& ma
 
     PreprocessResult result;
     std::ostringstream out;
+
+    /// eBasic's own standard string library (LEN/MID/LEFT/RIGHT/INSTR/etc. -
+    /// see builtin_prelude.hpp) is spliced in first, via the exact same
+    /// expansion machinery `#include` itself uses, under its own dedicated
+    /// synthetic "file" - so it's always available, in every compiled
+    /// program, with no `#include` needed. Its own declarations never
+    /// reference `dir`/`includeDirs` (no `#include` of its own), so passing
+    /// the main file's own `dir` here is inert either way.
+    int preludeFileId = diags.registerFile(kBuiltinPreludeFileName);
+    expandSource(state, kBuiltinPreludeSource, preludeFileId, dir, out, result.lineMap);
+
     expandSource(state, mainSource, fileId, dir, out, result.lineMap);
     result.source = out.str();
     return result;

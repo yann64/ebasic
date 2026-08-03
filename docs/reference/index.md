@@ -14,6 +14,7 @@ it's actually documented.
 - [`EXTERN` / C-C++ Interop](extern-interop.md)
 - [Doc Comments (`'''`)](doc-comments.md)
 - [Preprocessor](preprocessor.md)
+- [String Library](string-library.md)
 
 ## Symbols
 
@@ -31,6 +32,26 @@ it's actually documented.
 | `=` `<>` `<` `>` `<=` `>=` | comparison | [Operators](operators.md#comparison-operators) |
 | `@` | address-of | [Pointers](namespaces-pointers-unions.md#pointers-ptr--) |
 | `->` | member access through a pointer | [Pointers](namespaces-pointers-unions.md#pointers-ptr--) |
+
+## Standard library functions
+
+Not reserved keywords - ordinary, always pre-declared functions (see
+[String Library](string-library.md) for why a program still can't
+redeclare one of these names).
+
+| Function | Reference |
+|---|---|
+| `Len` | [String Library](string-library.md#len) |
+| `Left` / `Right` | [String Library](string-library.md#left--right) |
+| `Mid` | [String Library](string-library.md#mid) |
+| `InStr` / `InStrRev` | [String Library](string-library.md#instr--instrrev) |
+| `UCase` / `LCase` | [String Library](string-library.md#ucase--lcase) |
+| `LTrim` / `RTrim` / `Trim` | [String Library](string-library.md#ltrim--rtrim--trim) |
+| `Str` | [String Library](string-library.md#str) |
+| `Val` | [String Library](string-library.md#val) |
+| `Chr` / `Asc` | [String Library](string-library.md#chr--asc) |
+| `Space` | [String Library](string-library.md#space) |
+| `Repeat` | [String Library](string-library.md#repeat) |
 
 ## Preprocessor directives
 

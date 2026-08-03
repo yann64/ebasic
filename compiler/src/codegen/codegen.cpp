@@ -670,7 +670,8 @@ void Codegen::genTypeDecl(const Stmt& stmt) {
             bool isGetter = method->kind == StmtKind::FunctionDecl;
             std::string retType = isGetter ? cppType(method->declaredType) : "void";
             typesOut_ << ind(1) << retType << " " << mangleName(method->name)
-                       << (isGetter ? "_get(" : "_set(") << buildParamList(method->params) << ");\n";
+                       << (isGetter ? "_get(" : "_set(")
+                       << buildParamList(method->params, /*includeDefaults=*/true) << ");\n";
             continue;
         }
         bool isFunction = method->kind == StmtKind::FunctionDecl;
@@ -679,7 +680,8 @@ void Codegen::genTypeDecl(const Stmt& stmt) {
         /// not `Virtual` was also explicitly written (Sema's own rule).
         bool isVirtual = method->isVirtual || method->isOverride;
         typesOut_ << ind(1) << (isVirtual ? "virtual " : "") << retType << " "
-                   << mangleName(method->name) << "(" << buildParamList(method->params) << ")"
+                   << mangleName(method->name) << "("
+                   << buildParamList(method->params, /*includeDefaults=*/true) << ")"
                    << (method->isOverride ? " override" : "") << ";\n";
     }
     typesOut_ << "};\n\n";
@@ -688,7 +690,7 @@ void Codegen::genTypeDecl(const Stmt& stmt) {
     typesEmitted_.insert(key);
 }
 
-std::string Codegen::buildParamList(const std::vector<Param>& params) {
+std::string Codegen::buildParamList(const std::vector<Param>& params, bool includeDefaults) {
     std::string paramList;
     for (size_t i = 0; i < params.size(); ++i) {
         if (i > 0) paramList += ", ";
@@ -696,6 +698,16 @@ std::string Codegen::buildParamList(const std::vector<Param>& params) {
         paramList += cppType(p.type);
         paramList += p.byRef ? "& " : " ";
         paramList += mangleName(p.name);
+        /// A real C++ default argument - only ever legal on the *first*
+        /// signature the translation unit sees (repeating it identically on
+        /// a later re-declaration, e.g. an out-of-line body following its
+        /// own in-class/forward-declared prototype, is a hard "redefinition
+        /// of default argument" error), so callers pass `includeDefaults =
+        /// false` for that second emission - see genProcedure/
+        /// genMethodDefinition.
+        if (includeDefaults && p.defaultValue) {
+            paramList += " = " + genExpr(*p.defaultValue);
+        }
     }
     return paramList;
 }
@@ -754,7 +766,7 @@ void Codegen::genProcedure(const Stmt& stmt) {
         /// all - it's already a normal, real C++ declaration, the concrete
         /// payoff of transpiling to real C++ rather than emulating mangling.
         std::string externName = stmt.externAlias.empty() ? stmt.name : stmt.externAlias;
-        std::string paramList = buildParamList(stmt.params);
+        std::string paramList = buildParamList(stmt.params, /*includeDefaults=*/true);
         bool wrapC = stmt.externLinkage == "C";
         if (wrapC) protoOut_ << "extern \"C\" {\n";
         protoOut_ << retType << " " << externName << "(" << paramList << ");\n";
@@ -764,12 +776,20 @@ void Codegen::genProcedure(const Stmt& stmt) {
 
     std::string name = stmt.isOperator ? ("operator" + cppOperatorToken(stmt.operatorBinOp))
                                         : mangleName(stmt.name);
-    std::string paramList =
-        stmt.isOperator ? buildOperatorParamList(stmt.params) : buildParamList(stmt.params);
+    /// Two separate renderings, not one reused string: a default argument
+    /// may only appear on the *first* signature emission the translation
+    /// unit sees (see buildParamList's own doc comment) - the prototype
+    /// gets it, the body definition doesn't.
+    std::string protoParamList =
+        stmt.isOperator ? buildOperatorParamList(stmt.params)
+                         : buildParamList(stmt.params, /*includeDefaults=*/true);
+    std::string defParamList =
+        stmt.isOperator ? protoParamList
+                         : buildParamList(stmt.params, /*includeDefaults=*/false);
 
-    protoOut_ << retType << " " << name << "(" << paramList << ");\n";
+    protoOut_ << retType << " " << name << "(" << protoParamList << ");\n";
 
-    procOut_ << retType << " " << name << "(" << paramList << ") {\n";
+    procOut_ << retType << " " << name << "(" << defParamList << ") {\n";
     if (isFunction) {
         procOut_ << ind(1) << retType << " eb__ret{};\n";
     }
@@ -787,7 +807,10 @@ void Codegen::genProcedure(const Stmt& stmt) {
 void Codegen::genMethodDefinition(const Stmt& stmt) {
     bool isFunction = stmt.kind == StmtKind::FunctionDecl;
     std::string owner = mangleName(stmt.ownerType);
-    std::string paramList = buildParamList(stmt.params);
+    /// The in-class declaration (genTypeDecl) already rendered any default
+    /// argument - this out-of-line body definition must not repeat it (a
+    /// hard C++ error), so `includeDefaults = false`.
+    std::string paramList = buildParamList(stmt.params, /*includeDefaults=*/false);
 
     /// A constructor/destructor has no return type at all in C++ (not even
     /// `void`) and is named after the owning TYPE itself; a real method

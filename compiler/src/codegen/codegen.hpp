@@ -136,8 +136,13 @@ private:
     static std::string mangleName(const std::string& name);
     /// Renders a C++ parameter list ("T1 a, T2& b, ...") from BASIC params -
     /// shared by a free SUB/FUNCTION's prototype+definition and a TYPE
-    /// method's declaration+out-of-line definition.
-    static std::string buildParamList(const std::vector<Param>& params);
+    /// method's declaration+out-of-line definition. `includeDefaults`
+    /// governs whether a defaulted parameter's `= <value>` is rendered -
+    /// only the first signature emission a translation unit sees may have
+    /// it (see the .cpp's own doc comment on this parameter).  Not
+    /// `static` (unlike `buildOperatorParamList`) - a defaulted param's
+    /// value is rendered via `genExpr`, an instance method.
+    std::string buildParamList(const std::vector<Param>& params, bool includeDefaults);
     /// Same, but for an Operator overload's parameter list specifically: a
     /// UserDefined-typed parameter is always rendered `const T&` regardless
     /// of the source's BYVAL/BYREF (a plain mutable `T&`, this codebase's

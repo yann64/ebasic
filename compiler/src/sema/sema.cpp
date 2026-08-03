@@ -1,5 +1,7 @@
 #include "sema/sema.hpp"
 
+#include "preprocessor/builtin_prelude.hpp"
+
 #include <algorithm>
 #include <cctype>
 
@@ -520,7 +522,19 @@ void Sema::collectOperators(std::vector<StmtPtr>& stmts) {
 
 void Sema::collectExternSignatureChecks(std::vector<StmtPtr>& stmts) {
     auto checkType = [&](const Type& type, SourceLoc loc, const std::string& what) {
-        if (type.kind == TypeKind::StringT) {
+        /// `STRING` (a real C++ class, `ebasic::rt::BString` - not a
+        /// C-layout value) is rejected in a real, user-written EXTERN/
+        /// DECLARE signature: it can't safely cross into an arbitrary,
+        /// separately-compiled library the way this compiler's own real
+        /// runtime functions can. The one exception is the compiler's own
+        /// injected standard-library prelude (builtin_prelude.hpp,
+        /// spliced into every program by preprocess()) - those signatures
+        /// bind to real C++ functions in runtime/include/ebasic/runtime/
+        /// stringlib.hpp that this project fully controls and *does* take
+        /// BString directly, so the general safety net doesn't apply to
+        /// them.
+        if (type.kind == TypeKind::StringT &&
+            diags_.fileName(loc.fileId) != kBuiltinPreludeFileName) {
             diags_.error(loc, what + " cannot be STRING in an EXTERN/DECLARE signature - use "
                                "ZSTRING (or ZSTRING PTR) for a C-compatible string");
             return;
@@ -789,9 +803,21 @@ bool Sema::isLvalue(const Expr& expr) const {
 }
 
 void Sema::checkCallArgs(const ProcedureInfo& proc, std::vector<ExprPtr>& args, SourceLoc loc) {
-    if (args.size() != proc.params.size()) {
+    if (args.size() > proc.params.size()) {
         diags_.error(loc, "expected " + std::to_string(proc.params.size()) + " argument(s), got " +
                                std::to_string(args.size()));
+    } else if (args.size() < proc.params.size()) {
+        /// Fewer args than declared is only fine if every parameter beyond
+        /// the provided ones has a default value (Parser::parseParamList
+        /// already guarantees any parameter with a default is followed only
+        /// by other defaulted parameters, so it's enough to check the first
+        /// missing one).
+        const Param& firstMissing = proc.params[args.size()];
+        if (!firstMissing.defaultValue) {
+            diags_.error(loc, "missing required argument '" + firstMissing.name + "' (expected " +
+                                   std::to_string(proc.params.size()) + " argument(s), got " +
+                                   std::to_string(args.size()) + ")");
+        }
     }
     size_t n = std::min(args.size(), proc.params.size());
     for (size_t i = 0; i < n; ++i) {

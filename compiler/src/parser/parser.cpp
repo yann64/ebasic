@@ -977,9 +977,30 @@ StmtPtr Parser::parseExit() {
     return stmt;
 }
 
+namespace {
+/// A default parameter value is restricted to a literal (an arbitrary
+/// per-call-site default expression isn't supported yet) - the same shape
+/// `tryEvalConstLiteralText` (codegen.cpp) already accepts for a `--lib`-
+/// exportable `CONST`: a bare literal, or a literal negated by unary minus.
+bool isLiteralDefaultExpr(const Expr& expr) {
+    switch (expr.kind) {
+        case ExprKind::IntLiteral:
+        case ExprKind::DoubleLiteral:
+        case ExprKind::StringLiteral:
+        case ExprKind::BoolLiteral:
+            return true;
+        case ExprKind::UnaryNeg:
+            return expr.lhs && isLiteralDefaultExpr(*expr.lhs);
+        default:
+            return false;
+    }
+}
+} // namespace
+
 std::vector<Param> Parser::parseParamList() {
     std::vector<Param> params;
     if (!match(TokenKind::LParen)) return params;
+    bool sawDefault = false;
     if (!check(TokenKind::RParen)) {
         for (;;) {
             SourceLoc loc = peek().loc;
@@ -1003,6 +1024,23 @@ std::vector<Param> Parser::parseParamList() {
             p.type = type;
             p.byRef = byRef;
             p.loc = loc;
+
+            if (match(TokenKind::Equals)) {
+                ExprPtr defaultExpr = parseExpr();
+                if (byRef) {
+                    diags_.error(loc, "a BYREF parameter cannot have a default value");
+                } else if (!defaultExpr || !isLiteralDefaultExpr(*defaultExpr)) {
+                    diags_.error(loc, "a parameter's default value must be a literal");
+                } else {
+                    p.defaultValue = std::shared_ptr<Expr>(std::move(defaultExpr));
+                }
+                sawDefault = true;
+            } else if (sawDefault) {
+                diags_.error(loc, "parameter '" + p.name +
+                                       "' must have a default value (it follows a "
+                                       "parameter that has one)");
+            }
+
             params.push_back(std::move(p));
 
             if (!match(TokenKind::Comma)) break;

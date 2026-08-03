@@ -88,6 +88,49 @@ CALL TryIncrement(counter)
 PRINT counter        ' still 11
 ```
 
+### Default parameter values
+
+```basic
+FUNCTION Greet(BYVAL name AS STRING, BYVAL greeting AS STRING = "Hello") AS STRING
+    Greet = greeting & ", " & name & "!"
+END FUNCTION
+
+PRINT Greet("World")          ' Hello, World!
+PRINT Greet("World", "Hi")    ' Hi, World!
+```
+
+A trailing `= <literal>` makes a parameter optional - a call may omit it
+(and every parameter after it, which must also have a default) and get the
+literal's value instead. Three rules, all enforced at compile time:
+
+- **Trailing-only**: once one parameter in a list has a default, every
+  parameter after it must too.
+- **`BYVAL`-only**: a `BYREF` parameter can't have a default (there's no
+  addressable temporary for a missing argument to bind to).
+- **Literal-only**: the default must be a literal (a number, string,
+  boolean, or a negated numeric literal like `-1`) - not an arbitrary
+  expression (so it can't reference another parameter, a global, etc.).
+
+Applies to a free `SUB`/`FUNCTION`, an `Extern`/`Declare` signature, and a
+`TYPE` method alike:
+
+```basic
+TYPE Counter
+    value AS INTEGER
+    Declare Function AddTo(amount AS INTEGER = -1) AS INTEGER
+END TYPE
+
+FUNCTION Counter.AddTo(amount AS INTEGER = -1) AS INTEGER
+    THIS.value = THIS.value + amount
+    AddTo = THIS.value
+END FUNCTION
+
+DIM c AS Counter
+c.value = 10
+PRINT c.AddTo()     ' 9  (defaults to -1)
+PRINT c.AddTo(5)    ' 14
+```
+
 ### `EXIT SUB` / `EXIT FUNCTION`
 
 Returns immediately from the enclosing `SUB`/`FUNCTION` (a `FUNCTION`

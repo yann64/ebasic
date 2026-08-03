@@ -347,11 +347,24 @@ enum class LoopKind {
 /// One SUB/FUNCTION parameter. `byRef` is resolved by the parser from an
 /// explicit BYVAL/BYREF keyword, or FreeBASIC's default otherwise: BYREF for
 /// STRING and user-defined TYPE, BYVAL for every other built-in type.
+///
+/// `defaultValue` (null if this parameter is required) makes it optional -
+/// a trailing `= <literal>` in the parameter list. Only ever set on a BYVAL
+/// parameter (a BYREF default would need an addressable temporary to bind
+/// to, not supported) and restricted by the parser to a literal expression
+/// (an arbitrary per-call-site default expression isn't supported yet).
+/// Once one parameter in a list has a default, every parameter after it
+/// must too - matches real FreeBASIC/C++ default-argument rules, and is
+/// what lets Codegen map this directly onto a real C++ default argument.
+/// `shared_ptr`, not `ExprPtr` (`unique_ptr`) - `Param`/`ProcedureInfo` are
+/// copied around (e.g. Sema registering a signature), and a parsed literal
+/// default is small and immutable, so shared ownership is harmless.
 struct Param {
     std::string name;
     Type type;
     bool byRef;
     SourceLoc loc;
+    std::shared_ptr<Expr> defaultValue;
 };
 
 /// One field of a TYPE. Deliberately not reusing Param - fields need no byRef.

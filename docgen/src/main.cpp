@@ -3,10 +3,12 @@
 #include "diagnostics/diagnostics.hpp"
 #include "lexer/lexer.hpp"
 #include "parser/parser.hpp"
+#include "preprocessor/builtin_prelude.hpp"
 #include "preprocessor/preprocessor.hpp"
 
 #include "ebasic/version.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -125,6 +127,18 @@ int main(int argc, char** argv) {
         diags.printAll(std::cerr);
         return 1;
     }
+
+    /// The compiler's own standard-library prelude (LEN/MID/LEFT/RIGHT/
+    /// INSTR/etc. - see builtin_prelude.hpp) is spliced into every
+    /// compiled program's source, including this one - real user/package
+    /// content only, never the compiler's own injected declarations,
+    /// belongs in generated docs.
+    module.stmts.erase(
+        std::remove_if(module.stmts.begin(), module.stmts.end(),
+                        [&](const ebasic::StmtPtr& stmt) {
+                            return diags.fileName(stmt->loc.fileId) == ebasic::kBuiltinPreludeFileName;
+                        }),
+        module.stmts.end());
 
     std::error_code ec;
     fs::create_directories(outputDir, ec);
