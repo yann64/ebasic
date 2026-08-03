@@ -52,6 +52,13 @@ void annotatePointerBridge(const Type& target, Expr& value) {
         /// `pointerCastTo`/`genExpr` cast-insertion machinery with no
         /// Codegen changes at all.
         value.pointerCastTo = std::make_shared<Type>(target);
+    } else if (target.kind == TypeKind::ZStringT && value.kind == ExprKind::StringLiteral) {
+        /// A bare string literal assigned/passed somewhere a ZSTRING is
+        /// expected - see Expr::suppressStringWrap's own doc comment for
+        /// the dangling-pointer bug this avoids (Codegen's default
+        /// StringLiteral rendering always wraps it in a temporary
+        /// BString(...), safe only within the same statement).
+        value.suppressStringWrap = true;
     }
 }
 

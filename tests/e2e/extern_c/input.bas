@@ -5,6 +5,7 @@ Extern "C" Lib "ebfixturec"
     Declare Function eb_fixture_maybe_null(ByVal flag AS INTEGER) AS ZSTRING
     Declare Function eb_fixture_malloc_string() AS ANY PTR
     Declare Sub eb_fixture_free(ByVal p AS ANY PTR)
+    Declare Function eb_fixture_sum_lengths(ByVal arr AS ANY PTR, ByVal count AS INTEGER) AS INTEGER
 End Extern
 
 PRINT eb_fixture_add(2, 3)
@@ -37,3 +38,13 @@ DIM copied AS STRING
 copied = viaZstring
 CALL eb_fixture_free(rawPtr)
 PRINT copied
+
+' Regression test for the string-literal-to-ZSTRING dangling-pointer bug:
+' each element is assigned in its own statement (not consumed within the
+' same expression as the literal), then read back afterward, across a
+' function-call boundary - exactly the shape that used to corrupt.
+DIM names(2) AS ZSTRING
+names(0) = "echo"
+names(1) = "hello"
+names(2) = "world"
+PRINT eb_fixture_sum_lengths(@names(0), 3)

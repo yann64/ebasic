@@ -91,3 +91,22 @@ void* eb_fixture_malloc_string(void) {
 void eb_fixture_free(void* p) {
     free(p);
 }
+
+/** Sums strlen() of each of `count` strings in an array (count-driven, not
+ * NULL-terminated) - reads each string's *real content*, not just pointer
+ * non-nullity, unlike a NULL-counting function (glib's g_strv_length) would.
+ * Regression test for a real dangling-pointer bug: assigning a string
+ * literal to a ZSTRING array element used to wrap it in a temporary BString,
+ * whose own operator-const-char* pointer dangled the moment that temporary
+ * was destroyed at the end of the assignment statement - invisible for a
+ * same-statement call argument, but silently wrong once the array was built
+ * across several statements and read back later (found building a
+ * GSubprocess argv array in eb-gtk4). */
+int eb_fixture_sum_lengths(const char* const* arr, int count) {
+    int total = 0;
+    int i;
+    for (i = 0; i < count; i++) {
+        total += (int)strlen(arr[i]);
+    }
+    return total;
+}

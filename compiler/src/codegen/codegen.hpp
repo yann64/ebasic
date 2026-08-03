@@ -87,11 +87,15 @@ private:
     /// ANY-PTR-as-ZSTRING bridge) when Sema set `expr.pointerCastTo` (an ANY
     /// PTR value being bridged into a typed pointer - or ZSTRING - context;
     /// C++, unlike this language, has no implicit void* -> T*/const char*
-    /// conversion). The actual
-    /// per-ExprKind rendering lives in genExprBase; every recursive call for
-    /// a sub-expression goes through this wrapper too, so the cast is never
-    /// missed regardless of where in a larger expression the annotated node
-    /// sits.
+    /// conversion) - or, when Sema set `expr.suppressStringWrap`, renders
+    /// the bare string literal instead of genExprBase's usual
+    /// `BString("...")` wrap (see that field's own doc comment: the wrap
+    /// would otherwise construct a dangling-once-destroyed temporary
+    /// wherever a ZSTRING target outlives the current statement). The
+    /// actual per-ExprKind rendering lives in genExprBase; every recursive
+    /// call for a sub-expression goes through this wrapper too, so neither
+    /// the cast nor the unwrap is ever missed regardless of where in a
+    /// larger expression the annotated node sits.
     std::string genExpr(const Expr& expr);
     /// The real per-ExprKind rendering that genExpr wraps - never call this
     /// directly except from within genExpr itself or genExprBase's own

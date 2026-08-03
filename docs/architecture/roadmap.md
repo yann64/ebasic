@@ -1278,6 +1278,63 @@ path - get an `ANY PTR`, bridge-read it as `ZSTRING`, copy that into a
 all, since it was never re-typed). Full suite (47/47), clean
 `-Wall -Wextra -Werror` rebuild.
 
+## Fixed: a string literal assigned to `ZSTRING` dangles once it outlives the statement
+
+Found immediately after the fix above, while extending `eb-gtk4` with
+`GSubprocess` bindings: `g_subprocess_launcher_spawnv` needs a real,
+NUL-terminated `char**` argv - built as `DIM argv(n) AS ZSTRING`, filling
+in `argv(0)`/`argv(1)`/... across several statements, then passing
+`@argv(0)`. Spawning silently failed. Root-caused via a minimal, isolated
+repro built up in stages (a bare `ANY PTR`-typed launcher worked; wrapping
+it in a `TYPE` with a `.handle` field and passing it through a function
+parameter broke it) and finally by reading the actual generated C++
+(`ebc --keep-cpp`): every `ExprKind::StringLiteral`, unconditionally,
+renders as `::ebasic::rt::BString("...")` (`Codegen::genExprBase`) -
+correct and necessary when the target is `STRING` (that's the whole
+`BString` construction), but when the target is `ZSTRING`, the generated
+assignment (`eb_argv[0] = ::ebasic::rt::BString("echo");`) constructs a
+*temporary* `BString`, converts it to `const char*` via that temporary's
+own `operator const char*()`, stores *that* pointer - then the temporary
+is destroyed at the end of the full expression (the assignment
+statement), leaving `eb_argv[0]` dangling. Invisible for a same-statement
+call argument (the temporary survives through the end of that same call
+expression), but silently wrong for anything read back in a *later*
+statement - exactly `argv(0)`'s own fate. (Genuinely undefined behavior,
+not deterministic corruption: a `g_strv_length`-style non-null pointer
+count still "succeeded" throughout debugging, since it never dereferences
+the strings - only reading the actual *content* back later exposed it.)
+
+**Fix**: extended the same `Expr::pointerCastTo`/`annotatePointerBridge`/
+`Codegen::genExpr` machinery the fix above already uses, with a new,
+narrower case: a new `Expr::suppressStringWrap` flag (`ast.hpp`), set by
+`annotatePointerBridge` (`sema.cpp`) whenever a bare string-literal
+*expression* (checked structurally - `ExprKind::StringLiteral`, not just
+"any `StringT`-typed value") is used somewhere a `ZSTRING` is expected;
+`Codegen::genExpr` checks it first and renders the bare C++ literal
+directly, skipping `genExprBase`'s `BString(...)` wrap entirely. This is
+unconditionally safe - a C++ string literal has real static storage
+duration for the whole program, so aliasing it for any length of time,
+across any number of statements, is always fine; no cast, no lifetime
+tracking needed. Deliberately scoped to literal string constants only,
+not e.g. a `STRING` variable's own value written into a `ZSTRING` target
+(already safe today: `eb_argv[0] = eb_somevar;` calls `operator const
+char*()` on the *persistent* variable itself, not a temporary - nothing
+to fix there) or a general `STRING` expression like a concatenation
+result (a genuinely different, out-of-scope question, since a
+concatenation's result actually is a real temporary with no static-
+duration alternative available).
+
+Verified via a new `tests/e2e/extern_c` case built to reproduce the exact
+shape found in the wild: a new `eb_fixture_sum_lengths(const char* const*,
+int)` fixture function that actually reads each string's *content* (via
+`strlen`), unlike a mere non-null-pointer count, called against a
+`DIM names(2) AS ZSTRING` array built across three separate statements
+(`names(0) = "echo"` etc.) and read back in a later statement, across a
+function-call boundary. Confirmed the test fails without the fix (`15`
+instead of the correct `14` - reverted via `git stash` to check, restored
+afterward) and passes with it. Full suite (47/47), clean
+`-Wall -Wextra -Werror` rebuild.
+
 ## Fixed: `ebpm`'s `LIBRARY_PATH` workaround broke every process on real Haiku hardware
 
 Found while running the real Haiku verification for the fix above:

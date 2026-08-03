@@ -135,6 +135,13 @@ void Codegen::collectExternProcNames(const std::vector<StmtPtr>& stmts, const st
 }
 
 std::string Codegen::genExpr(const Expr& expr) {
+    if (expr.suppressStringWrap) {
+        /// See Expr::suppressStringWrap's own doc comment - render the
+        /// bare literal (real static storage duration, always safe)
+        /// instead of genExprBase's usual BString(...) wrap, which would
+        /// otherwise construct a dangling-once-destroyed temporary here.
+        return escapeStringLiteral(expr.stringValue);
+    }
     std::string result = genExprBase(expr);
     if (expr.pointerCastTo) {
         result = "static_cast<" + cppType(*expr.pointerCastTo) + ">(" + result + ")";

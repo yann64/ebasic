@@ -251,6 +251,23 @@ struct Expr {
     /// set; null whenever no cast is needed.
     std::shared_ptr<Type> pointerCastTo;
 
+    /// Set by Sema exactly when this is a StringLiteral being used
+    /// somewhere a ZSTRING (not STRING) is expected - Codegen::genExpr
+    /// then renders the bare C++ string literal instead of its usual
+    /// `::ebasic::rt::BString("...")` wrap. A real string literal has
+    /// static storage duration in the generated C++, so it's always safe
+    /// to alias for the whole program's lifetime; the BString wrap is not
+    /// just unnecessary here but actively dangerous - BString's own
+    /// `operator const char*()` returns a pointer into that *temporary*
+    /// BString's storage, which is destroyed at the end of the enclosing
+    /// full expression. Invisible when the value is consumed within the
+    /// same statement (a call argument - the temporary survives through
+    /// the call), but a real, silent dangling-pointer bug for a ZSTRING
+    /// value stored (a variable, an array element) for use in a *later*
+    /// statement (found building a `GSubprocess` argv array: `DIM
+    /// argv(n) AS ZSTRING` then `argv(0) = "echo"`, read back afterward).
+    bool suppressStringWrap = false;
+
     long long intValue = 0;
     double doubleValue = 0.0;
     std::string stringValue; // StringLiteral text, or Ident/Call/Member name
