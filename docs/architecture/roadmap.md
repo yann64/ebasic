@@ -1572,6 +1572,45 @@ output confirms it; a second `update` (no name) reports "already up to
 date"; `update` on a non-registry name fails clearly. Full suite (47/47),
 clean `-Wall -Wextra -Werror` rebuild.
 
+### REG-8 Implementation Notes (starter index + demo library, local so far)
+
+Two real, separate git repositories (not subdirectories of this repo),
+created locally at `~/git/cpp/mathlib-demo` and `~/git/cpp/ebpm-index`:
+
+- **`mathlib-demo`** - a tiny, genuinely real library, its `src/lib.bas`
+  starting from `tests/e2e_pkg/lib_and_app/mathlib`'s own content
+  (`Twice`/`AddOne`), tagged `v1.0.0`; a second commit adds `Square` and is
+  tagged `v1.1.0` - so version selection (`add`'s highest-pick, `--version`
+  constraints, `update`) has something real to prove, not just an
+  identical re-tag.
+- **`ebpm-index`** - one entry, `mathlib-demo.toml`, in exactly REG-3's
+  expected format, pointing at `mathlib-demo`'s eventual GitHub URL
+  (`https://github.com/yann64/mathlib-demo`) - the same URL `index.cpp`'s
+  `kDefaultIndexUrl` already hardcodes (`https://github.com/yann64/
+  ebpm-index.git`), so once both are pushed, `ebpm add mathlib-demo` works
+  out of the box with no `EBASIC_INDEX_URL` override at all.
+
+**Verified fully end-to-end before touching any real remote**: a temporary
+local bare clone of `ebpm-index`, with `mathlib-demo.toml`'s `git =` field
+substituted to the local `mathlib-demo` path instead of its future GitHub
+URL, pointed at via `EBASIC_INDEX_URL` - against this, a real `ebpm
+search`, `ebpm add mathlib-demo` (correctly picking the highest, v1.1.0),
+`ebpm run` (compiling and linking the real cloned dependency, printing
+`42`/`42`/`49` - `Twice(21)`/`AddOne(41)`/`Square(7)`), and `ebpm list`
+(showing the resolved registry entry) all passed, proving the real
+scaffolded format parses and resolves correctly through REG-3/REG-4's real
+code, not just through their own synthetic test fixtures.
+
+**Push deliberately deferred**: per this plan's own stated confirmation
+gate, pushing either repo to a public GitHub remote was raised for
+explicit confirmation at this exact point, and the answer was "not yet -
+keep local only." Both repos exist locally, fully tagged and verified, so
+pushing them later is just `gh repo create ... --push` with no further
+work - `ebpm`'s hardcoded default index URL will simply 404 until that
+happens, which doesn't block anything else in this plan (REG-4/REG-5/REG-6/
+REG-7's own tests all use their own local fake index/library repos via
+`EBASIC_INDEX_URL`, never the real default).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
