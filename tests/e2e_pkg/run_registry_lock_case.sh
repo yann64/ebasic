@@ -151,7 +151,13 @@ fi
 # to ^1.1 (which the 1.0.0 pin no longer satisfies) - must re-resolve to
 # 1.1.0, proving a manifest edit always takes effect. ---
 export EBASIC_INDEX_URL="$INDEX_REMOTE"
-sed -i 's/mylib = "\^1.0"/mylib = "^1.1"/' "$APP/ebasic.toml"
+# A portable redirect-based edit, not `sed -i` - BSD sed (macOS's default)
+# requires an explicit (even if empty) backup-suffix argument after `-i`,
+# unlike GNU sed, so a bare `-i` is parsed as consuming the next argument
+# (the script text itself) as that suffix and fails outright. Matches this
+# project's own existing convention (see run_git_case.sh's templating).
+sed 's/mylib = "\^1.0"/mylib = "^1.1"/' "$APP/ebasic.toml" >"$APP/ebasic.toml.new"
+mv "$APP/ebasic.toml.new" "$APP/ebasic.toml"
 if ! (cd "$APP" && "$EBPM" build) >"$WORKDIR/build4.log" 2>&1; then
     echo "FAIL: build 4 (requirement bumped to ^1.1) did not succeed"
     cat "$WORKDIR/build4.log"

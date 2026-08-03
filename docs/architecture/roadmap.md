@@ -1487,6 +1487,47 @@ newer version on the very next build, and the rebuilt program's real
 output confirms it. All four passed after the `cloneOrFetch` fix above.
 Full suite (44/44), clean `-Wall -Wextra -Werror` rebuild.
 
+### REG-6 Implementation Notes (`ebpm add` / `ebpm remove`, done)
+
+`main.cpp` gained `cmdAdd`/`cmdRemove` plus small text-editing helpers
+(`trimSpaces`, `readLines`, `writeLines`, `dependencyNameExists`,
+`insertDependencyLine`, `removeDependencyLine`). Both commands edit
+`ebasic.toml` at the text level rather than via toml++'s (read-only, in
+this codebase) parser+reserializer, so a user's existing formatting/
+comments in the file survive untouched - `add` finds-or-creates a
+`[dependencies]` section and inserts one `name = "^x.y.z"` line right
+after its header; `remove` deletes exactly that single line, refusing (with
+a clear message pointing at manual editing) if the named entry isn't in
+that simple single-line shorthand form. `add` checks for a duplicate name
+across `manifest.dependencies` *and every* `manifest.targetDependencies`
+entry, not just `effectiveDependencies()` (which only reflects the current
+platform) - a name already present in a different platform's
+`[target.*.dependencies]` section is still rejected. With no `--version`,
+the highest available index version is picked; with `--version <req>`, the
+highest version satisfying that requirement is picked via REG-1's
+`pickBestSatisfying`.
+
+**Not a code bug, a wrong test expectation** (found while chasing what
+looked like `--version` being silently ignored): the test asserted that
+`ebpm add mylib --version "^1.0"` against an index offering `1.0.0` and
+`1.2.0` should pick `1.0.0`. It doesn't, and correctly so - caret
+requirements are deliberately broad (`^1.0` means `>=1.0.0, <2.0.0`, per
+REG-1's own table), so `1.2.0` genuinely satisfies `^1.0` and is correctly
+the highest satisfying pick. `pickBestSatisfying` was never wrong; the test
+needed `~1.0.0` (`>=1.0.0, <1.1.0`) to actually exercise "picks a specific,
+non-latest version." Fixed by changing the test's requirement string, not
+the product code - a good reminder to double check a failing test's own
+expectation against the spec before assuming the implementation is at
+fault.
+
+Verified via `tests/e2e_pkg/run_add_remove_case.sh` against a real fake
+index + two-tag library repo: highest-version pick with no `--version`,
+duplicate-add rejection, the added dependency actually building and
+running, `remove` deleting the entry, re-remove rejection, a
+`--version`-constrained pick landing on the older compatible version, and
+an unknown package name failing clearly. Full suite (46/46), clean
+`-Wall -Wextra -Werror` rebuild.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

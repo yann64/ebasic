@@ -1,0 +1,7 @@
+[package]
+name = "addremoveapp"
+version = "0.1.0"
+
+[bin]
+name = "addremoveapp"
+path = "src/main.bas"

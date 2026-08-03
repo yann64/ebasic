@@ -1,7 +1,9 @@
 #include "build.hpp"
 #include "driver/process.hpp"
+#include "index.hpp"
 #include "manifest.hpp"
 #include "resolve.hpp"
+#include "semver.hpp"
 
 #include "ebasic/version.hpp"
 
@@ -21,12 +23,17 @@ void printUsage(std::ostream& os) {
     os << "usage: ebpm <command> [args]\n";
     os << "       ebpm [-v | --version] [-h | --help]\n";
     os << "commands:\n";
-    os << "  new <name> [--lib]   scaffold a new package directory <name>/\n";
-    os << "  init [--lib]         scaffold a package in the current directory\n";
-    os << "  build                build the package in the current directory\n";
-    os << "  run [-- args...]     build (if stale), then run the [bin] target\n";
-    os << "  test                 build+run every tests/*.bas as a standalone\n";
-    os << "                       program; pass = exit code 0\n";
+    os << "  new <name> [--lib]        scaffold a new package directory <name>/\n";
+    os << "  init [--lib]              scaffold a package in the current directory\n";
+    os << "  build                     build the package in the current directory\n";
+    os << "  run [-- args...]          build (if stale), then run the [bin] target\n";
+    os << "  test                      build+run every tests/*.bas as a standalone\n";
+    os << "                            program; pass = exit code 0\n";
+    os << "  add <name> [--version <req>]\n";
+    os << "                            look up <name> in the package index and add it\n";
+    os << "                            to [dependencies] (highest version, or the\n";
+    os << "                            highest satisfying <req> if given)\n";
+    os << "  remove <name>             remove <name> from [dependencies]\n";
 }
 
 /// Loads "ebasic.toml" from the current directory - every command below
@@ -313,6 +320,219 @@ int cmdTest(const std::vector<std::string>& args) {
     return failed == 0 ? 0 : 1;
 }
 
+/// Trims leading/trailing spaces/tabs/carriage-returns (this project's own
+/// manifests are plain ASCII, no need for anything Unicode-aware).
+std::string trimSpaces(const std::string& s) {
+    size_t start = s.find_first_not_of(" \t\r");
+    if (start == std::string::npos) return "";
+    size_t end = s.find_last_not_of(" \t\r");
+    return s.substr(start, end - start + 1);
+}
+
+std::vector<std::string> readLines(const std::string& path, std::string& err) {
+    std::ifstream in(path);
+    if (!in) {
+        err = "could not read '" + path + "'";
+        return {};
+    }
+    std::vector<std::string> lines;
+    std::string line;
+    while (std::getline(in, line)) lines.push_back(line);
+    return lines;
+}
+
+bool writeLines(const std::string& path, const std::vector<std::string>& lines, std::string& err) {
+    std::ofstream out(path, std::ios::trunc);
+    if (!out) {
+        err = "could not write '" + path + "'";
+        return false;
+    }
+    for (const std::string& line : lines) out << line << "\n";
+    return true;
+}
+
+/// REG-6: `name` already a dependency anywhere in the manifest - checked
+/// across `manifest.dependencies` *and* every `[target.*.dependencies]`
+/// section, not just `effectiveDependencies()` (which only reflects the
+/// *current* platform - a name could exist only in a different platform's
+/// section).
+bool dependencyNameExists(const ebpm::Manifest& manifest, const std::string& name) {
+    for (const ebpm::Dependency& d : manifest.dependencies) {
+        if (d.name == name) return true;
+    }
+    for (const auto& [os, deps] : manifest.targetDependencies) {
+        for (const ebpm::Dependency& d : deps) {
+            if (d.name == name) return true;
+        }
+    }
+    return false;
+}
+
+/// Inserts `line` as the [dependencies] section's first entry - a
+/// text-level edit, not a parse+reserialize round-trip (toml++ is
+/// read-only in this codebase, and a round-trip could reformat or drop a
+/// user's own comments/formatting). Appends a brand new `[dependencies]`
+/// section at EOF if none exists yet - the *common* case, since `ebpm
+/// new`'s own scaffolded manifest never emits one.
+bool insertDependencyLine(const std::string& manifestPath, const std::string& line, std::string& err) {
+    std::vector<std::string> lines = readLines(manifestPath, err);
+    if (!err.empty()) return false;
+
+    int depsIndex = -1;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        if (trimSpaces(lines[i]) == "[dependencies]") {
+            depsIndex = static_cast<int>(i);
+            break;
+        }
+    }
+    if (depsIndex < 0) {
+        lines.push_back("");
+        lines.push_back("[dependencies]");
+        lines.push_back(line);
+    } else {
+        lines.insert(lines.begin() + depsIndex + 1, line);
+    }
+    return writeLines(manifestPath, lines, err);
+}
+
+/// Removes the single-line `name = ...` entry from the manifest's
+/// `[dependencies]` section - deliberately scoped to the simple
+/// single-line shorthand form `add` itself always writes (`ebpm add`
+/// never emits a multi-line inline table); a hand-written multi-line entry
+/// is left untouched with an error, rather than risk corrupting the file.
+bool removeDependencyLine(const std::string& manifestPath, const std::string& name, std::string& err) {
+    std::vector<std::string> lines = readLines(manifestPath, err);
+    if (!err.empty()) return false;
+
+    int depsIndex = -1;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        if (trimSpaces(lines[i]) == "[dependencies]") {
+            depsIndex = static_cast<int>(i);
+            break;
+        }
+    }
+    if (depsIndex < 0) {
+        err = "'" + name + "' is not a dependency (no [dependencies] section at all)";
+        return false;
+    }
+
+    int foundIndex = -1;
+    for (size_t i = depsIndex + 1; i < lines.size(); ++i) {
+        std::string t = trimSpaces(lines[i]);
+        if (!t.empty() && t.front() == '[') break; // the next section - [dependencies] has ended
+        size_t eq = t.find('=');
+        if (eq == std::string::npos) continue;
+        if (trimSpaces(t.substr(0, eq)) == name) {
+            foundIndex = static_cast<int>(i);
+            break;
+        }
+    }
+    if (foundIndex < 0) {
+        err = "'" + name + "' is not a dependency in [dependencies]";
+        return false;
+    }
+    long braceBalance = std::count(lines[foundIndex].begin(), lines[foundIndex].end(), '{') -
+                         std::count(lines[foundIndex].begin(), lines[foundIndex].end(), '}');
+    if (braceBalance != 0) {
+        err = "'" + name +
+              "'s dependency entry spans multiple lines - remove it by hand instead";
+        return false;
+    }
+
+    lines.erase(lines.begin() + foundIndex);
+    return writeLines(manifestPath, lines, err);
+}
+
+int cmdAdd(const std::vector<std::string>& args) {
+    std::string name;
+    std::string versionReqStr;
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (args[i] == "--version") {
+            if (i + 1 >= args.size()) {
+                std::cerr << "ebpm: error: --version requires an argument\n";
+                return 1;
+            }
+            versionReqStr = args[++i];
+        } else if (!name.empty()) {
+            std::cerr << "ebpm: error: multiple package names given\n";
+            return 1;
+        } else {
+            name = args[i];
+        }
+    }
+    if (name.empty()) {
+        std::cerr << "ebpm: error: 'add' requires a package name\n";
+        return 1;
+    }
+
+    ebpm::Manifest manifest;
+    std::string err;
+    if (!loadCurrentManifest(manifest, err)) {
+        std::cerr << "ebpm: error: " << err << "\n";
+        return 1;
+    }
+    if (dependencyNameExists(manifest, name)) {
+        std::cerr << "ebpm: error: '" << name << "' is already a dependency - use `ebpm remove "
+                  << name << "` first\n";
+        return 1;
+    }
+
+    ebpm::PackageIndex pkgIndex;
+    if (!ebpm::lookupPackage(name, pkgIndex, err)) {
+        std::cerr << "ebpm: error: " << err << "\n";
+        return 1;
+    }
+    if (pkgIndex.versions.empty()) {
+        std::cerr << "ebpm: error: '" << name << "' has no published versions in the index\n";
+        return 1;
+    }
+
+    ebpm::SemVer chosen;
+    if (!versionReqStr.empty()) {
+        ebpm::VersionReq req;
+        if (!ebpm::parseVersionReq(versionReqStr, req, err)) {
+            std::cerr << "ebpm: error: " << err << "\n";
+            return 1;
+        }
+        std::vector<ebpm::SemVer> available;
+        for (const ebpm::IndexVersionEntry& v : pkgIndex.versions) available.push_back(v.version);
+        auto pick = ebpm::pickBestSatisfying(available, req);
+        if (!pick) {
+            std::cerr << "ebpm: error: no version of '" << name << "' satisfies " << versionReqStr
+                      << "\n";
+            return 1;
+        }
+        chosen = *pick;
+    } else {
+        chosen = pkgIndex.versions.front().version;
+        for (const ebpm::IndexVersionEntry& v : pkgIndex.versions) {
+            if (v.version > chosen) chosen = v.version;
+        }
+    }
+
+    std::string line = name + " = \"^" + ebpm::toString(chosen) + "\"";
+    if (!insertDependencyLine("ebasic.toml", line, err)) {
+        std::cerr << "ebpm: error: " << err << "\n";
+        return 1;
+    }
+    std::cout << "Added " << name << " v" << ebpm::toString(chosen) << " to [dependencies]\n";
+    return 0;
+}
+
+int cmdRemove(const std::vector<std::string>& args) {
+    if (args.size() != 1) {
+        std::cerr << "ebpm: error: 'remove' requires exactly one package name\n";
+        return 1;
+    }
+    std::string err;
+    if (!removeDependencyLine("ebasic.toml", args[0], err)) {
+        std::cerr << "ebpm: error: " << err << "\n";
+        return 1;
+    }
+    std::cout << "Removed " << args[0] << " from [dependencies]\n";
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -341,6 +561,8 @@ int main(int argc, char** argv) {
     if (command == "build") return cmdBuild(rest);
     if (command == "run") return cmdRun(rest);
     if (command == "test") return cmdTest(rest);
+    if (command == "add") return cmdAdd(rest);
+    if (command == "remove") return cmdRemove(rest);
 
     std::cerr << "ebpm: error: unknown command '" << command << "'\n";
     printUsage(std::cerr);
