@@ -1601,15 +1601,16 @@ search`, `ebpm add mathlib-demo` (correctly picking the highest, v1.1.0),
 scaffolded format parses and resolves correctly through REG-3/REG-4's real
 code, not just through their own synthetic test fixtures.
 
-**Push deliberately deferred**: per this plan's own stated confirmation
-gate, pushing either repo to a public GitHub remote was raised for
-explicit confirmation at this exact point, and the answer was "not yet -
-keep local only." Both repos exist locally, fully tagged and verified, so
-pushing them later is just `gh repo create ... --push` with no further
-work - `ebpm`'s hardcoded default index URL will simply 404 until that
-happens, which doesn't block anything else in this plan (REG-4/REG-5/REG-6/
-REG-7's own tests all use their own local fake index/library repos via
-`EBASIC_INDEX_URL`, never the real default).
+**Pushed**: per this plan's own stated confirmation gate, pushing either
+repo to a public GitHub remote was raised for explicit confirmation at
+this exact point; the initial answer was "not yet - keep local only," and
+both repos stayed local through the rest of REG-9. A later explicit
+go-ahead pushed both - `https://github.com/yann64/mathlib-demo` (with its
+`v1.0.0`/`v1.1.0` tags) and `https://github.com/yann64/ebpm-index` - and a
+final zero-config check (no `EBASIC_INDEX_URL` set at all) confirmed
+`ebpm search`/`add`/`run` all work against the real, live default index
+exactly as designed: `ebpm add mathlib-demo` picks v1.1.0, clones the real
+GitHub repo, and the built program prints `42`/`42`/`49`.
 
 ### REG-9 Implementation Notes (docs + final verification, done)
 
