@@ -1855,15 +1855,15 @@ in each sibling repo's own README/commit history.
   the shape a `Content-Length`-framed JSON-RPC body needs (a fixed byte
   count, not line-terminated). Added to `ebpm-index` as `gtk4` `v0.4.0`.
 - **`ebasic-editor`** (`https://github.com/yann64/ebasic-editor`) -
-  scaffolded as an `ebpm [bin]` package depending on `gtk4 ^0.4` and
+  scaffolded as an `ebpm [bin]` package depending on `gtk4 ^0.5` and
   `eb-cjson ^0.2` (a real, zero-config registry resolution, both fetched
   straight from GitHub); a window with a `GtkSourceView` and a real
   eBasic `GtkSourceView` language-spec file (`data/language-specs/
   ebasic.lang`, keywords pulled from the real lexer's own table) for
   actual syntax highlighting; Open/Save (`GtkFileChooserNative` + plain-
   path file I/O, plus `Ctrl+S`), undo/redo, and a modified-indicator in
-  the window title; and now a real `ebasic_lsp` client (`src/lsp.bas`) -
-  live diagnostics (`GtkTextTag` squiggles + a status-bar problem count),
+  the window title; a real `ebasic_lsp` client (`src/lsp.bas`) - live
+  diagnostics (`GtkTextTag` squiggles + a status-bar problem count),
   hover (`F1`), go-to-definition (`F12`), and completion (`Ctrl+Space`),
   all shown in a status bar rather than an interactive tooltip/popover
   (a deliberate scope cut - `gtk4` has no popover bindings yet, and
@@ -1880,7 +1880,18 @@ in each sibling repo's own README/commit history.
   buffer never reach the raw read); and `eb-cjson`'s own `--lib`-boundary
   `STRING` bug above. `tests/lsp_client_smoke.bas` drives the whole
   client against a real spawned `ebasic_lsp` headlessly, verified under
-  `ebpm test`. `ebpm`/`git` integration still to come.
+  `ebpm test`. And now real `ebpm` integration (`src/buildrun.bas`) -
+  Build/Run/Test header-bar buttons spawn `ebpm build`/`run`/`test` (same
+  `GSubprocess` primitive), streaming combined stdout/stderr into a new
+  read-only output panel (a `GtkPaned` split below the editor) line by
+  line, async so a slow build never freezes the window, followed by the
+  exit status. The package root is found the same way `ebpm`/
+  `ebasic_lsp` themselves do - walking up from the open file's own
+  directory for an `ebasic.toml` (`gtk4` gained `TextBufferAppendLine` in
+  a new `v0.5.0`, specifically for this streaming-output shape).
+  `tests/buildrun_smoke.bas` drives a real `ebpm build` against
+  `ebasic-editor` itself end to end, headlessly. `git` integration still
+  to come.
 
 ## Testing Strategy
 
