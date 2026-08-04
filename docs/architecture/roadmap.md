@@ -2438,6 +2438,59 @@ crash." `scripts/haiku_verify.sh` now runs all five `tests/*.bas` files
 Published: pushed with a `v0.2.0` tag, `ebpm-index` updated, `ebpm add
 eb-haiku` confirmed resolving to `v0.2.0` from the live index.
 
+### `eb-haiku` v0.3.0 (shipped): complete Layout Kit binding
+
+Asked directly whether Haiku's Layout API was fully implemented -
+confirmed **no** (only `BGroupLayout`, window-level only), then asked
+for a plan to complete it. Real Haiku Layout Kit surface confirmed by
+reading every relevant header on the Haiku host directly (`Layout.h`/
+`LayoutItem.h`/`TwoDimensionalLayout.h`/`GroupLayout.h`/`GridLayout.h`/
+`CardLayout.h`/`SplitView.h`/`SpaceLayoutItem.h`/`Size.h`/
+`Alignment.h`), not assumed: `BGridLayout` (row/column placement with
+spanning, per-column/row weight and min/max width/height), `BCardLayout`
+(shows exactly one child at a time), `BSplitView` (a real `BView`
+subclass providing resizable panes directly - `BSplitLayout` is a
+private implementation detail, only forward-declared, never meant to be
+used directly), `BSpaceLayoutItem` (glue/struts), plus the two pieces
+Phase 2 itself was missing: view-level (not just window-level)
+`SetLayout`, and per-view explicit size/alignment constraints.
+
+Two real simplifications found during research, both narrowing the
+actual implementation needed: `BSize`/`BAlignment` are plain value
+structs (confirmed directly) - passed as separate parameters throughout,
+exactly like `BRect` already was, never needing their own handle/`TYPE`;
+and `BGroupLayout`/`BGridLayout`/`BCardLayout` all share Haiku's own
+real `BLayout` base with a *virtual* `AddView`/`AddItem` - one generic
+pair of shim functions (`eb_haiku_layout_add_view`/`add_item`, taking a
+plain `BLayout*`) correctly dispatches to whichever concrete layout is
+actually passed in via ordinary C++ virtual dispatch, avoiding three
+near-duplicate `AddView` functions. `BLayoutBuilder` (a pure templated
+C++ convenience API with no stable ABI, only ever calling the same
+methods already bound directly) and `BGroupView`/`BGridView`/
+`BCardView` (convenience `BView`-with-built-in-layout subclasses,
+already achievable via `HViewCreate` + the new `HViewSetLayout`) were
+identified and explicitly *not* bound - not a gap, already fully
+covered.
+
+Continued the same "verify, don't guess" discipline that already paid
+off twice in Phase 2 - every real numeric constant needed here
+(`B_FOLLOW_ALL`, `B_ALIGN_TOP`/`BOTTOM`/`MIDDLE`, `B_USE_DEFAULT_SPACING`)
+was confirmed by compiling and printing it on the real Haiku host, not
+hand-derived from the header's own macro expressions (`B_ALIGN_TOP` in
+particular turned out to be `16`, not the `2` a plausible sequential-enum
+guess would produce).
+
+Verified end-to-end on real Haiku hardware via `eb-haiku`'s own
+`scripts/haiku_verify.sh`, now running 10 `tests/*.bas` files - every
+new layout type confirmed visually via `screenshot -s` (a nested layout
+inside an ordinary view, a real form-style grid with column spanning, a
+`BCardLayout` switched between two pages by a real button click -
+confirmed both by `VisibleIndex()`'s own return value and visually, a
+`BSplitView` with two evenly-split panes, and `BSpaceLayoutItem` glue
+correctly pushing two buttons to opposite ends of a row). Published:
+pushed with a `v0.3.0` tag, `ebpm-index` updated, `ebpm add eb-haiku`
+confirmed resolving to `v0.3.0` from the live index.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
