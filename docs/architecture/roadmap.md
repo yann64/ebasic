@@ -2061,6 +2061,70 @@ formatted-string lengths, an in-range `Timer()` - rather than a golden
 value for wall-clock output); the full existing suite (53/53); and a
 from-clean strict rebuild.
 
+## Post-1.0: A FreeBASIC-style Process/Environment Standard Library (Phase C of "the rest of the stdlib")
+
+Phase C of `/home/yann64/.claude/plans/lazy-bouncing-quasar.md` (Phase A
+math, Phase B date/time, both above). `Environ`/`Command`/`Shell`/
+`Sleep`/`ExitProcess` - see `docs/reference/process-library.md`. Name-
+collision check against `tests`/`examples`/`docs` came back clean, and
+none of the five names are already-reserved lexer keywords.
+
+Unlike Phases A/B, this one needed one small, genuinely new piece of
+**compiler** plumbing, not just a runtime header: `Command()` (the
+program's own command-line arguments, matching real FreeBASIC's own
+`Command$`) has nothing to read from unless the generated program's own
+`main()` actually receives `argc`/`argv` - confirmed directly that it
+never did (`Codegen::generate` always emitted a bare `int main() {`).
+Fixed at the source: `Codegen::generate` (compiler/src/codegen/codegen.cpp,
+its own `main()` emission) now generates `int main(int argc, char**
+argv)` and calls a new `::ebasic::rt::processlib::setCommandLineArgs
+(argc, argv)` as the very first statement, before any user code runs -
+storing `argv[1..argc)` (excluding the program's own path, again
+matching `Command$`) in a runtime-global `Command()` later reads. This
+is pure mechanical plumbing (one line changed, one line added) with no
+Sema or parser involvement - a fundamentally smaller, different kind of
+compiler change than Phase D's own planned `UBound`/`LBound` work (a
+real new call-form/symbol-table feature) - so it was folded directly
+into this phase rather than deferred.
+
+Every other library function reused the exact same header-only-runtime
+mechanism as Phases A/B - `processlib.hpp`, `#include`d from
+`runtime.hpp`, plus more `Declare` lines in the prelude. `Shell` wraps
+`std::system`, unwrapping the raw wait status via `WIFEXITED`/
+`WEXITSTATUS` on POSIX (a plain passthrough on Windows) to return a
+real exit code rather than a raw status word - the same `#ifdef _WIN32`
+split already used by the *compiler's* own `process.cpp` (a separate,
+non-header-only utility used for spawning the backend C++ compiler,
+confirmed NOT reusable here since the runtime must stay header-only
+with no link step - `Shell` is its own small, independent
+implementation, not a call into that existing code). `Sleep` blocks via
+`std::this_thread::sleep_for` (linked cleanly with no explicit
+`-pthread` on this toolchain - modern glibc folds pthread symbols into
+libc directly - flagged as a real, not-yet-CI-proven assumption on
+other platforms/toolchains). `ExitProcess` is a plain `std::exit`,
+named distinctly from the `END` keyword (which only ever closes a
+block, never means "stop the program").
+
+Verified: a standalone C++ program against `processlib.hpp` directly
+(including feeding it real `argv` and confirming `Shell`'s exit-code
+passthrough for a success, a failure, and an arbitrary explicit code);
+the same checks re-run through real `ebc` - notably running the
+compiled binary once with no arguments and once with real ones
+(`prog hello world`), confirming `Command()` genuinely reflects the
+process's own actual argv, not a placeholder; a timed `Sleep(300)` run
+confirming it actually blocks (~302ms observed); `tests/e2e/
+process_library` (`Environ` on an unset variable, `Command()` with no
+args - the standard harness never passes any - `Shell`'s three exit-
+status cases, `Sleep` returning); a small dedicated script,
+`process_library_exitprocess.sh` (matching `default_params_errors.sh`'s
+own precedent for a behavior the golden-diff harness structurally can't
+express - `run_case.sh` assumes a clean `exit 0`, but `ExitProcess`'s
+whole point is a possibly-nonzero, immediate exit), confirming both the
+exit code and that nothing after `ExitProcess` runs; the full existing
+suite (55/55, including every `e2e_pkg_*` case, since this phase's
+`main()` signature change touches literally every compiled program, not
+just this library's own tests); and a from-clean strict rebuild.
+
 ## eBasic code editor (`ebasic-editor`) - ecosystem repos
 
 A real eBasic code editor, using `gtk4` (this repo's own registry

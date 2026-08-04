@@ -117,6 +117,15 @@ Extern "C++"
     Declare Function Weekday(serial AS DOUBLE) AS INTEGER
     Declare Function DateAdd(BYVAL intervalCode AS STRING, number AS DOUBLE, serial AS DOUBLE) AS DOUBLE
     Declare Function DateDiff(BYVAL intervalCode AS STRING, startSerial AS DOUBLE, endSerial AS DOUBLE) AS DOUBLE
+
+    ' The process/environment library (Environ/Command/Shell/Sleep/
+    ' ExitProcess, matching FreeBASIC's own set) - see
+    ' docs/reference/process-library.md.
+    Declare Function Environ(BYVAL name AS STRING) AS STRING
+    Declare Function Command() AS STRING
+    Declare Function Shell(BYVAL command AS STRING) AS INTEGER
+    Declare Sub Sleep(milliseconds AS INTEGER)
+    Declare Sub ExitProcess(code AS INTEGER = 0)
 End Extern
 )EBASIC_PRELUDE";
 

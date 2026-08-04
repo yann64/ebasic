@@ -18,6 +18,7 @@ it's actually documented.
 - [File Library](file-library.md)
 - [Math Library](math-library.md)
 - [Date/Time Library](date-time-library.md)
+- [Process Library](process-library.md)
 
 ## Symbols
 
@@ -78,6 +79,11 @@ redeclare one of these names).
 | `DateSerial` / `TimeSerial` | [Date/Time Library](date-time-library.md#building-and-reading-a-serial) |
 | `Year` / `Month` / `Day` / `Hour` / `Minute` / `Second` / `Weekday` | [Date/Time Library](date-time-library.md#building-and-reading-a-serial) |
 | `DateAdd` / `DateDiff` | [Date/Time Library](date-time-library.md#dateadd--datediff) |
+| `Environ` | [Process Library](process-library.md#environ) |
+| `Command` | [Process Library](process-library.md#command) |
+| `Shell` | [Process Library](process-library.md#shell) |
+| `Sleep` | [Process Library](process-library.md#sleep) |
+| `ExitProcess` | [Process Library](process-library.md#exitprocess) |
 
 ## Preprocessor directives
 

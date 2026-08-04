@@ -1023,7 +1023,8 @@ std::string Codegen::generate(const Module& module, bool libMode) {
     /// define `main` itself (it would collide with the consuming package's
     /// own `main` at final link time).
     if (!libMode) {
-        out << "int main() {\n";
+        out << "int main(int argc, char** argv) {\n";
+        out << "    ::ebasic::rt::processlib::setCommandLineArgs(argc, argv);\n";
         out << mainOut.str();
         out << "    return 0;\n";
         out << "}\n";
