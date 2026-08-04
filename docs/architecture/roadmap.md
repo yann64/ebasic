@@ -2329,6 +2329,56 @@ guard on the sidebar actually being set up.
   checking it didn't crash. This completes the editor's planned feature
   set - a final manual verification pass (C6) is next.
 
+## `eb-haiku` - a Haiku OS native API binding (ecosystem repo)
+
+A new sibling repo (`https://github.com/yann64/eb-haiku`), matching
+`eb-gtk4`/`eb-cjson`'s own precedent, binding Haiku OS's own native
+Kits rather than a third-party C library. Real technical difference
+from every prior binding: Haiku's Kits (`BPath`/`BEntry`/`BDirectory`/
+`BNode`/`BMessage`/`BApplication`, ...) have **no C-level API at all** -
+`eb-gtk4` could bind GTK/GLib directly because they're C libraries with
+a C-shaped object/signal system; Haiku's classes are only reachable as
+real C++ with mangled symbols, and eBasic's `Extern` mechanism only
+ever binds free functions, never a foreign class's constructor or
+methods. `eb-haiku`'s own `native/` directory is therefore a small,
+hand-written `extern "C"` shim - the first eBasic ecosystem package to
+need one, since every prior binding target already had a flat C ABI to
+declare directly.
+
+Phase 1 (v0.1.0, shipped): Storage Kit (`BPath`/`BEntry`/`BDirectory`/
+`BNode`+`BNodeInfo` - the last being Haiku's own distinctive extended
+file attributes, a real OS capability with no POSIX equivalent),
+Support Kit (`BMessage`), and `BApplication`'s basic lifecycle (no
+subclassing). Real GUI work (`BWindow`/`BView` subclassing, forwarding
+virtual callbacks like `Draw`/`MessageReceived` to eBasic) is
+explicitly out of scope for this phase - it would need the shim to
+define real C++ subclasses forwarding virtuals to stored callbacks, a
+substantially larger, separate effort, deferred to its own future plan.
+
+This package **only builds and runs on real Haiku** (`libbe.so` exists
+nowhere else) - verified end-to-end over the same `Host haiku` SSH
+connection this project's own `scripts/haiku_verify.sh` uses, including
+building `ebc`/`ebpm` from source on the real host first (a proper
+`cmake --install`, not a bare binary copy - a bare copy silently relied
+on the original build tree's own runtime-header location, breaking the
+moment that tree was cleaned up), then a comprehensive
+`tests/integration.bas` against real filesystem/attribute/message
+state, plus four focused examples - all via `eb-haiku`'s own
+`scripts/haiku_verify.sh`. Published: pushed with a `v0.1.0` tag, added
+to `ebpm-index`, `ebpm add eb-haiku` confirmed resolving correctly
+against the live index (mirroring `mathlib-demo`'s own REG-8
+precedent).
+
+A real, documented gap: linking against this package needs `-l be`
+explicitly, in addition to the `-l ebhaikushim` `ebpm` already forwards
+automatically - `libbe` is a transitive dependency of the shim's own
+internals, not something any `Lib` clause in `eb-haiku`'s own `.bas`
+source captures (`ebpm`'s own `Lib`-clause-forwarding mechanism, built
+during the REG-* work, only sees symbols a package's `Extern` blocks
+actually declare). Always present on any real Haiku system, so a
+one-line addition wherever `ebc` is invoked directly, not a real
+installation burden - but not yet automatic.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
