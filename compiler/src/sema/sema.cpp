@@ -1488,6 +1488,44 @@ Type Sema::checkExpr(Expr& expr) {
                 return expr.type;
             }
             std::string key = canonicalName(expr.stringValue);
+            /// UBound/LBound (array-bounds introspection, matching real
+            /// FreeBASIC) aren't ordinary pre-declared functions like the
+            /// rest of the standard library - a dynamic array is a plain
+            /// std::vector<T> with no generic Extern "C++" binding possible,
+            /// and Codegen needs the array's own generated lower-bound
+            /// variable name (arrayLowerBoundVar_), which only exists at
+            /// compile time. So they're intercepted here, before normal
+            /// array-index/procedure-call resolution, and require their
+            /// sole argument to be a bare identifier naming an in-scope
+            /// array - not an arbitrary expression.
+            if (key == "ubound" || key == "lbound") {
+                if (expr.args.size() != 1) {
+                    diags_.error(expr.loc, "'" + expr.stringValue +
+                                                "' takes exactly one argument (an array name)");
+                    for (auto& arg : expr.args) checkExpr(*arg);
+                    expr.type = TypeKind::Integer;
+                    return expr.type;
+                }
+                Expr& arg = *expr.args[0];
+                SymbolInfo arrInfo;
+                bool isArrayName = arg.kind == ExprKind::Ident &&
+                                    lookupSymbol(canonicalName(arg.stringValue), arrInfo) &&
+                                    arrInfo.isArray;
+                if (isArrayName) {
+                    /// Not checkExpr(arg) - a bare array Ident is normally
+                    /// rejected ("array 'X' must be indexed") since it's
+                    /// almost always a mistake, but that's exactly the form
+                    /// UBound/LBound require, so its type is set directly
+                    /// here instead.
+                    arg.type = arrInfo.type;
+                } else {
+                    diags_.error(arg.loc, "'" + expr.stringValue +
+                                               "' requires an array name, not an expression");
+                    checkExpr(arg);
+                }
+                expr.type = TypeKind::Integer;
+                return expr.type;
+            }
             SymbolInfo info;
             bool isVar = lookupSymbol(key, info);
             if (isVar && info.isArray) {

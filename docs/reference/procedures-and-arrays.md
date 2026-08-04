@@ -218,6 +218,52 @@ REDIM names(1 TO 3)
 names(1) = "one"
 ```
 
+## `UBound` / `LBound`
+
+```
+UBound(name) AS INTEGER
+LBound(name) AS INTEGER
+```
+
+The current highest/lowest valid index of array `name` - static or
+dynamic, with or without an explicit lower bound, matching real
+FreeBASIC. `LBound` is `0` unless the array was declared with an
+explicit `lo TO hi` bound; `UBound` always reflects the array's
+*current* size, so it tracks a dynamic array across `REDIM`:
+
+```basic
+DIM arr() AS INTEGER
+PRINT LBound(arr)          ' 0
+PRINT UBound(arr)          ' -1 - an empty array's UBound is LBound - 1
+
+REDIM arr(4)
+PRINT UBound(arr)          ' 4
+
+DIM ranged(3 TO 7) AS INTEGER
+PRINT LBound(ranged)       ' 3
+PRINT UBound(ranged)       ' 7
+```
+
+The most common use is driving a loop without hardcoding the array's
+size:
+
+```basic
+DIM i AS INTEGER
+FOR i = LBound(arr) TO UBound(arr)
+    arr(i) = i * i
+NEXT i
+```
+
+Unlike every other function in eBasic's standard library, `UBound`/
+`LBound` aren't ordinary pre-declared functions - they're a compiler
+special form, resolved at compile time against the array's own
+generated bookkeeping (there's no way to bind a single ordinary
+function to "any array of any element type" the way `Len`/`Abs`/etc.
+bind to a concrete C++ type). Because of this, the argument must be a
+**bare array name**, not an arbitrary expression or a non-array
+variable - `UBound(3 + 4)` and `UBound(someInt)` are both rejected at
+compile time, not just at runtime.
+
 ## See also
 
 - [Types and Literals](types-and-literals.md) - `DIM`, static arrays

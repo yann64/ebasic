@@ -167,6 +167,16 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/process_library_exitprocess.sh $<TARGET_FILE:ebc>
 )
 
+add_test(
+    NAME e2e_ubound_lbound
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/ubound_lbound
+)
+
+add_test(
+    NAME e2e_ubound_lbound_errors
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/ubound_lbound_errors.sh $<TARGET_FILE:ebc>
+)
+
 # M5: a parallel golden-test harness (tests/e2e_pkg/) driving ebpm rather
 # than ebc directly - each case dir is itself a fixture package (ebasic.toml
 # + src/) plus an expected.stdout, round-tripped through `ebpm run`.

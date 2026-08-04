@@ -208,6 +208,21 @@ std::string Codegen::genExprBase(const Expr& expr) {
                 return result;
             }
             std::string key = canonicalName(expr.stringValue);
+            /// UBound/LBound - Sema already guaranteed the sole argument is
+            /// a bare identifier naming an in-scope array, so its own
+            /// generated lower-bound variable (arrayLowerBoundVar_) is
+            /// guaranteed to exist here. LBound is that variable directly;
+            /// UBound adds the vector's current size and subtracts one
+            /// (matching real FreeBASIC - an empty array's UBound is
+            /// LBound - 1, which this formula already produces for a
+            /// zero-size vector).
+            if (key == "ubound" || key == "lbound") {
+                const std::string& lowerVar =
+                    arrayLowerBoundVar_.at(canonicalName(expr.args[0]->stringValue));
+                if (key == "lbound") return lowerVar;
+                return "static_cast<std::int32_t>(" + lowerVar + " + static_cast<std::int64_t>(" +
+                       mangleName(expr.args[0]->stringValue) + ".size()) - 1)";
+            }
             auto arrIt = arrayLowerBoundVar_.find(key);
             if (arrIt != arrayLowerBoundVar_.end()) {
                 return mangleName(expr.stringValue) + "[static_cast<std::size_t>((" +

@@ -84,6 +84,7 @@ redeclare one of these names).
 | `Shell` | [Process Library](process-library.md#shell) |
 | `Sleep` | [Process Library](process-library.md#sleep) |
 | `ExitProcess` | [Process Library](process-library.md#exitprocess) |
+| `UBound` / `LBound` | [Procedures and Arrays](procedures-and-arrays.md#ubound--lbound) |
 
 ## Preprocessor directives
 

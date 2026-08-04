@@ -2125,6 +2125,78 @@ suite (55/55, including every `e2e_pkg_*` case, since this phase's
 `main()` signature change touches literally every compiled program, not
 just this library's own tests); and a from-clean strict rebuild.
 
+## Post-1.0: `UBound`/`LBound` Array-Bounds Introspection (Phase D, closing out "the rest of the stdlib")
+
+Phase D - the last phase of `/home/yann64/.claude/plans/lazy-bouncing-quasar.md`
+(Phase A math, Phase B date/time, Phase C process/environment, all
+above) - `UBound(arr)`/`LBound(arr)`, matching real FreeBASIC. See
+`docs/reference/procedures-and-arrays.md#ubound--lbound`.
+
+Genuinely different in kind from every other function shipped across
+this whole plan: a dynamic array is a plain `std::vector<T>` with no
+generic/templated `Extern "C++"` binding possible (there's no way to
+declare one ordinary function that binds to "any array of any element
+type"), and `UBound`/`LBound` need the array's own *generated* lower-
+bound variable name (`Codegen`'s existing `arrayLowerBoundVar_` map,
+already used for ordinary array-index codegen), which only exists at
+compile time - never something a runtime function could receive as an
+argument. So this is a real compiler feature, not a runtime-header
+addition: `Sema::checkExpr`'s bare-`Call` case
+(`compiler/src/sema/sema.cpp`, right before its existing array-index-
+vs-procedure resolution) now intercepts `canonicalName(...) ==
+"ubound"/"lbound"` first, requiring the sole argument to be a bare
+identifier naming an in-scope array (`SymbolInfo::isArray`) - not an
+arbitrary expression, not a non-array variable - and `Codegen`'s
+matching `Call` case (`compiler/src/codegen/codegen.cpp`, the same spot
+that already renders `arr(i)` as `arr[i - eb_arr__lo]`) intercepts the
+same names and emits `eb_arr__lo` directly for `LBound`, or
+`eb_arr__lo + static_cast<int64_t>(eb_arr.size()) - 1` for `UBound` -
+no new runtime function, no new AST node kind, just two matched
+interception points reusing bookkeeping that already existed for a
+different purpose.
+
+A genuine, deliberately narrow scope cut worth naming: array parameters
+don't exist in this language at all (confirmed directly - parameter
+binding in Sema never sets `isArray` true), and there's no array-typed
+`TYPE` field either, so `UBound`/`LBound`'s "bare array identifier"
+requirement isn't actually a cut-corner - it's the *only* form arrays
+can appear in as a first-class name here, so no real capability was
+left out.
+
+Caught and fixed a **real regression** this phase's own research
+surfaced, from earlier in this same plan: Sema's symbol table keys
+identifiers through a lowercasing `canonicalName()`, so identifier
+resolution is case-*insensitive* - contradicting an earlier, wrong
+conclusion (checked only the lexer, which preserves original case, and
+never checked how Sema actually keys its symbol table) used to justify
+skipping a rename during Phase A. `examples/extern_interop.bas`'s own
+lowercase `Declare Function abs(...)` (an `Extern "C"` binding to
+libc's `abs`) silently collided with the math library's new `Abs` the
+moment Phase A shipped - undetected until now because `examples/*.bas`
+is never compiled by `ctest`, only `tests/`. Fixed by aliasing to
+`c_abs` (`a12603a`); every `examples/*.bas` file is now explicitly
+compile-swept (not just `tests/`) as a standing part of this plan's own
+verification step from here on, and the corrected understanding is
+recorded for future collision checks.
+
+Verified: normal cases through real `ebc` - a static array with the
+default `0` lower bound, one with an explicit `lo TO hi` bound, a
+dynamic array before and after `REDIM` (including the well-known "an
+empty array's `UBound` is `LBound - 1`" edge case), the idiomatic `FOR
+i = LBound(arr) TO UBound(arr)` loop, and a local array inside a
+`FUNCTION` (confirming per-scope `arrayLowerBoundVar_` save/restore
+plays correctly with the new interception); every rejected shape
+(`UBound(3 + 4)`, `UBound` of a non-array variable, of an undeclared
+name, with zero or more than one argument) via a dedicated
+`ubound_lbound_errors.sh` script matching `default_params_errors.sh`'s
+own "check_rejected" pattern; `tests/e2e/ubound_lbound`; a full
+`examples/*.bas` compile sweep; the full existing suite (57/57); and a
+from-clean strict rebuild.
+
+This closes out `lazy-bouncing-quasar.md` - all four phases (string/file
+libraries from the prior plan, plus math/date-time/process-environment/
+UBound-LBound from this one) are now shipped.
+
 ## eBasic code editor (`ebasic-editor`) - ecosystem repos
 
 A real eBasic code editor, using `gtk4` (this repo's own registry
