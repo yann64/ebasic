@@ -2703,6 +2703,104 @@ examples (`locking.bas`, `menu.bas`, `roster_and_clipboard.bas`,
 `ebpm-index` updated, `ebpm add eb-haiku` confirmed resolving to
 `v0.6.0` from the live index.
 
+### `eb-haiku` v0.7.0 (shipped): Locale Kit, Kernel Kit concurrency, BSerialPort, BPackageRoster, Media Kit, BPrintJob
+
+Asked for a plan to implement the "remaining unimplemented Kits" -
+research surfaced six real, tractable candidates (real headers read
+directly on the Haiku host under `os/{locale,media,package,device,
+kernel}/` and `interface/PrintJob.h`), presented via two multi-select
+questions since they span genuinely different areas (new Kits vs. two
+smaller, different-in-kind additions); user picked all six.
+
+- **Locale Kit**: `BDateFormat`/`BTimeFormat`/`BNumberFormat`/
+  `BCollator` - ICU-backed, confirmed living directly in `libbe.so`
+  (no new link dependency, unlike Translation/Network/Media/Package/
+  Device Kit). Real `char*`/`maxSize` `Format` overloads exist directly
+  - simpler than most of this package's own buffer-out functions (no
+  `BString` involved at all).
+- **Kernel Kit concurrency**: `spawn_thread`/semaphores/message ports/
+  shared-memory areas - all plain `extern "C"` functions in `libroot.so`
+  (confirmed via the real header), bound directly under `Lib "root"`
+  like `find_directory`/`fs_create_index` - no shim needed at all. A
+  genuinely different kind of addition (real, language-level
+  concurrency, not an "OS Kit" wrapper) - flagged as such, approved
+  anyway. Verified with real concurrency correctness matching
+  `BLocker`'s own v0.6.0 bar: a semaphore genuinely blocking a second
+  thread until released, a port read genuinely blocking until a writer
+  thread sends - not just "the calls don't crash."
+- **Device Kit** (`BSerialPort` only): verified against a real
+  (QEMU-provided) virtual serial port actually present on the
+  development host - better than the plan's own anticipated "likely no
+  real hardware" fallback. Two real findings, both confirmed via a
+  compiled probe before trusting them: `Open()` returns a non-negative
+  value (not necessarily `0`) on success, unlike almost every other
+  status-code function in this package; and real baud-rate constants
+  are small sequential enum indices, not the literal rate (`B_9600_BPS`
+  is `13`, not `9600`) - the same category of trap as `B_ALIGN_TOP`/
+  `B_JPEG_FORMAT` in earlier phases.
+- **Package Kit basics** (`BPackageRoster` only): real installed-
+  package enumeration via `GetActivePackages` + `BPackageInfoSet::
+  Iterator`, confirmed against 726 real packages on the development
+  host (including `haiku` itself, by name and real version string) -
+  no Solver/hpkg machinery needed for this. Real repository cache/
+  config paths reuse the existing `HPath` type directly, no new
+  plumbing.
+- **Media Kit basics - a real, significant deviation from the approved
+  plan, confirmed by direct reproduction**: the plain free-function
+  `play_sound`/`stop_sound`/`wait_for_sound` API - originally planned
+  as the simplest possible path specifically to avoid `BSoundPlayer`'s
+  real-time buffer-callback complexity - turned out to be a **literal
+  `UNIMPLEMENTED` stub** on this real Haiku build (confirmed via a
+  standalone probe: it logs `UNIMPLEMENTED` and does nothing). Pivoted
+  to the real, fully functional `BSoundPlayer` + `BSound(entry_ref*,
+  loadIntoMemory=true)` path instead (a plain constructor loads a whole
+  file with no manual decoding needed) - verified via real wall-clock
+  playback timing against a real WAV file, not a mock. A second real
+  finding along the way: `ExitProcess` (`std::exit()`) doesn't destruct
+  this package's own heap-allocated opaque handles, so a live
+  `BSoundPlayer` background thread can hang the whole process on exit
+  unless explicitly stopped first - now its own reusable memory
+  ([[project_haiku_exit_hang_background_thread]]), since any future
+  Kit binding wrapping a background-thread-owning class is a candidate
+  for the same hazard.
+- **`BPrintJob`** (Interface Kit addition, not a new Kit): real
+  printing via a `ShimPrintJob` subclass (matching `ShimWindow`/
+  `ShimView`'s own established pattern) forwarding the virtual
+  `DrawView()` to an eBasic callback that draws using this package's
+  own **already-bound** view-drawing primitives - a real, satisfying
+  close of the loop between two previously-separate parts of Interface
+  Kit. Confirmed via a standalone probe that `ConfigJob`/`ConfigPage`
+  show a real, interactive Page Setup/Print dialog that blocks
+  indefinitely without a human to click through it - the same real
+  "not triggerable over SSH" limitation already documented for mouse
+  clicks - so this package's own tests/examples deliberately never
+  call them headlessly, verifying everything else instead
+  (`BeginJob`/`CanContinue`/`CancelJob`/`PaperRect`/`PrintableRect`/
+  `PrinterType`/`GetResolution`) rather than hanging or overclaiming.
+
+**A real, structural gap found unrelated to any single Kit, extending
+the same discovery from Translation/Network Kit in v0.6.0**: `ebpm`'s
+`.libs` sidecar also can't discover `libdevice`/`libpackage`/`libmedia`
+as transitive shim dependencies - none of them export a plain C symbol
+to hang the `find_directory`-style fix on either. Documented in the
+same README sections as the v0.6.0 finding, now covering all five
+affected libraries.
+
+**Also fixed**: a real cross-file naming collision, caught by
+`scripts/haiku_verify.sh`'s own end-to-end run - Kernel Kit's new
+`write_port`/`read_port` functions collided case-insensitively (see
+[[project_case_insensitive_identifiers]]) with `network_basics.bas`'s
+own pre-existing `WRITE_PORT`/`READ_PORT` test constants from v0.6.0,
+once both landed in the same compiled program via `lib.bas`. Renamed
+the test's own constants rather than the real Haiku function names.
+
+Verified end-to-end on real Haiku hardware via `eb-haiku`'s own
+`scripts/haiku_verify.sh`, now running 29 `tests/*.bas` files. Six new
+examples (`locale.bas`, `threads.bas`, `serial.bas`, `packages.bas`,
+`play_sound.bas`, `print.bas`), one per area. Published: pushed with a
+`v0.7.0` tag, `ebpm-index` updated, `ebpm add eb-haiku` confirmed
+resolving to `v0.7.0` from the live index.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
