@@ -2559,6 +2559,67 @@ the PNG translator reports an `image/png` output format). Published:
 pushed with a `v0.4.0` tag, `ebpm-index` updated, `ebpm add eb-haiku`
 confirmed resolving to `v0.4.0` from the live index.
 
+### `eb-haiku` v0.5.0 (shipped): Storage Kit extensions
+
+Asked for a detailed plan to implement the Storage Kit - Phase 1
+(v0.1.0) only ever covered a narrow slice (`BPath`/`BEntry`/
+`BDirectory`, `BNode` string attributes only, `BNodeInfo` MIME only).
+Real API surface confirmed by reading every relevant header on the
+Haiku host directly (`Statable.h`/`SymLink.h`/`Node.h`/`Volume.h`/
+`VolumeRoster.h`/`Query.h`/`MimeType.h`/`AppFileInfo.h`/`Resources.h`,
+`support/TypeConstants.h`, `kernel/fs_attr.h`), not assumed: `BStatable`
+(permissions/owner/group/size/modification+creation time, `IsSymLink`,
+`GetVolume` - the base every `BNode`/`BEntry`/`BFile`/`BDirectory`/
+`BSymLink` shares), `BNode`'s generic typed `WriteAttr`/`ReadAttr` (real
+`type_code` constants confirmed via probe, not hand-derived - FourCC-
+style values again differed from a naive guess) plus `GetAttrInfo`,
+`BSymLink`/`BDirectory::CreateSymLink`, `BVolume`/`BVolumeRoster`, and
+`BQuery` (Haiku's own live, attribute-based filesystem search - bound
+via the plain predicate-string API, not the `Push*`/`PushOp`
+reverse-polish stack builder, for identical expressiveness with far
+less binding surface). `BMimeType` (database-management surface,
+already covered per-file by `BNodeInfo`), `BAppFileInfo`/`BResources`
+(executable metadata/resources), the Disk Device Kit, live/watching
+query and volume-roster variants, and typed attributes beyond the
+practical scalar set were all identified and explicitly *not* bound -
+not gaps, deliberately scoped out with reasoning (see `eb-haiku`'s own
+README).
+
+**Binding approach informed directly by the v0.4.0 `BFile` MI bug**:
+`BStatable` methods are bound *per concrete type* (`HEntry`/`HNode`
+each get their own `GetPermissions`/`GetOwner`/... shim functions,
+`static_cast`-ing their own handle straight to its own known concrete
+type) rather than one generic function accepting "any `BStatable*`-
+shaped handle" - avoiding any risk of repeating the same multiple-
+inheritance pointer-adjustment mistake for classes whose real MI layout
+wasn't yet independently verified.
+
+A second real, non-obvious BFS behavior was found and documented,
+confirmed via a standalone C++ probe and Haiku's own `query`/`addattr`/
+`catattr`/`lsindex` command-line tools before trusting it (not assumed):
+`BQuery` predicates only ever match *indexed* attributes, and indexing
+is **not retroactive** - an attribute value written *before* its index
+existed is never picked up by that index, silently, with no error
+anywhere. The first query test wrote attributes on 3 real files, then
+created the index, then queried: 0 matches despite the attribute and
+index both genuinely existing on disk (confirmed via `catattr`/
+`lsindex`) - reordering to create the index *before* any attribute
+write fixed it immediately. `fs_create_index` (a real, plain
+`extern "C"` kernel function, bound directly like `find_directory`, no
+shim needed) is now documented as required *before* the first write of
+a custom attribute, not just before the query.
+
+Verified end-to-end on real Haiku hardware via `eb-haiku`'s own
+`scripts/haiku_verify.sh`, now running 19 `tests/*.bas` files - real
+file permission/owner/group/size/timestamp round-trips, typed-attribute
+round-trips (int32/int64/bool/double/raw) plus `GetAttrInfo`
+introspection, real symlink creation/readback, real mounted-volume
+iteration with boot-volume capacity/free-bytes sanity checks, and the
+compelling `BQuery` demo (tag real files with a distinctive attribute,
+query for it, confirm exactly the right files come back and nothing
+else). Published: pushed with a `v0.5.0` tag, `ebpm-index` updated,
+`ebpm add eb-haiku` confirmed resolving to `v0.5.0` from the live index.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
