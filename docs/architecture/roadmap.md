@@ -2491,6 +2491,74 @@ correctly pushing two buttons to opposite ends of a row). Published:
 pushed with a `v0.3.0` tag, `ebpm-index` updated, `ebpm add eb-haiku`
 confirmed resolving to `v0.3.0` from the live index.
 
+### `eb-haiku` v0.4.0 (shipped): Translation Kit binding
+
+Asked for a plan to fully implement Haiku's Translation Kit - the OS's
+own system for converting between data formats, most commonly images
+(PNG/JPEG/BMP/GIF/TIFF/WebP/...). Real API surface confirmed by reading
+every relevant header on the Haiku host directly
+(`translation/TranslatorRoster.h`/`TranslationUtils.h`/
+`TranslatorFormats.h`/`Bitmap.h`/`File.h`), not assumed: `BTranslatorRoster`
+(`Default()`, `Identify`, `Translate`, `GetAllTranslators`/
+`GetTranslatorInfo`/`GetInputFormats`/`GetOutputFormats`, `AddTranslators`),
+`BTranslationUtils::GetBitmap` (the single highest-value convenience
+function), `BBitmapStream` (wraps a `BBitmap*` for saving). Two small,
+genuinely necessary supporting bindings identified and added: `BBitmap`
+(Translation Kit's own central currency) and `BFile` (a concrete
+`BPositionIO` the roster's own I/O calls require) - both deliberately
+minimal, not a general Storage/Interface Kit expansion. 20 real
+translator add-ons confirmed installed on the Haiku host, so the
+binding is functional for real files, not just structurally complete.
+
+Two real, non-obvious findings, both confirmed by direct reproduction
+before being trusted (the same "verify, don't guess" discipline that
+already caught two real Haiku threading bugs during Phase 2/Layout Kit
+work):
+
+- `BTranslationUtils::GetBitmap` (and the rest of the Translation Kit,
+  which goes through the same registrar/add-on system) **hangs
+  indefinitely** if called before any `BApplication` exists - confirmed
+  via a standalone C++ probe (hung 45+ seconds with no `BApplication`,
+  worked instantly with one constructed first). Not a new burden for a
+  real GUI/app program (which already needs one), but a real trap for
+  Translation-Kit-only usage - now documented prominently in
+  `eb-haiku`'s own README, matching the existing "Threading" section's
+  precedent.
+- A genuine multiple-inheritance pointer-adjustment bug was found (and
+  fixed) in the shim itself: `BFile : public BNode, public BPositionIO`
+  places `BPositionIO` at a nonzero offset. Erasing a `BFile*` to `void*`
+  and later `static_cast`-ing that bare `void*` straight to
+  `BPositionIO*` skips the compiler's pointer adjustment (a `void*`
+  carries no static type to adjust from), corrupting the pointer -
+  reproduced as a real General Protection Fault *inside a real
+  installed Haiku translator add-on* (`WonderBrushTranslator`'s own
+  `BitsCheck`) when it read through the corrupted pointer, while the
+  identical logical calls written inline with full static types worked
+  perfectly every time. Fixed by computing the adjusted `BPositionIO*`
+  at the one point `BFile`'s real static type is still known (creation
+  time) and using `dynamic_cast` (RTTI) to recover `BFile*` where still
+  needed.
+
+A third real finding, this time about the API's own behavior rather
+than the shim: `HTranslate` going straight from one compressed format
+to a *different* compressed format in a single call typically fails
+with `B_NO_TRANSLATOR` - most translators only declare their own format
+and the generic uncompressed `H_TRANSLATOR_BITMAP` ("bits") as inputs,
+confirmed by a standalone probe reproducing the identical failure
+outside eBasic entirely. The documented, tested fix is the two-hop
+pattern `HGetBitmap` + `HBitmapStreamCreate` + `HTranslate`, matching
+how Haiku's own `translate` command-line tool behaves internally.
+
+Verified end-to-end on real Haiku hardware via `eb-haiku`'s own
+`scripts/haiku_verify.sh`, now running 15 `tests/*.bas` files - decode
+a real PNG and check its decoded bounds/color space, draw it in a
+window (confirmed visually via `screenshot -s`), convert PNG to JPEG
+and round-trip-verify the result, detect real PNG/JPEG/BMP format/MIME
+via `Identify`, and introspect all 20 installed translators (confirming
+the PNG translator reports an `image/png` output format). Published:
+pushed with a `v0.4.0` tag, `ebpm-index` updated, `ebpm add eb-haiku`
+confirmed resolving to `v0.4.0` from the live index.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
