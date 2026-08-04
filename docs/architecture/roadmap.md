@@ -2379,6 +2379,65 @@ actually declare). Always present on any real Haiku system, so a
 one-line addition wherever `ebc` is invoked directly, not a real
 installation burden - but not yet automatic.
 
+### `eb-haiku` Phase 2 (v0.2.0, shipped): Interface Kit GUI
+
+The deferred GUI work from Phase 1, now real: `BWindow`/`BView` reached
+via genuine C++ shim subclasses (`ShimWindow`/`ShimView`, `native/
+shim_interface.cpp`) forwarding `MessageReceived`/`QuitRequested`/
+`FrameResized`/`Draw`/`MouseDown`/`MouseUp`/`KeyDown` to eBasic
+callbacks - the only way to reach a foreign C++ class's virtual methods
+at all, confirmed again here. A genuinely useful simplification found
+along the way: stock controls (`BButton`/`BStringView`/`BTextControl`)
+need **no callback-forwarding shim of their own** - Haiku's own
+`BControl`/`BInvoker` already posts a control's `what` message to its
+target, which defaults to the window it's attached to once shown, so a
+button click arrives at the *window's* `MessageReceived` callback
+directly. `BGroupLayout` rounds this out (arranging children instead of
+manual frame positioning).
+
+Also closed Phase 1's own documented `-l be` gap - a real, useful
+`find_directory()` binding (a genuine `extern "C"` Haiku function,
+needing no shim wrapper at all, unlike every Kit class) under its own
+`Lib "be"` clause means `ebpm`'s existing `.libs`-forwarding mechanism
+now captures `libbe` automatically for any downstream consumer -
+confirmed by building a real consumer package (a `[bin]` package with a
+plain `[dependencies] eb-haiku = ...` entry) that links successfully
+with zero manual linker configuration, on real Haiku hardware.
+
+Found and fixed two real, non-obvious Haiku threading bugs, the same
+way both times - reproducing the failure in a **standalone C++ program
+with no eBasic involved at all** to separate "real Haiku API behavior"
+from "eBasic-side bug," then reading Haiku's own kernel fault backtrace
+(`/boot/system/var/log/syslog`) to pinpoint the exact crash site:
+`BInvoker::Invoke()` and `BView::Invalidate()` both crash when called
+from a thread other than the target's own window thread - the
+completely normal case of a program's main thread manipulating a
+window/view after `Show()`, since every shown `BWindow` runs its own
+message loop on its own separate thread from that point on.
+`Invoke()`'s fix was a rewrite (`Messenger().SendMessage(Message())`
+instead, confirmed thread-safe); `Invalidate()`'s fix was a proper
+`BLooper::Lock()` first (`ViewAutolock`, an RAII helper - `Lock()` is
+safe to call even from the looper's own thread, so unconditional
+locking in a shim function is always correct). Documented prominently
+in the package's own README (a new "Threading" section) rather than
+left as an implementation detail, since any future direct use of a raw
+Haiku API from outside a callback needs the same care.
+
+A real, meaningful verification upgrade over Phase 1: this phase's own
+GUI behavior has something to actually *look at*, unlike pure Storage/
+Support Kit calls - confirmed a real, live desktop session exists on
+the `Host haiku` hardware (`app_server` running) and Haiku's own
+`screenshot -s <file>` (silent mode - the default interactive mode
+opens its own dialog and hangs over a non-interactive SSH session)
+produces a real, fetchable PNG. Every GUI test/example (a window
+showing and closing, a button click updating a label via a real posted
+message, custom-drawn shapes/text, a `BGroupLayout`-arranged form) was
+visually confirmed this way during development, not just "didn't
+crash." `scripts/haiku_verify.sh` now runs all five `tests/*.bas` files
+(the original Phase 1 integration test plus one per new GUI area).
+Published: pushed with a `v0.2.0` tag, `ebpm-index` updated, `ebpm add
+eb-haiku` confirmed resolving to `v0.2.0` from the live index.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
