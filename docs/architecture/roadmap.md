@@ -2801,6 +2801,90 @@ examples (`locale.bas`, `threads.bas`, `serial.bas`, `packages.bas`,
 `v0.7.0` tag, `ebpm-index` updated, `ebpm add eb-haiku` confirmed
 resolving to `v0.7.0` from the live index.
 
+### `eb-haiku` v0.8.0 (shipped): closing gaps in already-bound Kits
+
+Asked to plan for the Kits that are "not fully implemented" - unlike
+every prior phase (which added brand-new Kits), this one re-read every
+"not bound"/"out of scope" list across `eb-haiku`'s own README and
+closed seven of them, confirmed via real headers on the host and two
+multi-select questions; user picked all seven. No new libraries needed
+- everything lives in `libbe.so`/`libbnetapi.so`/`libroot.so`/
+`libdevice.so`, all already linked since v0.6.0/v0.7.0.
+
+- **Small polish bucket**: Kernel Kit `_etc` timeout/flag variants,
+  area introspection (`clone_area`/`resize_area`/`find_area`/
+  `area_for`), `BSerialPort` modem control lines, `BPrintJob` Settings/
+  SetSettings/IsSettingsMessageValid. **Two real findings**: `HAreaCreate`'s
+  original `BYREF ANY PTR` parameter shape (shipped in v0.7.0) had
+  never actually been exercised by any test and didn't compile at any
+  real call site - a real eBasic codegen issue with `BYREF ANY PTR`
+  params (confirmed by direct reproduction), fixed by switching to the
+  same `BYVAL`-pointer-to-pointer convention used everywhere else in
+  the package. And `BPrintJob::SetSettings` can hang indefinitely with
+  anything but a message from a real, configured job - the same
+  interactive-dialog-hazard category as `ConfigJob`/`ConfigPage`.
+- **`BTextView`** (multi-line, plain-text editing) - needs no shim
+  subclass, unlike `BWindow`/`BView`: `Text()` returns a plain `const
+  char*`, marshaling the same way `HStringViewGetText` already does.
+- **`BPopUpMenu`/`BMenuField`** - `BPopUpMenu` IS-A `BMenu` (like
+  `BMenuBar` already is), reusing the existing `HMenu` type directly.
+  Real interactive item selection needs a human mouse click (same
+  limitation as `BPrintJob::ConfigJob`) - verified via the async `Go()`
+  path plus a screenshot confirming real rendering.
+- **`BMimeType`** (the separate meta-mime database) - a real, confirmed
+  API inconsistency found along the way: `GetInstalledSupertypes` fills
+  a field named `"super_types"`, NOT `"types"` like
+  `GetInstalledTypes` - easy to assume wrong, caught by probing before
+  trusting it. New generic `HMessageCountItems`/`FindStringAt` read any
+  `BMessage`'s own repeated-value fields.
+- **`HWatcher` + real live `BQuery`/`BVolumeRoster` watching** - the
+  one genuinely new piece of infrastructure this phase: a small
+  `ShimHandler : public BHandler`, `AddHandler`'d onto `be_app`,
+  becomes a live `BMessenger` target. **Three real findings, each
+  confirmed via direct reproduction before trusting them**: (1)
+  `BQuery::SetTarget` alone does NOT establish the real live monitor,
+  even though `IsLive()` reports true immediately - `Fetch()` must
+  still be called afterward, which is what actually registers the live
+  watch with the kernel; (2) `BApplication::Quit()` called directly
+  from a thread other than the one that called `Run()` fails ("you
+  must Lock the application object") - a real, previously-undiscovered
+  bug (`HApplicationQuit` had never been exercised cross-thread before
+  this phase), fixed the same way `HWindowClose` already does, by
+  posting a real `B_QUIT_REQUESTED` message instead; (3) freeing a live
+  query's watcher *after* freeing the owning `BApplication` is a real
+  use-after-free (the watcher's own cleanup calls
+  `be_app->RemoveHandler` internally) - now documented as a hard
+  ordering requirement. Verified with real concurrency correctness: a
+  background thread creates a file matching a live query's predicate,
+  confirming a real `B_QUERY_UPDATE` genuinely arrives.
+- **`BRoster` app-info/recent-lists + `BClipboard` watching** -
+  `GetAppInfo`/`GetRunningAppInfo`/`FindApp` fill the existing `HPath`
+  type from `app_info`'s own `entry_ref`; `GetRecentDocuments`/
+  `Folders`/`Apps` via a new `HMessageFindRefAt`. Verified against real
+  system state: `GetAppInfo` against Tracker, `FindApp("text/plain")`
+  correctly resolving to `StyledEdit`, and a real self-triggered
+  clipboard-watch test confirming `B_CLIPBOARD_CHANGED` actually fires.
+- **`BSecureSocket`/TLS + `BDatagramSocket`/UDP** - `BSecureSocket`
+  IS-A `BSocket`, so a single new constructor function was all that was
+  needed; every other socket function already dispatches correctly to
+  the real TLS implementation via ordinary C++ virtual dispatch. **A
+  real, confirmed finding**: a freshly-created `BDatagramSocket` has no
+  real underlying file descriptor until `Bind()` is called (created
+  lazily, not by the constructor) - `SendTo()` on an unbound socket
+  fails with a real "Bad file descriptor" status, even for the sender,
+  which must bind to an ephemeral local address/port before ever
+  sending. Verified with a real TLS handshake against a real HTTPS
+  server (a manual `GET` request over the encrypted channel to
+  `example.com`) and a real UDP loopback round-trip using a second
+  thread as the receiver.
+
+Verified end-to-end on real Haiku hardware via `eb-haiku`'s own
+`scripts/haiku_verify.sh`, now running 34 `tests/*.bas` files. Five new
+examples (`popup_menu.bas`, `text_editor.bas`, `mime_lookup.bas`,
+`live_query.bas`, `https_fetch.bas`), one per major area. Published:
+pushed with a `v0.8.0` tag, `ebpm-index` updated, `ebpm add eb-haiku`
+confirmed resolving to `v0.8.0` from the live index.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
