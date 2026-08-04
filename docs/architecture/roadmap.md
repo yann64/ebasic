@@ -2620,6 +2620,89 @@ query for it, confirm exactly the right files come back and nothing
 else). Published: pushed with a `v0.5.0` tag, `ebpm-index` updated,
 `ebpm add eb-haiku` confirmed resolving to `v0.5.0` from the live index.
 
+### `eb-haiku` v0.6.0 (shipped): BLocker, menus, BRoster/BClipboard, Network Kit + BUrl
+
+Asked for a detailed plan to implement "other Kits" - research
+surfaced four concrete, real, boundable candidates (real Haiku headers
+read directly under `os/{support,interface,app,net}/`, not assumed);
+presented as a multi-select question since they span genuinely
+different areas with different effort/value tradeoffs, and the user
+picked all four:
+
+- **`BLocker`** (Support Kit) - a real mutex, closing the risk this
+  package's own README had documented by name since Phase 2: "eBasic
+  has no locking primitives... a real, unsolved risk this package
+  doesn't protect you from." Verified with a real cross-thread test,
+  not just "doesn't crash": two window threads racing to increment a
+  shared counter 1000 times each land on exactly 2000 with the lock
+  held around every access - a genuine confirmation the lock serializes
+  access (a race without it would very likely lose updates).
+  `BAutolock` deliberately not bound - header-only inline RAII with no
+  out-of-line methods to wrap, doesn't map onto eBasic's own scoping
+  model.
+- **`BMenuBar`/`BMenu`/`BMenuItem`** (Interface Kit) - real window
+  menus. Two real requirements found the hard way, not assumed: a menu
+  bar's own constructor takes no `BRect` frame at all and renders at
+  zero size (invisible) unless hosted in a real `BLayout` (confirmed by
+  a screenshot showing nothing, then fixed and re-confirmed);
+  `BMenuItem` is a `BInvoker`, inheriting the exact same
+  `Invoke()`-crashes-cross-thread risk already documented for `BButton`
+  (see [[project_haiku_invoke_gotcha]]) - fixed the identical way (a
+  `Messenger()`-based safe invoke), which as a side effect enabled a
+  real, automated, end-to-end "click"-equivalent test with no mouse
+  hardware needed, confirming the real auto-target-to-window delivery
+  behavior directly rather than assuming it matches `BButton`'s own.
+- **`BRoster`/`BClipboard`** (Application Kit) - find/launch/activate
+  other running apps, system copy/paste. Found Haiku's real clipboard
+  text convention (a raw `B_MIME_TYPE` field named `"text/plain"` via
+  `AddData`, **not** a string field via `AddString`) by reading the
+  real `clipboard` command-line tool's own `-d`/debug dump directly,
+  not assumed - added a small, generally useful
+  `HMessageAddData`/`FindData` pair to support it correctly. Also found
+  that `BClipboard::Lock()` hangs indefinitely without a `BApplication`
+  existing first - the exact same category of gotcha the Translation
+  Kit already hit with `GetBitmap` (v0.4.0), now promoted to its own
+  reusable memory ([[project_haiku_needs_bapplication_first]]) since
+  it's recurred twice independently.
+- **Network Kit + `BUrl`** (`BUrl` is Support Kit, despite the name) -
+  real TCP networking (`BSocket`/`BNetworkAddress`) and URL parsing.
+  **A real, important finding, confirmed before writing any code**:
+  Haiku's high-level HTTP/URL-request API (`BUrlRequest`/
+  `BHttpRequest`/`BUrlProtocolRoster`) lives only under
+  `headers/private/netservices{,2}/` - one class is literally declared
+  inside `namespace BPrivate::Network`, and the only libs are static,
+  unversioned internals, not the stable `libbnetapi.so` this package
+  links against - not a safely bindable target, deliberately not
+  attempted; only raw TCP sockets are in scope. Verified via a real
+  local TCP round-trip using a throwaway `nc` listener on the Haiku
+  host itself (both directions - write and read), not a mock.
+
+**A real, structural gap found while double-checking the README's own
+"Building" section claims, unrelated to any single Kit above**:
+`ebpm`'s automatic linker-flag forwarding (the `.libs` sidecar
+mechanism, which records every `Extern "C" Lib "name"` clause found in
+a package's own raw layer) cannot discover `libtranslation`/
+`libbnetapi` as transitive link dependencies of the *compiled shim
+itself* - unlike `-l be`/`-l root` (both captured automatically because
+`find_directory`/`fs_create_index` are real plain C functions bound
+directly under those `Lib` names), neither `libtranslation.so` nor
+`libbnetapi.so` exports a single non-C++-mangled symbol to hang the
+same fix on (confirmed via `nm -D --defined-only` on the real host -
+only `_init`/`_fini`). Reproduced directly with a real downstream
+consumer package using only `[dependencies] eb-haiku = ...`: linking
+fails with "undefined reference" errors until `-l translation
+-l bnetapi` are added explicitly. Documented honestly in the README's
+own "Building" and "Known gaps" sections rather than left as a silent
+trap - this had been true since Translation Kit's own v0.4.0 without
+being noticed until now.
+
+Verified end-to-end on real Haiku hardware via `eb-haiku`'s own
+`scripts/haiku_verify.sh`, now running 23 `tests/*.bas` files. Four new
+examples (`locking.bas`, `menu.bas`, `roster_and_clipboard.bas`,
+`network.bas`), one per area. Published: pushed with a `v0.6.0` tag,
+`ebpm-index` updated, `ebpm add eb-haiku` confirmed resolving to
+`v0.6.0` from the live index.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
