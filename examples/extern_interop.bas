@@ -3,11 +3,11 @@
 ' since libc is always linked.
 
 Extern "C"
-    Declare Function abs(ByVal n AS INTEGER) AS INTEGER
+    Declare Function c_abs Alias "abs" (ByVal n AS INTEGER) AS INTEGER
     Declare Function atoi(ByVal s AS ZSTRING) AS INTEGER
 End Extern
 
-PRINT abs(-5)
+PRINT c_abs(-5)
 
 DIM numText AS STRING
 numText = "42"
