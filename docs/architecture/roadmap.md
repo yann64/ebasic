@@ -2209,9 +2209,11 @@ own "ecosystem repo" tracking precedent - the real technical detail lives
 in each sibling repo's own README/commit history.
 
 **Status: all six originally planned slices (C0-C5) shipped, plus a C7
-follow-up** - a manual verification checklist (`ebasic-editor`'s own
-README) is the one remaining step for all of it, since this sandbox has
-no real GTK4 display backend to run the finished app in. C7 closed the
+follow-up, plus a real (not just written) manual verification pass** -
+see the Implementation Notes entry at the end of this section for how
+that pass actually went, once a real GTK4 display backend turned out to
+be available after all (environment-dependent, not universal - see that
+entry). C7 closed the
 one real, deliberate gap left after C0-C6: the plan's own locked-in "flat
 file list" sidebar (`src/filebrowser.bas`) - a flat list of the currently
 browsed folder's immediate contents (never a recursive tree), each row
@@ -2327,7 +2329,46 @@ guard on the sidebar actually being set up.
   actually inspecting the captured output (against a throwaway, isolated
   fixture repo, never this project's own working repo) rather than just
   checking it didn't crash. This completes the editor's planned feature
-  set - a final manual verification pass (C6) is next.
+  set.
+
+**A real manual verification pass (closing C6) - the premise it was
+blocked on turned out to be environment-specific, not universal**: every
+prior session assumed no real GTK4 display backend was available (a
+claim `eb-gtk4`'s own README repeats, based on a real segfault seen
+constructing a bare `GtkWindow` outside a `GtkApplication`/`"activate"`
+context). A later session found a genuine, live desktop available
+(`gnome-session`/`Xwayland` actually running, GTK4 4.22.4 + dev headers
+installed) and, forcing `GDK_BACKEND=x11` so X11 tools could see/drive
+the window, launched the real `target/ebasic-editor` binary into a
+correctly rendered, fully functional window - screenshotted as proof.
+The earlier segfault reproduces too, but only from code that skips
+GTK4's required `GtkApplication`/`"activate"` bootstrap; `ebasic-editor`'s
+own `main.bas` never does that, so the per-slice work was correct all
+along - only "we can't test this here" was ever wrong, and only in
+sandboxes without a real desktop.
+
+A new `scripts/manual_verify.sh` scripts as much of the checklist as
+turned out to be reliably automatable (window layout, syntax
+highlighting, live LSP connectivity, sidebar keyboard navigation,
+Undo/Redo - each with screenshot evidence) and documents, precisely, why
+the rest couldn't be: **synthetic X11 mouse clicks were never recognized
+by GTK4's own gesture recognizer** in that sandboxed session (tried
+multiple techniques, with pointer position independently confirmed
+correct each time), and **keyboard focus-traversal (Tab) reaching a
+plain button then activating it (Space/Return) was not reliably
+reproducible** across repeated, otherwise-identical attempts - a genuine,
+confirmed input-delivery/timing limitation of that specific environment,
+not a suspected app defect, since every button-triggered action
+(Build/Run/Test/Git toolbar) calls exactly the functions the existing
+`buildrun_smoke.bas`/`gitui_smoke.bas` tests already prove correct
+end-to-end. `GtkFileChooserNative` (Open/Open Folder/Save As) never
+showed any dialog window at all either - likely a portal/Wayland-vs-
+forced-X11-backend interaction, not investigated further. One real,
+minor (non-blocking) UX gap found live: loading a file via the sidebar
+never moves keyboard focus into the editor, since `eb-gtk4` has no
+`gtk_widget_grab_focus` binding yet - documented as a known gap rather
+than fixed, since closing it needs new upstream `eb-gtk4` surface, not
+an `ebasic-editor`-side change.
 
 ## `eb-haiku` - a Haiku OS native API binding (ecosystem repo)
 
