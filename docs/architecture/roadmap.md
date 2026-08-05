@@ -2414,6 +2414,22 @@ stable C ABI), so this Haiku result required zero source changes to
 either repo - both READMEs' "Linux-only"/"Linux-first" framing is
 updated accordingly.
 
+**Cross-version test resolves the button-click gap's real nature (same
+session, direct follow-up)**: ran the identical `Atspi.Action.do_action`
+call inside a disposable `debian:bookworm` Docker container sharing the
+host's X11 display - a genuinely older GTK 4.8.3 + at-spi2-core 2.46.0 +
+python3-gi 3.42.2, versus the host's GTK 4.22.4 + at-spi2-core 2.60.4 +
+python3-gi 3.56.2. **Result: on the older build, the same call genuinely
+triggers the button's real `"clicked"` handler end-to-end** (confirmed
+via both a marker file the handler writes and the button's own label
+visibly changing, screenshotted). So the button-click gap is a real,
+version-specific regression in GTK4's/at-spi2-core's AT-SPI
+action-to-signal bridge, not a fundamental limitation of AT-SPI-based
+automation and not a defect in `ebasic-editor` - it simply doesn't
+reproduce on an older, real package combination. Not yet bisected to a
+single package (all three moved together across that range); no
+upstream bug report filed yet.
+
 ## `eb-haiku` - a Haiku OS native API binding (ecosystem repo)
 
 A new sibling repo (`https://github.com/yann64/eb-haiku`), matching
