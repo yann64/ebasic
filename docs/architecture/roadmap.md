@@ -3071,6 +3071,69 @@ API returns `NULL`. Published: pushed with a `v0.10.0` tag,
 `ebpm-index` updated, `ebpm add eb-haiku` confirmed resolving to
 `v0.10.0` from the live index.
 
+### `eb-haiku` v0.11.0 (shipped): eight residual gaps in already-bound Kits
+
+Asked once more whether every Kit is fully implemented - this round
+closed the 8 real, tractable residual items still listed as "not
+bound" across `BVolume`/`BMimeType`/Locale Kit/Translation Kit/Network
+Kit/Media Kit/Package Kit, surfaced across four multi-select
+questions; user picked all eight.
+
+- **`BVolume::GetIcon`/`SetName`** - `GetIcon` reuses the existing
+  `HBitmap` type (real `BVolume` has no `SetIcon` at all); `SetName` is
+  a real, functional rename. **A 4th confirmed occurrence of the "needs
+  `BApplication` first" gotcha family**: `HVolumeGetIcon` hangs
+  indefinitely without one, caught via probe before shipping.
+- **`BMimeType` sniffer rules** - `GetSnifferRule`/`SetSnifferRule` and
+  the static `CheckSnifferRule` validator. Verified with a real, valid
+  rule round-tripped on a throwaway type, and a real invalid rule
+  correctly rejected with Haiku's own detailed parse-error message.
+- **Locale Kit `Parse` methods** - the inverse of `Format`. **Resolved
+  a real open question from planning**: `BTime`/`BDate` are declared
+  inside `namespace BPrivate` purely as an internal-organization quirk
+  inside the *public* `os/support/DateTime.h` header, which re-exports
+  both via `using BPrivate::BTime;`/`using BPrivate::BDate;` at global
+  scope - fully stable, ordinary public API despite the namespace name.
+- **`BCatalog`** (new `src/catalog.bas`) - the runtime-facing surface
+  only, deliberately not attempting `collectcatkeys`/`linkcatkeys`
+  themselves. Real and useful even with zero `.catkeys` data: `GetString`
+  gracefully echoes the key itself back unchanged when uncovered.
+- **`BMemoryIO`/`BMallocIO`** - both real `BPositionIO` subclasses,
+  usable directly anywhere `HFile` already is. Verified with a real,
+  entirely in-memory round trip (decode a PNG, `Translate` into a
+  growing `BMallocIO`, decode back from a read-only `BMemoryIO`
+  wrapping that same buffer) - no intermediate file on disk.
+- **`BNetworkInterface` configuration** - `SetFlags`/`SetMTU`/
+  `SetMedia`/`SetMetric`, the simple `BNetworkAddress`-based overloads
+  of `AddAddress`/`RemoveAddress`/`RemoveAddressAt`,
+  `AddDefaultRoute`/`RemoveDefaultRoute`, `AutoConfigure`.
+  **SAFETY-CRITICAL**: verified via a standalone C++ probe first, then
+  only ever exercised against the real loopback interface - never the
+  live NICs an active SSH session might depend on.
+- **Media Kit real-time buffer synthesis** - a new `BSoundPlayer`
+  constructor overload taking a real `BufferPlayerFunc` callback. **A
+  real, confirmed shim bug caught by a standalone C++ probe before
+  shipping**: real `BSoundPlayer::Cookie()` returns a real, non-`NULL`
+  internal pointer even for a plain player (not `NULL` as might be
+  assumed) - a single shared destroy function that unconditionally
+  called `delete Cookie()` corrupted the heap and hung the process.
+  Fixed with a dedicated free function for the buffer-callback path.
+- **Package Kit repo-config visiting/watching** -
+  `VisitCommonRepositoryConfigs`/`VisitUserRepositoryConfigs` via a new
+  `ShimRepositoryConfigVisitor` subclass (real Haiku only ever calls a
+  visitor as a functor), and `StartWatching`/`StopWatching` reusing the
+  existing `HWatcher` primitive.
+
+Verified end-to-end on real Haiku hardware via `eb-haiku`'s own
+`scripts/haiku_verify.sh`, now running 48 `tests/*.bas` files. Eight
+new examples, one per area. With v0.11.0 shipped, every candidate
+surfaced by both survey rounds (v0.10.0's new-Kit search and this
+version's own residual-gap search) is bound except Bluetooth Kit (not
+selected) and Screen Saver Kit (confirmed not bindable given `ebc`'s
+current lack of a shared-library output mode). Published: pushed with
+a `v0.11.0` tag, `ebpm-index` updated, `ebpm add eb-haiku` confirmed
+resolving to `v0.11.0` from the live index.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
