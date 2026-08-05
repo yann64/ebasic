@@ -47,7 +47,15 @@ if [ ! -f "$SHARED_LIB" ]; then
 fi
 
 CC="${CC:-cc}"
-if ! "$CC" "$FIXTURE_DIR/harness.c" -o "$WORKDIR/harness" -ldl 2>"$WORKDIR/cc.log"; then
+# dlopen/dlsym linkage varies by platform: glibc Linux needs an explicit
+# -ldl (a real, separate library there); Haiku has no libdl at all -
+# dlopen is built directly into libroot, and linking -ldl fails outright
+# (confirmed live on real Haiku hardware: "cannot find -ldl").
+DL_LIBS=""
+if [ "$(uname -s)" = "Linux" ]; then
+    DL_LIBS="-ldl"
+fi
+if ! "$CC" "$FIXTURE_DIR/harness.c" -o "$WORKDIR/harness" $DL_LIBS 2>"$WORKDIR/cc.log"; then
     echo "FAIL: harness.c did not compile"
     cat "$WORKDIR/cc.log"
     exit 1
