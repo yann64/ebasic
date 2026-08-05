@@ -3382,6 +3382,62 @@ have no `SetLabel`/`GetLabel`/`SetEnabled`/`IsEnabled` wrappers at all -
 left as a real, named gap for a future session rather than rushed in
 alongside these smaller fixes.
 
+## `ebasic-editor`: a real, interactive completion popup (ecosystem repo)
+
+`ebasic-editor`'s completion had been a deliberate v1 scope cut - a real
+`textDocument/completion` LSP round trip existed, but the result was just
+dumped as plain status-bar text, not an interactive dropdown. Closed for
+real this session, prompted directly by the user's own explicit request
+for a plan, then approval to implement it.
+
+**Key finding that reshaped the approach**: `gtksourceview-5`'s own real,
+installed dev headers already ship a complete completion popup framework
+- `GtkSourceCompletion` (auto-created per view) plus
+`GtkSourceCompletionWords`, a ready-made provider needing no custom
+GObject-interface implementation at all - it watches a plain
+`GtkTextBuffer` (no display needed, same fact this whole ecosystem
+already relies on for headless testing) and offers every distinct word
+found in it as a candidate, with popup positioning/live filtering/
+keyboard nav/insertion all handled internally. This avoided hand-building
+a `GtkPopover` + manual cursor-to-pixel positioning + a keyboard-nav state
+machine from scratch - `eb-gtk4` v0.8.0 just binds
+`SourceCompletion`/`SourceCompletionWords` (5 new raw functions, a
+matching idiomatic layer, a headless smoke test). No core `eBasic`/
+`ebasic_lsp` changes were needed - `completionItems()` already returns
+every known keyword/procedure/struct/symbol name unconditionally, exactly
+the flat word-list the provider wants.
+
+**A real architectural wrinkle surfaced and fixed**: `ebasic-editor`'s LSP
+client tracked exactly one outstanding request via a single global
+"pending kind" slot, with a caller-side blocking wait after each request.
+Keeping the completion word-list live as the user types means firing a
+background refresh on every keystroke *without* blocking and *without*
+racing a concurrent hover/go-to-definition request - fixed with a small,
+contained change (not a rearchitecture): a new `LspSendRequestRaw`
+(extracted from `LspSendRequest`) that doesn't touch the pending-kind
+slot at all; the background refresh tracks its own response id directly
+and `LspDispatch` checks it before ever consulting the old single-slot
+scheme, so the two paths can never clobber each other regardless of
+interleaving.
+
+**Verification**: `ebpm test` stays green in both repos (`eb-gtk4`'s new
+headless smoke test; `ebasic-editor`'s `tests/lsp_client_smoke.bas`,
+rewritten to confirm the hidden completion-words buffer genuinely gets
+populated with both a keyword and a variable the test's own document
+declares, via a real spawned `ebasic_lsp`). Live: the popup was confirmed
+genuinely rendering a real candidate after typing a partial keyword
+(screenshotted) - the first real, positive completion-popup evidence this
+project has had. **One honest, open item**: keyboard-driven *acceptance*
+of a candidate (Tab/Return inserting the full word) wasn't confirmed live
+this pass - several reasonable synthetic-X11-key attempts (immediate
+accept, an explicit `Down` to select first, varied timing) either fell
+through to ordinary text editing or were silently swallowed. Plausibly
+the same broad class of input-delivery limitation `ebasic-editor`'s
+earlier AT-SPI/button-click investigation already found in this sandbox
+(real mouse clicks and some AT-SPI action-dispatch paths are also
+unreliable here), not necessarily a defect in `GtkSourceCompletion`
+itself - left as a named gap, not silently claimed done.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
