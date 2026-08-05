@@ -43,6 +43,10 @@ struct Options {
     /// M5: build a library (static archive + auto-generated interface file)
     /// instead of an executable - see printUsage for the exact output shape.
     bool libMode = false;
+    /// Build a real, dynamically loadable shared library (.so/.dylib/.dll)
+    /// instead of an executable - see printUsage for the exact output
+    /// shape. Mutually exclusive with libMode (checked in main()).
+    bool sharedLibMode = false;
     /// M5: extra #include search paths (`-I <dir>`, repeatable) - a fallback
     /// only, consulted after the includer-relative lookup fails (see
     /// preprocess()'s doc comment). Lets a package's source #include a
@@ -95,6 +99,8 @@ bool parseArgs(int argc, char** argv, Options& opts, std::string& err) {
             opts.keepCpp = true;
         } else if (a == "--lib") {
             opts.libMode = true;
+        } else if (a == "-dll" || a == "--shared-lib") {
+            opts.sharedLibMode = true;
         } else if (a == "-v" || a == "--version") {
             opts.showVersion = true;
         } else if (a == "-h" || a == "--help") {
@@ -114,18 +120,31 @@ bool parseArgs(int argc, char** argv, Options& opts, std::string& err) {
         err = "no input file";
         return false;
     }
+    if (opts.libMode && opts.sharedLibMode) {
+        err = "--lib and --shared-lib/-dll are mutually exclusive";
+        return false;
+    }
     return true;
 }
 
 void printUsage(std::ostream& os) {
     os << "usage: ebc <input.bas> [-o <output>] [-cxx <compiler>] [-L <dir>]... [-I <dir>]...\n";
-    os << "           [-l <name>]... [--keep-cpp] [--lib]\n";
+    os << "           [-l <name>]... [--keep-cpp] [--lib | --shared-lib]\n";
     os << "       ebc [-v | --version] [-h | --help]\n";
     os << "  --lib: build a library instead of an executable - <output> is a bare\n";
     os << "  name; produces lib<output>.a (a static archive), <output>.iface.bas\n";
     os << "  (an auto-generated interface for dependent packages to #include), and\n";
     os << "  <output>.libs (this archive's own Lib \"name\" clauses, one per line -\n";
     os << "  for a build tool to forward to a downstream consumer's own link step).\n";
+    os << "  --shared-lib (alias -dll): build a real, dynamically loadable shared\n";
+    os << "  library instead of an executable - <output> is a bare name; produces\n";
+    os << "  a real lib<output>.so/.dylib (Linux/Haiku/macOS) or <output>.dll +\n";
+    os << "  lib<output>.dll.a (Windows/MinGW import library), plus the same\n";
+    os << "  <output>.iface.bas/<output>.libs sidecar files --lib produces. Only a\n";
+    os << "  SUB/FUNCTION written with a real body inside an `Extern \"C\" ... End\n";
+    os << "  Extern` block becomes a real, stable, unmangled export usable by\n";
+    os << "  another program (e.g. dlopen'd) - everything else keeps its ordinary\n";
+    os << "  mangled name, same as --lib. Mutually exclusive with --lib.\n";
     os << "  -I <dir>: extra #include search path, consulted only after the\n";
     os << "  includer-relative lookup fails.\n";
     os << "  -l <name>: extra library to link, alongside any already named by the\n";
@@ -254,12 +273,12 @@ std::vector<std::string> runtimeIncludeArgs(const std::string& argv0) {
     return args;
 }
 
-/// M5 (--lib mode): a library's object file must never define `main` itself
-/// (it would collide with the consuming package's own `main` at final link
-/// time), so its module may only contain declarations - no top-level
-/// executable statement (PRINT, assignment, IF, a loop, ...). Checked
-/// structurally here, directly against the parsed module, rather than
-/// threading a new mode flag through Sema.
+/// M5 (--lib mode, and --shared-lib/-dll): a library's object file must
+/// never define `main` itself (it would collide with the consuming
+/// package's own `main` at final link time), so its module may only contain
+/// declarations - no top-level executable statement (PRINT, assignment, IF,
+/// a loop, ...). Checked structurally here, directly against the parsed
+/// module, rather than threading a new mode flag through Sema.
 bool hasOnlyLibDeclarations(const ebasic::Module& module, std::string& err) {
     for (const auto& stmtPtr : module.stmts) {
         switch (stmtPtr->kind) {
@@ -274,12 +293,30 @@ bool hasOnlyLibDeclarations(const ebasic::Module& module, std::string& err) {
                 continue;
             default:
                 err = "line " + std::to_string(stmtPtr->loc.line) +
-                      ": a --lib build may only contain declarations (DIM/CONST/ENUM/SUB/"
-                      "FUNCTION/TYPE/UNION/NAMESPACE) at the top level, not executable code";
+                      ": a --lib/--shared-lib build may only contain declarations (DIM/CONST/"
+                      "ENUM/SUB/FUNCTION/TYPE/UNION/NAMESPACE) at the top level, not executable "
+                      "code";
                 return false;
         }
     }
     return true;
+}
+
+/// Mirrors pkg/src/manifest.cpp's own currentTargetOS() idiom - duplicated
+/// locally rather than shared across binaries for something this small (see
+/// this project's own established preference, e.g. ebpm's build.cpp doing
+/// the same). Only used by the --shared-lib link step below, to pick the
+/// right artifact prefix/extension/link flags.
+std::string currentTargetOS() {
+#ifdef _WIN32
+    return "windows";
+#elif defined(__APPLE__)
+    return "macos";
+#elif defined(__HAIKU__)
+    return "haiku";
+#else
+    return "linux";
+#endif
 }
 
 } // namespace
@@ -341,7 +378,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    if (opts.libMode) {
+    if (opts.libMode || opts.sharedLibMode) {
         std::string err;
         if (!hasOnlyLibDeclarations(module, err)) {
             std::cerr << "ebc: error: " << err << "\n";
@@ -350,7 +387,7 @@ int main(int argc, char** argv) {
     }
 
     ebasic::Codegen codegen;
-    std::string cpp = codegen.generate(module, opts.libMode);
+    std::string cpp = codegen.generate(module, opts.libMode || opts.sharedLibMode, opts.sharedLibMode);
 
     if (opts.outputPath.empty()) {
         opts.outputPath = fs::path(opts.inputPath).stem().string();
@@ -400,6 +437,78 @@ int main(int argc, char** argv) {
         if (rc == 0) {
             rc = ebasic::runProcess(
                 ebasic::hostExecArgs({"ar", "rcs", archivePath.string(), objPath.string()}));
+        }
+        if (rc == 0) {
+            std::ofstream ifaceOut(ifacePath);
+            ifaceOut << codegen.generateLibraryInterface(module, libName);
+            std::ofstream libsOut(libsPath);
+            for (const std::string& lib : codegen.externLibs()) libsOut << lib << "\n";
+        }
+        std::error_code ec;
+        fs::remove(objPath, ec);
+    } else if (opts.sharedLibMode) {
+        /// Real, dynamically loadable shared library - unlike --lib's static
+        /// archive, this needs a genuine platform-specific link step (shared
+        /// object/dylib/DLL), not `ar`. Only an `isExported` procedure
+        /// (real body inside `Extern "C" ... End Extern`) gets a stable,
+        /// unmangled, dllexport/visibility-default symbol - see
+        /// Codegen::genProcedure. The same .iface.bas/.libs sidecar files
+        /// --lib produces are generated too (orthogonal to archiving-vs-
+        /// shared-linking: this package can still also be depended on by
+        /// another eBasic package via its ordinary mangled symbols, not just
+        /// its opt-in C exports).
+        fs::path outDir = fs::path(opts.outputPath).parent_path();
+        std::string libName = fs::path(opts.outputPath).filename().string();
+        fs::path objPath = opts.outputPath + ".o";
+        fs::path ifacePath = outDir / (libName + ".iface.bas");
+        fs::path libsPath = outDir / (libName + ".libs");
+
+        std::string targetOS = currentTargetOS();
+        bool isWindows = targetOS == "windows";
+        bool isMacos = targetOS == "macos";
+        std::string prefix = isWindows ? "" : "lib";
+        std::string ext = isWindows ? ".dll" : (isMacos ? ".dylib" : ".so");
+        fs::path sharedLibPath = outDir / (prefix + libName + ext);
+        /// MinGW's own convention: another program links against this import
+        /// library at build time (there is no real static archive of the
+        /// DLL's code to link against directly, unlike ELF/Mach-O where the
+        /// shared object itself is linked against).
+        fs::path importLibPath = outDir / ("lib" + libName + ".dll.a");
+
+        std::vector<std::string> compileArgs = {cxx, "-std=c++17"};
+        for (const std::string& a : runtimeIncludeArgs(argv[0])) compileArgs.push_back(a);
+        if (!isWindows) compileArgs.push_back("-fPIC");
+        compileArgs.push_back("-c");
+        compileArgs.push_back(cppPath.string());
+        compileArgs.push_back("-o");
+        compileArgs.push_back(objPath.string());
+        rc = ebasic::runProcess(ebasic::hostExecArgs(compileArgs));
+
+        if (rc == 0) {
+            std::vector<std::string> linkArgs = {cxx};
+            if (isMacos) {
+                linkArgs.push_back("-dynamiclib");
+            } else {
+                linkArgs.push_back("-shared");
+            }
+            if (!isWindows) linkArgs.push_back("-fPIC");
+            linkArgs.push_back(objPath.string());
+            linkArgs.push_back("-o");
+            linkArgs.push_back(sharedLibPath.string());
+            if (isWindows) {
+                linkArgs.push_back("-Wl,--out-implib," + importLibPath.string());
+            }
+            for (const std::string& dir : opts.libDirs) {
+                linkArgs.push_back("-L");
+                linkArgs.push_back(dir);
+            }
+            for (const std::string& lib : codegen.externLibs()) {
+                linkArgs.push_back("-l" + lib);
+            }
+            for (const std::string& lib : opts.extraLibNames) {
+                linkArgs.push_back("-l" + lib);
+            }
+            rc = ebasic::runProcess(ebasic::hostExecArgs(linkArgs));
         }
         if (rc == 0) {
             std::ofstream ifaceOut(ifacePath);

@@ -152,7 +152,7 @@ void Codegen::collectExternProcNames(const std::vector<StmtPtr>& stmts, const st
             collectExternProcNames(stmtPtr->body, nsKey, nsReal);
             continue;
         }
-        if (!stmtPtr->isExtern) continue;
+        if (!stmtPtr->isExtern && !stmtPtr->isExported) continue;
         std::string key = (keyPrefix.empty() ? "" : keyPrefix + "::") + canonicalName(stmtPtr->name);
         std::string realName = stmtPtr->externAlias.empty() ? stmtPtr->name : stmtPtr->externAlias;
         externProcNames_[key] = (realPrefix.empty() ? "" : realPrefix + "::") + realName;
@@ -791,6 +791,24 @@ void Codegen::genProcedure(const Stmt& stmt) {
 
     std::string name = stmt.isOperator ? ("operator" + cppOperatorToken(stmt.operatorBinOp))
                                         : mangleName(stmt.name);
+    /// Shared-library support: an isExported procedure (a real, bodied
+    /// `Sub`/`Function` written inside `Extern "C" ... End Extern`) is the
+    /// *only* definition Codegen ever emits for it - reusing the ordinary
+    /// body-emission path below, just under its own verbatim externAlias
+    /// name (never mangleName, since dlopen/dlsym or a plain external C
+    /// caller must find it exactly as written) and wrapped in real dynamic-
+    /// export linkage. EBASIC_EXPORT (defined in generate()'s preamble only
+    /// when sharedLib_ is true) adds real dllexport/visibility-default;
+    /// otherwise plain `extern "C"` still gives it unmangled C linkage
+    /// without claiming dynamic-export visibility that wouldn't mean
+    /// anything here (e.g. an ordinary `--lib`/executable build that merely
+    /// reuses the export syntax - no real shared object exists to export
+    /// from).
+    std::string exportPrefix;
+    if (stmt.isExported) {
+        name = stmt.externAlias.empty() ? stmt.name : stmt.externAlias;
+        exportPrefix = sharedLib_ ? "EBASIC_EXPORT " : "extern \"C\" ";
+    }
     /// Two separate renderings, not one reused string: a default argument
     /// may only appear on the *first* signature emission the translation
     /// unit sees (see buildParamList's own doc comment) - the prototype
@@ -802,9 +820,9 @@ void Codegen::genProcedure(const Stmt& stmt) {
         stmt.isOperator ? protoParamList
                          : buildParamList(stmt.params, /*includeDefaults=*/false);
 
-    protoOut_ << retType << " " << name << "(" << protoParamList << ");\n";
+    protoOut_ << exportPrefix << retType << " " << name << "(" << protoParamList << ");\n";
 
-    procOut_ << retType << " " << name << "(" << defParamList << ") {\n";
+    procOut_ << exportPrefix << retType << " " << name << "(" << defParamList << ") {\n";
     if (isFunction) {
         procOut_ << ind(1) << retType << " eb__ret{};\n";
     }
@@ -933,8 +951,9 @@ void Codegen::genNamespaceDecl(const Stmt& stmt) {
     if (hasGlobals) globalsOut_ << "} // namespace " << ns << "\n";
 }
 
-std::string Codegen::generate(const Module& module, bool libMode) {
+std::string Codegen::generate(const Module& module, bool libMode, bool sharedLib) {
     externLibs_ = module.externLibs;
+    sharedLib_ = sharedLib;
 
     /// Top-level DIM/CONST/ENUM become real C++ globals (declared before any
     /// function bodies) so SUB/FUNCTION can see them; SUB/FUNCTION become
@@ -1028,6 +1047,17 @@ std::string Codegen::generate(const Module& module, bool libMode) {
     out << "#include <cmath>\n";
     out << "#include <cstdint>\n";
     out << "#include <vector>\n\n";
+    /// Shared-library support: only meaningful (and only emitted) when this
+    /// is a real `--shared-lib`/`-dll` build - an isExported procedure's
+    /// definition uses this macro instead of plain `extern "C"` (see
+    /// genProcedure) to also get real dynamic-export visibility.
+    if (sharedLib_) {
+        out << "#if defined(_WIN32)\n";
+        out << "#define EBASIC_EXPORT extern \"C\" __declspec(dllexport)\n";
+        out << "#else\n";
+        out << "#define EBASIC_EXPORT extern \"C\" __attribute__((visibility(\"default\")))\n";
+        out << "#endif\n\n";
+    }
     if (!typesOut_.str().empty()) out << typesOut_.str();
     if (!globalsOut_.str().empty()) out << globalsOut_.str() << "\n";
     if (!protoOut_.str().empty()) out << protoOut_.str() << "\n";

@@ -24,7 +24,17 @@ public:
     /// statements (only declarations), since a library's object file must
     /// never define `main` itself (it would collide with the consuming
     /// package's own `main` at final link time).
-    std::string generate(const Module& module, bool libMode = false);
+    /// `sharedLib` (shared-library support): when true, an `isExported`
+    /// procedure's definition (see genProcedure) is wrapped in the real
+    /// `EBASIC_EXPORT` macro (dllexport/visibility-default), and that
+    /// macro's preamble is emitted once at the top of the output. When
+    /// false but the module still contains an `isExported` procedure (e.g.
+    /// an ordinary `--lib`/executable build that merely reuses `Extern "C"`
+    /// export syntax), the same definition is emitted with plain `extern
+    /// "C"` linkage instead - correct, just not given real dynamic-export
+    /// visibility (there is no shared object here for that to mean
+    /// anything).
+    std::string generate(const Module& module, bool libMode = false, bool sharedLib = false);
 
     /// M5: renders an auto-generated, real `.bas`-syntax interface file for
     /// a library build - an `Extern "C++" Lib "<libName>" ... End Extern`
@@ -119,8 +129,11 @@ private:
     /// for everything else (This/Base/a general receiver, or an ordinary
     /// non-extern procedure/namespace member).
     std::string resolveCalleeName(const Expr* lhs, const std::string& name);
-    /// Recursively collects every isExtern SubDecl/FunctionDecl's real
-    /// external name into externProcNames_, keyed by its (possibly
+    /// Recursively collects every isExtern (or isExported - shared-library
+    /// support: the *only* definition Codegen ever emits for one of these
+    /// uses its verbatim externAlias, never mangleName, so an in-file call
+    /// site must resolve to that same real name too) SubDecl/FunctionDecl's
+    /// real external name into externProcNames_, keyed by its (possibly
     /// namespace-qualified) canonical BASIC name - recurses into
     /// NamespaceDecl bodies so an Extern "C++" NAMESPACE binding (M4c) is
     /// found too, not just top-level EXTERN declarations (M4b).
@@ -202,6 +215,10 @@ private:
     std::unordered_set<std::string> namespaces_;
     /// See the public externLibs() accessor.
     std::vector<std::string> externLibs_;
+    /// Set once, up front, from generate()'s own `sharedLib` parameter -
+    /// see that parameter's doc comment. Read only by genProcedure, for an
+    /// `isExported` procedure.
+    bool sharedLib_ = false;
     /// Canonical BASIC name -> real external symbol name (the `Alias`, or
     /// the declared name as-is), computed once up front in generate() for
     /// every top-level `isExtern` SubDecl/FunctionDecl (M4). A call site

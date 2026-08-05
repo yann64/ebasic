@@ -322,6 +322,14 @@ add_test(
     COMMAND $<TARGET_FILE:semver_test>
 )
 
+# --shared-lib/-dll: real dlopen/dlsym/call round trip, plus both rejection
+# paths (a STRING export; --lib + --shared-lib together). Skips itself on
+# Windows/MinGW (no dlopen there) - see shared_lib.sh's own comment.
+add_test(
+    NAME cli_shared_lib
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/cli/shared_lib.sh $<TARGET_FILE:ebc>
+)
+
 # LSP-1: a protocol-level smoke test - speaks real Content-Length-framed
 # JSON-RPC over ebasic_lsp's stdio (initialize/didOpen/didChange/didClose/
 # shutdown/exit, plus the unimplemented-method and unclean-disconnect exit-

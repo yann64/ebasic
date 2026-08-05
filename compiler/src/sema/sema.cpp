@@ -559,7 +559,12 @@ void Sema::collectExternSignatureChecks(std::vector<StmtPtr>& stmts) {
     };
 
     for (auto& stmt : stmts) {
-        if (!stmt->isExtern) continue;
+        /// A shared-library export (isExported - a real, bodied SUB/
+        /// FUNCTION written inside an EXTERN "C" block) crosses exactly
+        /// the same C-ABI boundary a plain isExtern import does, just in
+        /// the opposite direction - the same STRING/TYPE restrictions
+        /// checkType already enforces for imports apply equally here.
+        if (!stmt->isExtern && !stmt->isExported) continue;
         for (const Param& p : stmt->params) {
             checkType(p.type, p.loc, "parameter '" + p.name + "'");
         }

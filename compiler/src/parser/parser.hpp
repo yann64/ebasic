@@ -94,6 +94,11 @@ private:
     /// could in principle also hold more than one Stmt in the future).
     void parseExternNamespace(std::vector<StmtPtr>& out, const std::string& linkage,
                                const std::string& lib);
+    /// Shared-library support: a real `Sub`/`Function ... End Sub`/`End
+    /// Function` definition written inside an `Extern "C" ... End Extern`
+    /// block - reuses parseSub()/parseFunction() verbatim, then marks the
+    /// result `isExported` (see its own doc comment in parser.cpp).
+    StmtPtr parseExternExportDef(const std::string& linkage, const std::string& lib);
     std::vector<Param> parseParamList();
 
     /// Parses an Identifier's trailing chain of `.field` (Member) and, for

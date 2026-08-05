@@ -457,8 +457,11 @@ void Parser::parseExternBlock(std::vector<StmtPtr>& out) {
             parseExternNamespace(out, linkage, lib);
         } else if (check(TokenKind::KwDeclare)) {
             out.push_back(parseExternDecl(linkage, lib));
+        } else if (check(TokenKind::KwSub) || check(TokenKind::KwFunction)) {
+            out.push_back(parseExternExportDef(linkage, lib));
         } else {
-            diags_.error(peek().loc, "expected DECLARE or NAMESPACE inside an EXTERN block");
+            diags_.error(peek().loc,
+                         "expected DECLARE, SUB, FUNCTION, or NAMESPACE inside an EXTERN block");
             synchronize();
         }
         skipNewlines();
@@ -466,6 +469,37 @@ void Parser::parseExternBlock(std::vector<StmtPtr>& out) {
     expect(TokenKind::KwEnd, "expected END EXTERN");
     expect(TokenKind::KwExtern, "expected END EXTERN");
     expectStmtEnd();
+}
+
+/// Shared-library support: `Sub`/`Function ... End Sub`/`End Function` with
+/// a real body, written *inside* an `Extern "C" ... End Extern` block -
+/// the opt-in mechanism giving a real, eBasic-authored procedure a
+/// stable, unmangled, dynamically-loadable C symbol (see
+/// `--shared-lib`'s own doc comment in the driver). Reuses the ordinary
+/// parseSub()/parseFunction() grammar verbatim (a real function
+/// definition looks identical whether or not it's wrapped in an EXTERN
+/// block) and just marks the result `isExported` afterward - unlike
+/// parseExternDecl's own DECLARE form, there is no ALIAS clause here (a
+/// defined function's exported name is always its own real name,
+/// verbatim; renaming an *import* via ALIAS is a different, established
+/// use case that doesn't apply to a definition this project itself
+/// authors).
+StmtPtr Parser::parseExternExportDef(const std::string& linkage, const std::string& lib) {
+    if (linkage != "C") {
+        diags_.error(peek().loc,
+                     "only EXTERN \"C\" blocks may contain a real SUB/FUNCTION definition - a "
+                     "mangled \"C++\"-linkage export is not a stable ABI boundary");
+    }
+    StmtPtr stmt = check(TokenKind::KwSub) ? parseSub() : parseFunction();
+    if (!stmt->ownerType.empty()) {
+        diags_.error(stmt->loc, "a TYPE method cannot be exported from an EXTERN block - only a "
+                                 "free (non-member) SUB/FUNCTION can");
+    }
+    stmt->isExported = true;
+    stmt->externLinkage = linkage;
+    stmt->externLib = lib;
+    stmt->externAlias = stmt->name;
+    return stmt;
 }
 
 /// `Namespace Name [Alias "realName"] ... End Namespace`, nested inside an

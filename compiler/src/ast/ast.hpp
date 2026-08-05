@@ -535,6 +535,20 @@ struct Stmt {
     /// the prototype and every call site.
     std::string externAlias;
     std::string externLib; // a `Lib "name"` clause; empty = none given
+
+    /// `Sub`/`Function ... End Sub`/`End Function` with a real body,
+    /// written *inside* an `Extern "C" ... End Extern` block (shared-
+    /// library support) - the opt-in mechanism for giving a real,
+    /// eBasic-authored procedure a stable, unmangled, dynamically-
+    /// loadable C symbol (e.g. a Haiku add-on's own real entry point).
+    /// Distinct from `isExtern` (which always means "no body, imported
+    /// from elsewhere") - this one always has a real `body`. Reuses
+    /// `externLinkage`/`externAlias` above for the same purpose those
+    /// already serve for imports; `externLinkage` is always "C" here
+    /// (enforced by the parser - a mangled "C++"-linkage "export" isn't
+    /// a stable ABI boundary) and `externLib` is unused/empty (no `Lib`
+    /// clause is meaningful for a real definition).
+    bool isExported = false;
 };
 
 /// The parsed result of one compilation: every top-level statement, plus the
