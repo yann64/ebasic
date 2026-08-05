@@ -2973,6 +2973,104 @@ area. Published: pushed with a `v0.9.0` tag, `ebpm-index` updated,
 `ebpm add eb-haiku` confirmed resolving to `v0.9.0` from the live
 index.
 
+### `eb-haiku` v0.10.0 (shipped): five entirely new Kits
+
+Asked once more whether every Kit is fully implemented - this time
+research went beyond the already-bound Kits' own residual gaps and
+surveyed the real Haiku host for Kits never touched at all. Six real,
+linkable candidates were found (Mail, MIDI Kit 2, Game, OpenGL, Screen
+Saver, Bluetooth, Disk Device); user picked all but Bluetooth Kit (real
+but lowest-confidence: 2007-origin headers, a differently-namespaced
+`Bluetooth::` convention unlike every `B`-prefixed class elsewhere).
+Deep research then found Screen Saver Kit is **not realistically
+bindable**: `BScreenSaver` only works as a loadable `.so` add-on
+exporting `extern "C" instantiate_screen_saver()`, which Haiku's
+screensaver daemon `dlopen`s at runtime - but `ebc` has no shared-
+library/PIC output mode at all (only a native executable or a static
+`.a` archive) - a compiler-level limitation, documented in `eb-haiku`'s
+own README "Known gaps" rather than attempted.
+
+- **Mail Kit** - `BEmailMessage` (`SetTo`/`SetFrom`/`SetSubject`/
+  `SetBodyTextTo`/`Attach`/`Send`) and `BMailDaemon` (`CheckMail`/
+  `SendQueuedMail`/`CountNewMessages`/`MarkAsRead`/`Quit`/`Launch`).
+  Plain `new`/`delete` throughout. **Two real findings**: on a host
+  with no mail account configured and no `mail_daemon` running,
+  `CheckMail`/`CountNewMessages` return a real `B_MAIL_NO_DAEMON`
+  status promptly (no hang) and `Send` fails - expected behavior for
+  that environment; and `IsComponentAttachment` returns false even for
+  a genuine attachment, despite `ComponentType()` correctly reporting
+  it as one - a real, confirmed Mail Kit inconsistency, worked around
+  via `CountComponents()` instead.
+- **Game Kit** - `BGameSound` and its three leaf subclasses:
+  `BFileGameSound` (play a whole file), `BSimpleGameSound` (one-shot,
+  file or raw in-memory PCM), `BPushGameSound` (direct lock/unlock
+  buffer-fill polling, for procedurally-generated audio). Plain
+  `new`/`delete` throughout, confirmed via probe to need no
+  `BApplication` first either - a real contrast with Media Kit's own
+  `BSoundPlayer`. Hit the same real eBasic codegen limitation already
+  known from `HAreaCreate` (v0.8.0): a `BYREF ... AS ANY PTR` parameter
+  shape doesn't compile at any real call site - fixed the same
+  established way.
+- **OpenGL Kit** - `BGLView` (a real `BView` subclass) via a new
+  `ShimGLView` subclass overriding `Draw(BRect)`, directly reusing the
+  existing `EbHaikuDrawCallback` typedef and forwarding pattern from
+  `ShimView`/`ShimWindow`. Raw OpenGL calls are a separate `libGL.so`
+  surface, not Haiku API - bound directly via a new `Extern "C" Lib
+  "GL"` declare, matching the direct-`Lib`-declare precedent already
+  used for Kernel Kit's `Lib "root"`. Verified with a real, genuinely
+  rendered dark-blue-cleared window and an interpolated red/green/blue
+  triangle, confirmed via `screenshot -s`.
+- **Disk Device Kit** - `BDiskDeviceRoster`/`BDiskDevice`/`BPartition`.
+  **A first for this project**: the real classes live under
+  `headers/private/storage`, not the public `os/` tree every other
+  binding has used - a deliberate, documented exception. `BDiskDevice`
+  IS-A `BPartition` (single inheritance, no pointer-adjustment
+  concern), so the `BPartition`-level functions are shared and work on
+  either handle directly. **A real, confirmed hazard found and
+  deliberately avoided**: `BDiskDeviceRoster`'s own
+  `VisitEachMountablePartition` does not reliably scope its
+  enumeration to a childless `device` filter - a standalone C++ probe
+  showed it visiting every real partition on the entire host,
+  including the live boot volumes, and never returning. Not bound at
+  all - enumeration instead uses only `GetNextDevice`/`RewindDevices`
+  plus direct `ChildAt`/`CountChildren` navigation, both confirmed
+  safe. Verified entirely against a throwaway loopback file device
+  (`dd` + `mkfs -t bfs`), never any physical/boot device.
+- **MIDI Kit 2** - the most novel binding in this package:
+  `BMidiRoster` is a pure static-method facade (never instantiated).
+  Every endpoint class is real-refcounted (a genuine `fRefCount` field
+  + `Acquire()`/`Release()`, private/protected destructors enforcing it
+  at compile time) - there is deliberately no "destroy" function; the
+  shim calls `Release()`, never `delete`. `BMidiLocalProducer`
+  (`SprayNoteOn`/`NoteOff`/`ControlChange`/`ProgramChange`) and
+  `BMidiLocalConsumer` via a new `ShimMidiConsumer` subclass (the same
+  virtual-forwarding pattern as `ShimWindow`/`ShimView`). **Two real
+  findings, both confirmed via standalone C++ probes**: (1) both
+  endpoints must be `Register()`'d with the roster BEFORE
+  `Connect()`/`Spray*` for any data to actually be delivered - real
+  MIDI Kit 2 routing always goes through the out-of-process
+  `midi_server`, even for two purely local endpoints; (2) a genuine
+  shim bug - `ShimMidiConsumer`'s own `Data()` override must call the
+  real `BMidiLocalConsumer::Data()` base implementation, which is what
+  actually parses the raw byte stream and dispatches to
+  `NoteOn`/`NoteOff`/`ControlChange` internally - overriding it without
+  forwarding silently broke every other callback in the class, caught
+  by a shim-level probe that bypassed eBasic entirely to isolate the
+  bug from the glue code. Verified with a real, self-contained
+  loopback test.
+
+Verified end-to-end on real Haiku hardware via `eb-haiku`'s own
+`scripts/haiku_verify.sh`, now running 43 `tests/*.bas` files. Five new
+examples (`send_email.bas`, `game_sound.bas`, `opengl_triangle.bas`,
+`disk_devices.bas`, `midi_loopback.bas`), one per new Kit. A real edge
+case found while writing the Disk Device Kit example: `BPartition::
+Name`/`Type`/`ContentType` are real `NULL` for an unformatted/empty
+removable drive - passing a `NULL const char*` through as a `ZSTRING`
+broke `PRINT`; fixed by returning `""` from the shim whenever the real
+API returns `NULL`. Published: pushed with a `v0.10.0` tag,
+`ebpm-index` updated, `ebpm add eb-haiku` confirmed resolving to
+`v0.10.0` from the live index.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
