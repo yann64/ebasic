@@ -3334,6 +3334,54 @@ gap the `eb-haiku` v0.11.0 entry named for Screen Saver Kit, though
 actually binding `BScreenSaver` itself remains unstarted follow-on work
 for that separate ecosystem repo, not part of this change.
 
+## Ecosystem polish sweep (no new milestone - small fixes across repos)
+
+With M0-M8 all shipped and no next milestone yet chosen, ran a
+sweep (four parallel Explore agents) across every ecosystem repo
+(`eBasic` itself, `eb-gtk4`, `eb-haiku`, `eb-cjson`, `ebasic-editor`)
+looking for TODOs, stubbed code, doc/behavior mismatches, and small API
+gaps - not new features. Two genuine, real bugs turned up (not just
+gaps):
+
+- **`eb-cjson` v0.3.0**: `JsonSetField`'s own doc comment always claimed
+  "adds/overwrites", but it was a thin wrapper over
+  `cJSON_AddItemToObject`, which always appends - calling it twice with
+  the same key silently produced a duplicate-keyed object rather than
+  replacing the value. Fixed to check for an existing key first and use
+  `cJSON_ReplaceItemInObject` when found, matching the documented
+  contract; added a regression test. Also added `JsonStringifyPretty`
+  (`cJSON_Print` was already declared in the raw FFI layer but never
+  exposed idiomatically).
+- **`ebasic-editor`**: `SaveToPath` discarded `WriteFileContents`'s real
+  `g_file_set_contents` success/failure result, so a failed disk write
+  (read-only filesystem, full disk, permissions) still cleared the
+  modified flag and title asterisk - silently telling the user the save
+  succeeded when it hadn't. Now checks the result and reports failure
+  via the status bar instead; `LoadFileIntoEditor` similarly now reports
+  a failed read via the status bar rather than a silent no-op. Bumped
+  its `eb-cjson` dependency to `^0.3` to pick up the fix above.
+
+Smaller, lower-risk additions found the same way:
+
+- **`eb-gtk4` v0.7.0**: `BoxRemove`, `TextBufferDelete`,
+  `SourceBufferGetLanguage` - all three wrap a raw FFI function that was
+  already declared but never given an idiomatic wrapper. README gained
+  a mention of `WidgetGrabFocus` (missing since it shipped in v0.6.0).
+- **This repo**: `ebc --lib`/`--shared-lib` mode silently skipped any
+  `STRING`-signature top-level `SUB`/`FUNCTION` from the generated
+  `.iface.bas`, leaving only a comment in that file with no build-time
+  diagnostic - `ebc` now also prints an `ebc: warning: ...` for each one
+  skipped this way (`compiler/src/codegen/codegen.cpp`), and
+  `docs/guide/ebc.md`'s `--lib` mode section documents the limitation
+  and the fix (`ZSTRING`/`ANY PTR` instead).
+
+`eb-haiku` came back essentially clean (no TODOs, known runtime
+gotchas already documented in-repo) aside from one moderate-effort,
+not-yet-done item needing a native shim change: `BButton`/`BControl`
+have no `SetLabel`/`GetLabel`/`SetEnabled`/`IsEnabled` wrappers at all -
+left as a real, named gap for a future session rather than rushed in
+alongside these smaller fixes.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

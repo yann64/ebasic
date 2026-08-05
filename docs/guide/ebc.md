@@ -72,7 +72,15 @@ time). Produces three files:
   bodyless) `SUB`/`FUNCTION` (there's no new compiled code for it in the
   archive to point at) - a library wrapping a native C API should expose
   its public surface as top-level functions taking/returning its
-  `TYPE`s, not as methods, until that gap closes.
+  `TYPE`s, not as methods, until that gap closes. A `SUB`/`FUNCTION`
+  whose parameters or return type use `STRING` is skipped too (an
+  ordinary `STRING` compiles to a real `BString`, not the bare
+  `const char*` an `Extern`-side re-declaration would assume - a genuine
+  ABI mismatch, not just cosmetic) - `ebc` prints an `ebc: warning: ...`
+  for each one skipped this way, and `.iface.bas` itself gets a matching
+  comment; use `ZSTRING`/`ANY PTR` instead (see any of this project's
+  own registry packages, e.g. `eb-gtk4`'s `TextBufferGetText`, for the
+  usual pattern).
 - **`<output>.libs`** - this archive's own `Lib "name"` clauses (M4), one
   per line, plain text. `.iface.bas` only ever names *this* archive itself
   (`Lib "<output>"`) - it has no way to also tell a dependent program

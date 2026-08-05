@@ -2,6 +2,7 @@
 
 #include <cctype>
 #include <functional>
+#include <iostream>
 #include <optional>
 #include <stdexcept>
 
@@ -1180,6 +1181,11 @@ std::string Codegen::generateLibraryInterface(const Module& module, const std::s
             if (hasStringSignature) {
                 skippedText << "' (not exported: '" << stmt.name
                             << "' uses STRING, which needs a marshaling shim not yet implemented)\n";
+                std::cerr << "ebc: warning: '" << stmt.name
+                          << "' not exported from this --lib/--shared-lib build - it uses STRING, "
+                             "which needs a marshaling shim not yet implemented (see the generated "
+                             ".iface.bas for this note in context; use ZSTRING/ANY PTR instead, same "
+                             "as this package's own runtime-facing functions)\n";
                 continue;
             }
             bool isFunction = stmt.kind == StmtKind::FunctionDecl;
