@@ -2370,6 +2370,50 @@ never moves keyboard focus into the editor, since `eb-gtk4` has no
 than fixed, since closing it needs new upstream `eb-gtk4` surface, not
 an `ebasic-editor`-side change.
 
+**Closing the `WidgetGrabFocus` gap, an AT-SPI-based verification
+attempt, and real Haiku compilation+runtime confirmation - same session
+as a follow-up**: `eb-gtk4` v0.6.0 added `gtk_widget_grab_focus`;
+`ebasic-editor`'s `LoadFileIntoEditor` now calls it, confirmed fixed via
+a real AT-SPI state read (the editor's `FOCUSED` state, not a screenshot
+guess). A new `scripts/atspi_verify.py` (using `gi.repository.Atspi` -
+confirmed importable with no new package install at all) reliably
+proves structural/state introspection - every button/row's correct
+accessible name, and widget state flags read directly - genuinely
+solving the "how do I check state without screen-scraping" half of the
+problem. **It does not solve button-click confirmation, though**:
+`Atspi.Action.do_action` ("click") reports success at the D-Bus protocol
+level, even after resolving and explicitly exporting the real, canonical
+AT-SPI bus address (`org.a11y.Bus.GetAddress`) to rule out a stale/
+mismatched private bus (a real, confirmed pitfall found along the way -
+repeated ad hoc script runs had accumulated many distinct, unconnected
+`/run/user/<uid>/at-spi2-*` private bus sockets) - but was never observed
+to produce a real application-level effect either, cross-checked against
+a guard clause that should unconditionally fire the instant a real
+"clicked" handler runs at all. A second, separate, real input-delivery
+limitation, additional to (not a fix for) the X11 mouse-click one above -
+button-click *effects* remain unconfirmed live by either route tried so
+far, though every one of them keeps its own real, passing automated
+coverage regardless.
+
+Separately, **`eb-gtk4`/`ebasic-editor` were confirmed to compile, link,
+and genuinely *run* on real Haiku hardware** - not assumed: `ebpm build`
+succeeded against Haiku's own real, installed `gtk4` 4.23.2/
+`gtksourceview5` 5.20.0/`glib2` 2.88.1/`cjson` 1.7.18 HaikuPorts packages,
+and the built binary rendered a fully correct window there too
+(screenshotted proof - real syntax highlighting, real sidebar listing,
+`ebasic_lsp` connecting successfully). A real, non-fatal red herring
+along the way: both the app and a minimal hand-written C GTK4 program
+print `Gtk-WARNING: Unable to acquire session bus: ... AT_SECURE is set`
+on that box, but keep running and rendering correctly regardless - the
+actual, only real gotcha was that launching a GUI app over SSH and
+backgrounding it (`nohup ... &`/`disown`) got the *remote* process killed
+the moment the SSH channel closed, in every variation tried; a plain
+foreground `ssh host './binary'` left running is what actually worked.
+`eb-gtk4` has no native code of its own (pure FFI over GLib/GTK4's own
+stable C ABI), so this Haiku result required zero source changes to
+either repo - both READMEs' "Linux-only"/"Linux-first" framing is
+updated accordingly.
+
 ## `eb-haiku` - a Haiku OS native API binding (ecosystem repo)
 
 A new sibling repo (`https://github.com/yann64/eb-haiku`), matching
