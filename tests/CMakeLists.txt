@@ -301,6 +301,16 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/lib_with_tests . test
 )
 
+# [shared-lib]: `ebpm build` on a package declaring only a [shared-lib]
+# target (no [bin] to `ebpm run`), then a real dlopen/dlsym/call round trip
+# against the produced shared library - proves ebpm's own build step, not
+# just ebc directly (tests/cli/shared_lib.sh), produces a genuinely
+# loadable artifact.
+add_test(
+    NAME e2e_pkg_shared_lib
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/run_shared_lib_case.sh $<TARGET_FILE:ebpm> $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e_pkg/shared_lib ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/shared_lib/harness.c
+)
+
 # M7b: docgen against a small fixture with a documented CONST/FUNCTION, an
 # undocumented FUNCTION, and a plain (non-doc) comment that must not be
 # attached - the Markdown output is diffed (the HTML output is hand-

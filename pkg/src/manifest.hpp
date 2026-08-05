@@ -38,9 +38,21 @@ struct BinTarget {
     std::string path;
 };
 
+/// A package's `[shared-lib]` target - present iff the package builds a
+/// real, dynamically loadable shared library (.so/.dylib/.dll, via `ebc
+/// --shared-lib`). `name` defaults to `Manifest::name`, `path` to
+/// "src/lib.bas" - the same default source path as `[lib]`, since the
+/// common case is offering the *same* source both as a static `.a` (for
+/// other eBasic packages, via `[lib]`) and a real shared library (for
+/// external consumers, via `[shared-lib]`); a package may declare both.
+struct SharedLibTarget {
+    std::string name;
+    std::string path;
+};
+
 /// The parsed, defaults-applied contents of an `ebasic.toml` manifest. A
-/// package may have a `[lib]`, a `[bin]`, both, or (rejected by the loader)
-/// neither.
+/// package may have a `[lib]`, a `[bin]`, a `[shared-lib]`, any combination
+/// of the three, or (rejected by the loader) none of them.
 struct Manifest {
     std::string name;
     std::string version; // metadata only for M5 - never constraint-solved
@@ -48,6 +60,8 @@ struct Manifest {
     LibTarget lib;
     bool hasBin = false;
     BinTarget bin;
+    bool hasSharedLib = false;
+    SharedLibTarget sharedLib;
     std::vector<Dependency> dependencies;
     /// `[target.<os>.dependencies]` entries, keyed by the exact platform name
     /// used throughout this project's own CMakePresets.json/CI (`"windows"`/

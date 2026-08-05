@@ -17,8 +17,9 @@ namespace ebpm {
 std::string ebcCommand();
 
 /// Builds `manifest`'s target(s) (rooted at `packageDir`) into
-/// `<packageDir>/target/`, invoking ebcCommand() once per target ([lib] and
-/// [bin] are independent - a package may have either, or both). Prints one
+/// `<packageDir>/target/`, invoking ebcCommand() once per target ([lib],
+/// [bin], and [shared-lib] are independent - a package may have any
+/// combination of the three). Prints one
 /// short progress line per target (matches Cargo's own "Compiling ..."
 /// feel). `extraIncludeDirs`/`extraLibDirs` are forwarded as repeated
 /// `-I`/`-L` flags, and `extraLibNames` as repeated `-l` flags (needed
@@ -80,6 +81,14 @@ std::string archivePath(const Manifest& manifest, const std::string& packageDir)
 /// (`<packageDir>/target/<name>.iface.bas`) - only meaningful when
 /// `manifest.hasLib`.
 std::string interfacePath(const Manifest& manifest, const std::string& packageDir);
+
+/// Path to the package's built real shared library
+/// (`<packageDir>/target/lib<shared-lib.name>.so`/`.dylib`, or
+/// `<packageDir>/target/<shared-lib.name>.dll` on Windows) - only
+/// meaningful when `manifest.hasSharedLib`. Platform-aware naming mirrors
+/// `ebc --shared-lib`'s own driver-side convention exactly (see
+/// compiler/src/driver/main.cpp).
+std::string sharedLibPath(const Manifest& manifest, const std::string& packageDir);
 
 /// True if `outPath` doesn't exist, or exists but is older than any of
 /// `srcPaths` - a deliberately simple staleness check (each relevant

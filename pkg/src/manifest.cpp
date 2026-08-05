@@ -135,8 +135,13 @@ bool loadManifest(const std::string& manifestPath, Manifest& out, std::string& e
         out.bin.name = bin["name"].value<std::string>().value_or(out.name);
         out.bin.path = bin["path"].value<std::string>().value_or("src/main.bas");
     }
-    if (!out.hasLib && !out.hasBin) {
-        err = "'" + manifestPath + "' declares neither a [lib] nor a [bin] target";
+    if (auto sharedLib = tbl["shared-lib"]; sharedLib.is_table()) {
+        out.hasSharedLib = true;
+        out.sharedLib.name = sharedLib["name"].value<std::string>().value_or(out.name);
+        out.sharedLib.path = sharedLib["path"].value<std::string>().value_or("src/lib.bas");
+    }
+    if (!out.hasLib && !out.hasBin && !out.hasSharedLib) {
+        err = "'" + manifestPath + "' declares neither a [lib], [bin], nor [shared-lib] target";
         return false;
     }
 

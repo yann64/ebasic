@@ -84,6 +84,16 @@ std::string interfacePath(const Manifest& manifest, const std::string& packageDi
     return (fs::path(packageDir) / "target" / (manifest.name + ".iface.bas")).string();
 }
 
+std::string sharedLibPath(const Manifest& manifest, const std::string& packageDir) {
+#if defined(_WIN32)
+    return (fs::path(packageDir) / "target" / (manifest.sharedLib.name + ".dll")).string();
+#elif defined(__APPLE__)
+    return (fs::path(packageDir) / "target" / ("lib" + manifest.sharedLib.name + ".dylib")).string();
+#else
+    return (fs::path(packageDir) / "target" / ("lib" + manifest.sharedLib.name + ".so")).string();
+#endif
+}
+
 bool isStale(const std::vector<std::string>& srcPaths, const std::string& outPath) {
     std::error_code ec;
     if (!fs::exists(outPath, ec)) return true;
@@ -157,6 +167,30 @@ int buildPackage(const Manifest& manifest, const std::string& packageDir,
             (pkgDir / manifest.bin.path).string(),
             "-o",
             binaryPath(manifest, packageDir),
+        };
+        for (const std::string& dir : extraIncludeDirs) {
+            args.push_back("-I");
+            args.push_back(dir);
+        }
+        for (const std::string& dir : extraLibDirs) {
+            args.push_back("-L");
+            args.push_back(dir);
+        }
+        for (const std::string& lib : extraLibNames) {
+            args.push_back("-l");
+            args.push_back(lib);
+        }
+        int rc = ebasic::runProcess(args);
+        if (rc != 0) return rc;
+    }
+    if (manifest.hasSharedLib) {
+        std::cerr << "   Compiling " << manifest.sharedLib.name << " (shared-lib)" << std::endl;
+        std::vector<std::string> args = {
+            ebc,
+            "--shared-lib",
+            (pkgDir / manifest.sharedLib.path).string(),
+            "-o",
+            (targetDir / manifest.sharedLib.name).string(),
         };
         for (const std::string& dir : extraIncludeDirs) {
             args.push_back("-I");

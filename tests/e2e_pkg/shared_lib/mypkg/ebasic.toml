@@ -1,0 +1,6 @@
+[package]
+name = "mypkg"
+
+[shared-lib]
+name = "mypkg"
+path = "src/lib.bas"
