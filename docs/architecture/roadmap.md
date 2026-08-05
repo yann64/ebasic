@@ -3134,6 +3134,105 @@ current lack of a shared-library output mode). Published: pushed with
 a `v0.11.0` tag, `ebpm-index` updated, `ebpm add eb-haiku` confirmed
 resolving to `v0.11.0` from the live index.
 
+## `ebc --shared-lib`/`-dll`: real shared-library output (done)
+
+The gap named at the end of the `eb-haiku` v0.11.0 entry above -
+`BScreenSaver`-style OS add-ons need a real, dynamically loadable
+`.so`/`.dylib`/`.dll`, which `ebc` had no way to produce - closed
+directly, matching FreeBASIC's own `-dll` flag.
+
+**Export mechanism**: reuses the existing `Extern "C" ... End Extern`
+import syntax (M4) to *also* accept a real, bodied `SUB`/`FUNCTION`
+definition, not just a bodyless `Declare` - the opt-in mechanism marking
+a procedure as a stable, unmangled, dynamically-loadable C export
+(`Stmt::isExported`), reusing the existing `externLinkage`/`externAlias`
+fields. An ordinary top-level procedure elsewhere in the same file is
+unaffected and keeps its usual mangled `eb_<name>` symbol - only the
+opted-in export crosses the C-ABI boundary, so an internal helper can
+still freely use `STRING`/constructor-bearing `TYPE`s. Chosen over a
+blanket "export everything" default specifically to preserve that
+freedom.
+
+Implementation, in order:
+
+- **Parser**: `parseExternBlock`'s dispatch loop gained a third case - a
+  `SUB`/`FUNCTION` token inside the block delegates to the *existing*
+  `parseSub()`/`parseFunction()` (reused verbatim, not reimplemented),
+  then marks the result `isExported`. Restricted to `Extern "C"` only -
+  a mangled `Extern "C++"`-linkage "export" isn't a stable ABI boundary,
+  rejected with a clear diagnostic. A `TYPE` method can't be exported
+  (free procedures only).
+- **Sema**: the *existing* extern-import C-ABI-compatibility checker
+  (`collectExternSignatureChecks`'s `checkType` lambda - already
+  rejecting `STRING`/non-standard-layout `TYPE`s for `isExtern`) needed
+  only a one-line guard broadening to also cover `isExported` - the
+  same C-ABI boundary, just crossed in the opposite direction. No new
+  Sema logic needed at all.
+- **Codegen**: a new `EBASIC_EXPORT` macro (`extern "C"
+  __declspec(dllexport)` on Windows, `extern "C"
+  __attribute__((visibility("default")))` elsewhere), emitted once in
+  the generated `.cpp`'s preamble only for a real `--shared-lib` build.
+  `genProcedure` emits an `isExported` procedure's *one* definition
+  under its verbatim `externAlias` name (never `mangleName`), wrapped in
+  `EBASIC_EXPORT` (or plain `extern "C"` if the module merely reuses the
+  export syntax without actually being a `--shared-lib` build - e.g. a
+  `--lib` build). **A real design point caught before shipping**: since
+  only one definition is ever emitted for an exported procedure, an
+  in-file call to it (from other eBasic code in the same file) must
+  also resolve to that same verbatim name, not a nonexistent mangled
+  one - `collectExternProcNames` (already populating `externProcNames_`
+  for `isExtern` call-site resolution) needed the same one-line guard
+  broadening as Sema's checker, for the same underlying reason.
+- **Driver**: `-dll`/`--shared-lib`, mutually exclusive with `--lib`;
+  a new platform-detection helper (mirroring `ebpm`'s own
+  `currentTargetOS()`) drives real per-platform linking - Linux/Haiku
+  (`-shared -fPIC`, `.so`), macOS (`-dynamiclib`, not `-shared` - that
+  would produce a Mach-O bundle instead - `.dylib`), Windows/MinGW
+  (`-shared` + `-Wl,--out-implib,<path>.dll.a`, `.dll`). The same
+  `.iface.bas`/`.libs` sidecar files `--lib` produces are generated too
+  - a shared library can still also be depended on by another eBasic
+  package via its ordinary mangled symbols, orthogonal to its opt-in C
+  exports.
+- **`ebpm`**: a new `[shared-lib]` manifest target (`SharedLibTarget`,
+  mirroring `BinTarget`'s shape) - a package may now declare any
+  combination of `[lib]`/`[bin]`/`[shared-lib]`. `buildPackage` gained a
+  parallel `ebc --shared-lib` invocation block, mirroring the existing
+  `[lib]`/`[bin]` blocks' `-I`/`-L`/`-l` forwarding exactly.
+
+**Verified with real dynamic loading, not just "the file exists" on
+every platform**:
+
+- **Linux**: a real `dlopen`/`dlsym`/call round trip via a small C
+  harness (`tests/cli/shared_lib.sh`, `cli_shared_lib`), plus both
+  rejection paths (a `STRING` export; `--lib` + `--shared-lib`
+  together).
+- **Haiku**: the same test, run for real over SSH
+  (`scripts/haiku_verify.sh`) - **a real, live bug caught this way**:
+  Haiku has no separate `libdl` at all (`dlopen`/`dlsym`/`dlclose` are
+  built directly into `libroot`), so the test's own `-ldl` link flag
+  failed outright (`cannot find -ldl`) the first time it ran there -
+  fixed by only adding `-ldl` on Linux specifically.
+- **macOS**: the `-dynamiclib` codepath verified via the existing
+  `macos` GitHub Actions CI job (full test suite, including
+  `cli_shared_lib`, green).
+- **Windows/MinGW**: two real codepaths on the existing `windows-mingw`
+  CI job - `LoadLibrary`/`GetProcAddress` dynamic loading, and a
+  build-time link test directly against the generated import library
+  (`lib<name>.dll.a`) via a new `linktest.c` fixture, proving the
+  import library is genuinely link-time-usable, not just present on
+  disk.
+- **`ebpm`**: a new e2e test (`e2e_pkg_shared_lib`) - `ebpm build` on a
+  package declaring only `[shared-lib]` (no `[bin]` to `ebpm run`),
+  then the same real `dlopen`/`dlsym`/call round trip against the
+  produced shared library.
+
+Full CI matrix green (linux-gcc, linux-clang, macos, windows-mingw)
+across every commit, plus real Haiku hardware (hrev59922) via SSH -
+58/58 `tests/*` passing there, including `cli_shared_lib`. Closes the
+gap the `eb-haiku` v0.11.0 entry named for Screen Saver Kit, though
+actually binding `BScreenSaver` itself remains unstarted follow-on work
+for that separate ecosystem repo, not part of this change.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

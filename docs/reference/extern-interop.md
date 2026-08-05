@@ -185,8 +185,36 @@ into external code).
   headers regardless (see above), so only the *value* needs to line up,
   not a matching declared type on the eBasic side.
 
+## Exporting eBasic code (`Extern "C"` with a real body)
+
+Everything above is eBasic *calling into* external code. The reverse
+direction - external code calling *into* eBasic - uses the same `Extern
+"C" ... End Extern` syntax, just with a real, bodied `SUB`/`FUNCTION`
+definition instead of a bodyless `Declare`:
+
+```basic
+Extern "C"
+    Function AddNumbers(a AS INTEGER, b AS INTEGER) AS INTEGER
+        AddNumbers = a + b
+    End Function
+End Extern
+```
+
+Only meaningful for [`ebc --shared-lib`](../guide/ebc.md#--shared-lib-mode)
+(building a real, dynamically loadable shared library) - it's what gives a
+function a stable, unmangled C symbol another program can `dlopen`/
+`dlsym` (or `LoadLibrary`/`GetProcAddress`) by name, instead of `ebc`'s
+usual internal mangled name. The same C-ABI restrictions apply as an
+ordinary `Extern`/`Declare` signature (no `STRING`; use `ZSTRING`
+instead), and only `Extern "C"` (not `Extern "C++"`) may contain a bodied
+definition - a mangled C++-linkage "export" isn't a stable ABI boundary.
+An ordinary top-level `SUB`/`FUNCTION` elsewhere in the same file is
+unaffected and keeps using `STRING`/`TYPE`s freely - only the opted-in
+export crosses the C-ABI boundary.
+
 ## See also
 
 - [Types and Literals](types-and-literals.md) - `ZSTRING`
 - [Namespaces, Pointers, and Unions](namespaces-pointers-unions.md) - `PTR`, `NAMESPACE`
 - [End-user guide: `ebpm`](../guide/ebpm.md) - linking against a package's own auto-generated interface uses this exact same `Extern "C++"`/`Declare` machinery
+- [End-user guide: `ebc`](../guide/ebc.md) - `--shared-lib` mode, the only place a bodied `Extern "C"` export is meaningful

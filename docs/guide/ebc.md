@@ -2,12 +2,13 @@
 
 ```
 usage: ebc <input.bas> [-o <output>] [-cxx <compiler>] [-L <dir>]... [-I <dir>]...
-           [-l <name>]... [--keep-cpp] [--lib]
+           [-l <name>]... [--keep-cpp] [--lib | --shared-lib]
        ebc [-v | --version] [-h | --help]
 ```
 
 Transpiles `<input.bas>` to C++ and invokes a real backend compiler to
-produce a native executable (or, with `--lib`, a static library).
+produce a native executable, a static library (`--lib`), or a real,
+dynamically loadable shared library (`--shared-lib`/`-dll`).
 
 ## Flags
 
@@ -38,6 +39,9 @@ produce a native executable (or, with `--lib`, a static library).
 - **`--keep-cpp`** - don't delete the generated `<output>.gen.cpp`
   intermediate file (useful for inspecting what eBasic actually generates).
 - **`--lib`** - build a library instead of an executable (see below).
+- **`--shared-lib`** (alias **`-dll`**) - build a real, dynamically loadable
+  shared library instead of an executable (see below). Mutually exclusive
+  with `--lib`.
 - **`-v` / `--version`** - print the version and exit.
 - **`-h` / `--help`** - print usage and exit.
 
@@ -84,6 +88,68 @@ This is exactly the mechanism [`ebpm`](ebpm.md) uses under the hood for a
 package's `[lib]` target - see that page for the higher-level, manifest-driven
 workflow (dependency resolution, transitive linking, lockfiles) built on top
 of it.
+
+## `--shared-lib` mode
+
+```sh
+$ ebc mylib.bas --shared-lib -o mylib
+```
+
+Like `--lib`, `mylib.bas` may only contain declarations at the top level -
+no executable statement, and (mutually exclusive) not combinable with
+`--lib` itself. Unlike `--lib`'s static archive, this produces a real,
+dynamically loadable shared library another program can `dlopen()` (or
+`LoadLibrary` on Windows) at runtime - the gap this mode fills is a
+library meant for a consumer that isn't itself an eBasic/`ebc`-built
+program (a plugin host, a scripting-language binding, an OS add-on
+mechanism such as Haiku's own `BScreenSaver` add-ons).
+
+By default, an ordinary top-level `SUB`/`FUNCTION` still gets its usual
+mangled internal name (`eb_<name>`, wrapped in real C++, not a stable ABI
+symbol) - exactly like every other `ebc` build. Only a `SUB`/`FUNCTION`
+written with a **real body** inside an `Extern "C" ... End Extern` block
+opts in to becoming a real, stable, unmangled export another program can
+find by name:
+
+```basic
+Extern "C"
+    Function AddNumbers(a AS INTEGER, b AS INTEGER) AS INTEGER
+        AddNumbers = a + b
+    End Function
+End Extern
+```
+
+This reuses the same `Extern "C" ... End Extern` syntax already used for
+[importing](../reference/extern-interop.md) a real C function - here, a
+real, bodied definition inside the block marks it as an *export* instead.
+Restrictions:
+
+- Only `Extern "C"` (not `Extern "C++"`) may contain a bodied definition -
+  a mangled C++-linkage "export" isn't a stable ABI boundary.
+- Only a free (non-member) `SUB`/`FUNCTION` can be exported - not a
+  `TYPE` method.
+- Every parameter and the return type must be C-ABI-compatible - `STRING`
+  is rejected (same restriction as an ordinary `Extern`/`Declare`
+  signature); use `ZSTRING`/`ZSTRING PTR` instead. Nothing about the rest
+  of the file is restricted - an internal helper (not itself exported)
+  can freely use `STRING`, `TYPE`s with constructors, or anything else,
+  since only the opted-in export crosses the C-ABI boundary.
+
+Produces, per platform:
+
+| Platform | Shared library | Import library |
+| --- | --- | --- |
+| Linux / Haiku | `lib<output>.so` | - |
+| macOS | `lib<output>.dylib` | - |
+| Windows (MinGW) | `<output>.dll` | `lib<output>.dll.a` |
+
+plus the same `<output>.iface.bas`/`<output>.libs` sidecar files `--lib`
+produces - a shared library can *also* still be depended on by another
+eBasic package via its ordinary mangled symbols, not just its opt-in C
+exports (the two mechanisms are orthogonal).
+
+This is exactly the mechanism [`ebpm`](ebpm.md) uses under the hood for a
+package's `[shared-lib]` target.
 
 ## See also
 

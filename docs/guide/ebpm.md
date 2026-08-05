@@ -56,7 +56,14 @@ path = "src/main.bas"
 - **`[bin]`** - present iff the package builds an executable. `name`
   defaults to `[package].name`, `path` to `"src/main.bas"`, if omitted.
 - **`[lib]`** - present iff the package builds a library. `path` defaults to
-  `"src/lib.bas"` if omitted. A package may have `[bin]`, `[lib]`, or both.
+  `"src/lib.bas"` if omitted.
+- **`[shared-lib]`** - present iff the package builds a real, dynamically
+  loadable shared library (via [`ebc --shared-lib`](ebc.md#--shared-lib-mode)).
+  `name` defaults to `[package].name`, `path` to `"src/lib.bas"` (the same
+  default source path `[lib]` uses - the common case is offering the same
+  source both as a static `.a`, for other eBasic packages, and a real shared
+  library, for external consumers). A package may have any combination of
+  `[bin]`, `[lib]`, and `[shared-lib]` (at least one is required).
 - **`[dependencies]`** - see below.
 
 ```toml
@@ -293,7 +300,9 @@ dependency order - each package receives the `-I`/`-L`/`-l` flags for its
 *entire transitive* dependency closure, not just its direct dependencies
 (so a chain like `app -> mid -> base` still links `base` into `app`'s final
 binary even though `app`'s own source never `#include`s `base`'s interface
-directly).
+directly). `[lib]`, `[bin]`, and `[shared-lib]` are independent - a package
+declaring more than one gets one `ebc` invocation per target, each printed
+as its own "Compiling ... (kind)" line.
 
 `ebpm` has no `-cxx` flag of its own - it invokes `ebc` as a child process,
 which inherits the `CXX` environment variable directly, so `CXX=clang++
@@ -348,4 +357,4 @@ program exits `0`.
 ## See also
 
 - [Getting Started](getting-started.md)
-- [`ebc`](ebc.md) - `ebpm` uses `ebc --lib` mode under the hood for `[lib]` targets
+- [`ebc`](ebc.md) - `ebpm` uses `ebc --lib` mode under the hood for `[lib]` targets, and `ebc --shared-lib` for `[shared-lib]` targets
