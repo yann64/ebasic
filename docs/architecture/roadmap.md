@@ -2885,6 +2885,94 @@ examples (`popup_menu.bas`, `text_editor.bas`, `mime_lookup.bas`,
 pushed with a `v0.8.0` tag, `ebpm-index` updated, `ebpm add eb-haiku`
 confirmed resolving to `v0.8.0` from the live index.
 
+### `eb-haiku` v0.9.0 (shipped): remaining gaps in already-bound Kits, round 2
+
+Asked again whether any Kits are still not fully implemented - re-read
+every "not bound"/"deliberately out of scope" line across `eb-haiku`'s
+own README, confirmed real APIs on the host, and surfaced seven
+tractable candidates across two multi-select questions; user picked
+all seven. No new libraries needed - `BNetworkInterface`/
+`BNetworkRoster` live in the already-linked `libbnetapi.so`; everything
+else lives in the already-linked `libbe.so`.
+
+- **Radio-mode menu grouping** (`BMenu::SetRadioMode`/`IsRadioMode`/
+  `SetLabelFromMarked`) - marking one item automatically unmarks its
+  siblings, entirely handled internally by real Haiku. **A real,
+  confirmed gotcha, a new variant of the existing "needs BApplication
+  first" family**: constructing a *new* `BMenu`/`BMenuItem` *after* the
+  owning `BApplication` has already been freed hangs indefinitely -
+  needs one still *alive*, not merely one that existed once.
+- **`BMimeType` icon get/set** - `GetIcon`/`SetIcon` and the `*ForType`
+  siblings, reusing the existing `HBitmap` type directly. **Confirmed
+  by direct reproduction, this time caught by a probe before shipping**:
+  hangs indefinitely without a real `BApplication` existing first - the
+  same family as `GetBitmap`/`BClipboard::Lock`.
+- **`BAppFileInfo`** - real executable metadata: signature, app flags,
+  supported types (a `BMessage` repeated-string field, reusing
+  `HMessageCountItems`/`FindStringAt` from v0.8.0). **A second real
+  occurrence of the Translation Kit's own MI-pointer-adjustment bug
+  class**: the existing file handle is stored as `BPositionIO*`
+  (`BFile`'s non-first base, a non-zero-offset erasure) from an earlier
+  shim function, but a new, independently-written `SetTo` function did
+  a naive `static_cast<BFile*>` on it and silently got `B_BAD_VALUE`
+  against a perfectly valid file - fixed via
+  `dynamic_cast<BFile*>(static_cast<BPositionIO*>(handle))`, the same
+  pattern the original bug was fixed with. General lesson: any later,
+  independently-written shim function receiving an already-erased
+  handle from an earlier one must re-derive that exact erasure
+  convention, not assume a plain `static_cast`.
+- **Drag-and-drop** - the single most-requested standing gap, closed
+  with the smallest useful slice: `BView::DragMessage` (the simplest
+  no-bitmap overload, called from inside an existing `MouseDown`
+  callback) and `BMessage::WasDropped`/`DropPoint` on the drop target's
+  own existing `MessageReceived` callback. **Confirmed by direct
+  reproduction**: calling `DragMessage` outside a real `MouseDown` (i.e.
+  without an actual mouse button currently held) blocks indefinitely -
+  the same "not triggerable over SSH" limitation as `BPopUpMenu::Go`/
+  `BPrintJob::ConfigJob`; the automated test never calls it, only a new
+  interactive-only example.
+- **`BTextView` styled text (color only)** - `SetFontAndColor`, scoped
+  via `SetStylable`/`IsStylable` + a plain `rgb_color` get/set (no
+  `BFont` binding needed). **A real, non-obvious finding, found only
+  because the test checked an out-of-range offset**: real
+  `BTextView::IsStylable()` defaults to `false`, and while false, a
+  color change silently applies to the ENTIRE text instead of the given
+  range - `SetStylable(true)` must be called first.
+- **`BRoster::StartWatching` + `entry_ref` overloads** - real app
+  launch/quit notifications (reusing the existing `HWatcher` primitive
+  from v0.8.0; real `B_SOME_APP_LAUNCHED = 1112686931`/
+  `B_SOME_APP_QUIT = 1112686929`, confirmed via probe, not hand-derived)
+  plus path-based `IsRunning`/`TeamFor`/`GetAppInfo`/`FindApp` overloads
+  (constructing the real `entry_ref` internally via `BEntry`). **A real
+  finding that took three iterative probes to pin down**: these
+  notifications are only actually delivered while the watching
+  program's own message loop (`Run()`) is actively pumping -
+  triggering the launch/quit via a backgrounded `system()` shell
+  subprocess produced zero notifications (an unrelated SSH-pipe-holding
+  artifact from the backgrounded process keeping stdout open), and
+  calling `Launch()` before `Run()` also produced zero despite
+  succeeding, because nothing was dispatching the already-queued
+  messages yet - fixed by triggering from a background thread while
+  `Run()` is already pumping on the main thread, the same pattern
+  already proven for `BQuery`/`BVolumeRoster` watching in v0.8.0.
+- **`BNetworkInterface`/`BNetworkRoster`** - enumerates the local
+  machine's own real network interfaces: `BNetworkRoster::Default()` (a
+  shared, never-destroyed singleton, matching `be_roster`/
+  `be_clipboard`'s own convention), `CountInterfaces`/`GetNextInterface`,
+  and per-interface `Name`/`Flags`/`HasLink`/`CountAddresses`/
+  `GetAddressAt`. An interface address's own `Address()` is copied into
+  an existing `BNetworkAddress` handle rather than exposing a third
+  address-shaped type. Diagnostics/enumeration only - interface
+  configuration deliberately not bound.
+
+Verified end-to-end on real Haiku hardware via `eb-haiku`'s own
+`scripts/haiku_verify.sh`, now running 38 `tests/*.bas` files. Five new
+examples (`drag_and_drop.bas`, `styled_text.bas`, `mimetype_icon.bas`,
+`app_launch_watching.bas`, `network_interfaces.bas`), one per major
+area. Published: pushed with a `v0.9.0` tag, `ebpm-index` updated,
+`ebpm add eb-haiku` confirmed resolving to `v0.9.0` from the live
+index.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
