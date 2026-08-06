@@ -3645,6 +3645,44 @@ isolating the gap entirely to synthetic-input delivery in this sandbox.
 Published: `ebasic.toml` bumped to `0.4.0`, tagged `v0.4.0`,
 `ebpm-index` updated, registry resolution to `0.4.0` confirmed live.
 
+### `eb-qt6` Phase 5 - stacked widgets, color/font dialogs, dials/LCD numbers, dock widgets
+
+User again picked all four widget families offered: `QStackedWidget`,
+`QColorDialog`/`QFontDialog`, `QDial`/`QLCDNumber`, `QDockWidget`. Same
+hand-written-shim architecture, one native shim file per widget family.
+
+Notable design points: `QStackedWidget` mirrors `QTabWidget`'s function
+shape exactly and shares the same synchronous-`currentChanged(0)`-on-
+first-page gotcha found in Phase 3 - applied the lesson correctly again
+without incident. `QColorDialog`/`QFontDialog` introduced `BYREF`
+out-parameters at this package's idiomatic layer for the first time,
+adopting `eb-haiku`'s own long-established `@var`/`BYREF` convention
+(e.g. `HBitmapGetBounds`) rather than inventing a new one - both dialogs
+leave their out-parameters untouched on cancel, only filling them when
+the user actually picks something. `QDial` mirrors `QSlider`'s function
+shape exactly (both real `QAbstractSlider` subclasses).
+
+No new honest exceptions this phase - every signal and dialog round
+trip in the combined example (`examples/phase5_demo.bas`: a stacked
+widget with `Next`/`Back` navigation, a dock widget with a dial driving
+an LCD number, buttons opening the color/font dialogs) was confirmed
+live via keyboard, including `QColorDialog`'s `Escape`-cancel path and
+`QFontDialog`'s `Return`-accept path with the real picked family/point
+size showing up in the status bar.
+
+A previously-documented ImageMagick `import -window` screenshot-tooling
+flake (first seen during `eb-qt6` v0.1.0's own development) recurred
+mid-session - confirmed once again to be a genuine transient tool issue
+unrelated to the code under test (even plain `/tmp` paths with no
+eb-qt6 involvement failed identically for several minutes, then
+resolved on its own) - worked around by relying on keyboard-driven
+state changes (status bar text) as the verification signal instead of
+a screenshot for the specific interactions affected, falling back to
+screenshots again once the tool recovered.
+
+Published: `ebasic.toml` bumped to `0.5.0`, tagged `v0.5.0`,
+`ebpm-index` updated, registry resolution to `0.5.0` confirmed live.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
