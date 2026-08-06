@@ -3556,6 +3556,52 @@ new `TYPE MenuBar` ("'menuBar' is already declared") - renamed to
 Published: `ebasic.toml` bumped to `0.2.0`, tagged `v0.2.0`,
 `ebpm-index` updated, registry resolution to `0.2.0` confirmed live.
 
+### `eb-qt6` Phase 3 - tabs, lists/tables, dialogs, sliders/spin boxes
+
+User again picked all four widget families offered: `QTabWidget`,
+`QListWidget`/`QTableWidget`, `QDialog` (plus `QMessageBox`/
+`QFileDialog`), `QSlider`/`QSpinBox`/`QGroupBox`. Same
+hand-written-shim architecture, one native shim file per widget family.
+
+Notable design points: `QListWidget` has no `currentText()` of its own
+(unlike `QComboBox`) - implemented via `currentItem()`, null-safe for
+"nothing selected." `QSlider::valueChanged(int)` is unambiguous but
+`QSpinBox` keeps both `valueChanged(int)` and `valueChanged(const
+QString&)` in Qt6 - needed `qOverload<int>(...)` to disambiguate, unlike
+`QComboBox`'s `currentIndexChanged` in Phase 2 (Qt6 dropped that
+particular overload but not this one). `QDialog`/`QGroupBox` are real
+`QWidget` subclasses, so the existing generic `WidgetShow`/
+`WidgetSetLayout`/etc. already work on their handles for free - only the
+dialog-specific `exec`/`accept`/`reject`/`finished` needed new shim
+functions. `QMessageBox`/`QFileDialog` are Qt's own static convenience
+dialogs (not persistent widgets) - `QMessageBox::question` is
+normalized to a plain 1/0 Yes/No return rather than exposing Qt's own
+`StandardButton` enum across the FFI boundary.
+
+Caught a real, general Qt gotcha (not eb-qt6-specific) while building
+the combined example: `QTabWidget` fires `currentChanged(0)`
+**synchronously**, as a side effect of inserting its very first tab (Qt
+auto-selects it) - not later, once the rest of the UI exists. The
+original example crashed here (`QLabel::setText` on a not-yet-
+constructed status label the handler tried to touch) - fixed by
+constructing that label before adding any tabs, and documented in the
+README as a general lesson (a widget can emit a signal as a side effect
+of its own construction/setup) rather than a narrow one-off fix.
+
+Two more honest, named limitations, both the same class of
+environment-specific synthetic-input-delivery limitation as Phase 2's
+menu-opening gap: `QTableWidget::cellClicked` requires a real mouse
+click and wasn't confirmed live (the table's own rendering was);
+`QFileDialog` was confirmed to open as a real dialog window (found via
+`xwininfo`), but the full pick-a-file-and-return round trip wasn't
+screenshot-verified (the screenshot tool raced the dialog's own window
+lifecycle) - not treated as a suspected code defect, since the
+underlying static-function call is structurally identical to the
+already-proven `QMessageBox` pattern.
+
+Published: `ebasic.toml` bumped to `0.3.0`, tagged `v0.3.0`,
+`ebpm-index` updated, registry resolution to `0.3.0` confirmed live.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
