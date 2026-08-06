@@ -3509,6 +3509,53 @@ Published: `ebasic.toml` at `0.1.0`, tagged `v0.1.0`, new public GitHub
 repo (`yann64/eb-qt6`), `ebpm-index` updated, `ebpm add qt6` confirmed
 resolving live.
 
+### `eb-qt6` Phase 2 - checkbox/radio, combo box, text edit, menus
+
+User picked all four remaining widget families offered (via a
+multi-select clarifying question): `QCheckBox`/`QRadioButton`,
+`QComboBox`, `QTextEdit`, `QMenuBar`/`QMenu`/`QAction`. Same
+hand-written-shim architecture as Phase 1, one native shim file per
+widget family.
+
+Notable design points: `QCheckBox`/`QRadioButton` share one
+`AbstractButton` idiomatic function family (`AbstractButtonSetChecked`/
+`IsChecked`/`ConnectToggled`) since both are real `QAbstractButton`
+subclasses - the same "one function, several real subclasses"
+convention `eb-haiku` already uses for `HControlSetEnabled`. `QComboBox`
+binds Qt6's unambiguous `&QComboBox::currentIndexChanged` directly (Qt6
+dropped the old Qt5 overload that needed `QOverload<int>::of(...)`).
+`QTextEdit`'s `textChanged` signal deliberately carries no parameter
+(unlike `QLineEdit`'s own, which does) - documented explicitly since
+it's an easy trap. `QMenuBar`/`QMenu`/`QAction` follow the same
+"container now owns it" convention already established for layouts/
+central widgets - no separate destroy functions.
+
+One honest, named limitation: `QAction`/`QMenu` construct and render
+correctly (the menu bar shows real text), but interactive
+keyboard-driven menu *opening* (`Alt`+mnemonic, `F10`) could not be
+confirmed live in this sandboxed session - no dropdown appeared and no
+new X11 popup window was created under any method tried. Treated as the
+same broad class of environment-specific input-delivery limitation
+already documented elsewhere in this ecosystem (`ebasic-editor`'s own
+mouse-click/AT-SPI gotchas), not a binding defect - `QAction::
+triggered`'s own forwarding uses the identical, already-proven
+lambda+`connect` mechanism as every other working signal in the
+package. Documented plainly in the README rather than chased further.
+
+`examples/phase2_demo.bas` combines all four in one window (menu bar
+with File > Quit, checkbox, two mutually-exclusive radio buttons, a
+combo box, a text edit, all wired to a shared status label).
+Checkbox/radio/combobox/textedit signal-forwarding confirmed live via
+keyboard interaction and screenshot; menu-opening specifically was not.
+
+Also caught and fixed during this phase: eBasic's case-insensitive
+identifiers meant a local variable named `menuBar` collided with the
+new `TYPE MenuBar` ("'menuBar' is already declared") - renamed to
+`winMenuBar`.
+
+Published: `ebasic.toml` bumped to `0.2.0`, tagged `v0.2.0`,
+`ebpm-index` updated, registry resolution to `0.2.0` confirmed live.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
