@@ -3438,6 +3438,77 @@ earlier AT-SPI/button-click investigation already found in this sandbox
 unreliable here), not necessarily a defect in `GtkSourceCompletion`
 itself - left as a named gap, not silently claimed done.
 
+## `eb-qt6` - a Qt6 Widgets binding (new ecosystem repo)
+
+A brand-new sibling package, prompted by the user's own explicit request
+for "a detailed plan to implement a Qt6 binding for eBasic." Qt Widgets
+(the traditional, imperative toolkit) was chosen over Qt Quick/QML (a
+fundamentally different declarative architecture) to stay consistent
+with `eb-gtk4`'s own style - confirmed with the user before planning.
+
+**Architecture**: Qt6 has no C-level API at all (only mangled C++
+classes), so this mirrors `eb-haiku`'s hand-written `extern "C"` shim
+approach (`native/` - plain C functions constructing/calling/destroying
+real Qt objects behind opaque `void*`), not `eb-gtk4`'s direct-FFI
+approach (GTK4 is a C library). A real, favorable difference from
+`eb-haiku` found during planning and confirmed while implementing:
+Qt6's modern functor-based `connect(sender, &Signal, lambda)` lets a
+signal forward to a stored C callback via a capturing lambda with no
+custom `QObject` subclass or `moc` needed at all - only the one
+custom-paint widget (`PainterWidget`, overriding the real C++ virtual
+`paintEvent`, which Qt calls directly rather than via a signal) needs a
+real `Q_OBJECT` subclass. Real Qt6 (6.10.2) is fully installed on this
+development host, so - unlike `eb-haiku`, which needs a remote
+SSH-accessed real Haiku machine for every build/test cycle - this
+package was built, compiled, and its GUI actually screenshot-verified
+entirely locally.
+
+Two real findings from implementation, both documented in the package's
+own README:
+
+- **`QT_QPA_PLATFORM=xcb` must be set explicitly** in this GNOME/
+  Wayland-with-XWayland environment, or Qt6 silently auto-detects the
+  "wayland" platform plugin - `QApplication`/every widget constructs
+  successfully (no error, no crash, valid handles) but never actually
+  creates a real, visible window at all, and never registers as a real
+  X11 client. Found the hard way: a working "hello window" spike
+  mysteriously stopped showing any window at all on a later run,
+  looking exactly like an environment regression, before isolating the
+  actual cause. The same class of unconditional requirement
+  `GDK_BACKEND=x11` already is for every `eb-gtk4` app.
+- **Real mouse clicks are exactly as unreliable here for Qt6** as
+  `ebasic-editor`'s own README already documents for GTK4 in this same
+  sandboxed session - verified via real keyboard activation (`Tab` to
+  focus, `Space`/`Return` to activate) instead, which worked reliably
+  throughout.
+
+**Phase 1 scope, each screenshot-verified live** (`examples/*.bas`, no
+automated test suite yet - GUI widgets have no real headless story here
+the way `GtkTextBuffer`/`BMessage` do in the sibling packages):
+`QApplication`, `QWidget`/`QMainWindow`, `QPushButton`+`clicked` (the
+first per-signal-connect exemplar), `QLabel`, `QVBoxLayout`/
+`QHBoxLayout`, `QLineEdit`+`returnPressed`/`textChanged` (a deliberate
+three-step complexity ramp - reusing the `clicked`-signal callback
+shape before introducing `QString`->`const char*` marshaling), and
+`PainterWidget`+`QPainter` drawing primitives (`fillRect`/`drawRect`/
+`drawLine`/`drawText`). A dedicated spike confirmed (not assumed) that
+using the `QPainter*` handle after its owning `paintEvent` callback
+returns doesn't crash - Qt's own `isActive()` check makes it a silent
+no-op with a stderr warning instead, a gentler failure mode than
+originally guessed.
+
+**Ownership deliberately deviates from `eb-gtk4`'s `SinkHandle`/
+`ObjDestroy` ref-counting convention** - Qt has no equivalent (parent-
+child tree deletion, not ref-counting). `WidgetDestroy` uses
+`deleteLater()`, never an immediate `delete`, specifically to avoid a
+use-after-free when a widget destroys itself from inside its own signal
+callback (a common real pattern: "close this window when this button is
+clicked").
+
+Published: `ebasic.toml` at `0.1.0`, tagged `v0.1.0`, new public GitHub
+repo (`yann64/eb-qt6`), `ebpm-index` updated, `ebpm add qt6` confirmed
+resolving live.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
