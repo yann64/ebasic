@@ -3602,6 +3602,49 @@ already-proven `QMessageBox` pattern.
 Published: `ebasic.toml` bumped to `0.3.0`, tagged `v0.3.0`,
 `ebpm-index` updated, registry resolution to `0.3.0` confirmed live.
 
+### `eb-qt6` Phase 4 - progress/status bars, trees, scroll areas/splitters, tool bars
+
+User again picked all four widget families offered: `QProgressBar`/
+`QStatusBar`, `QTreeWidget`, `QScrollArea`/`QSplitter`, `QToolBar`. Same
+hand-written-shim architecture, one native shim file per widget family.
+
+Notable design points: `QTreeWidget` items are exposed as opaque
+`QTreeWidgetItem*` handles (owned by the tree or a parent item) rather
+than a wrapped value type - needed a new `EbQt6PtrCallback` typedef
+(`shim_common.h`) for `currentItemChanged`, the first signal in this
+package to carry a handle rather than a primitive value.
+`QScrollArea`/`QSplitter` are both real `QWidget` subclasses, so the
+existing generic `WidgetShow`/`WidgetSetLayout` already worked on their
+handles for free - `ScrollAreaSetWidgetResizable` is exposed explicitly
+because real Qt defaults it to off, which usually looks wrong (content
+stays at its own size instead of filling the viewport). `QToolBar`
+buttons reuse the exact same `Action` TYPE `QMenu` already defines
+(`QToolBar::addAction` returns a real `QAction`, identical to
+`QMenu::addAction`) - `ActionConnectTriggered` wires up either one with
+no new callback machinery.
+
+Caught the same class of Qt gotcha found in Phase 3 (`QTabWidget` firing
+a signal synchronously during its own setup) one step ahead this time:
+`QTreeWidget` also auto-selects its first item and fires
+`currentItemChanged` immediately - having already learned the lesson,
+the combined example constructed the shared status bar *before* adding
+any tree items, avoiding a repeat crash.
+
+One more honest, named limitation, same class as Phase 2/3's
+menu-opening and `cellClicked` gaps: the toolbar's `Increment` action
+couldn't be activated via `Tab`+`Space` (real Qt behavior - toolbar
+buttons are chrome, not part of the normal focus chain) or a real mouse
+click at verified-correct coordinates. This time, rather than stopping
+at "couldn't confirm live," the binding was verified independently of
+input delivery: a small standalone C++ program was written that links
+the shim directly, wires up the same `ActionConnectTriggered` call, and
+invokes `QAction::trigger()` programmatically - the connected callback
+fired exactly as expected, proving the binding itself is correct and
+isolating the gap entirely to synthetic-input delivery in this sandbox.
+
+Published: `ebasic.toml` bumped to `0.4.0`, tagged `v0.4.0`,
+`ebpm-index` updated, registry resolution to `0.4.0` confirmed live.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
