@@ -3727,6 +3727,44 @@ previously-documented general screenshot-tool flake.
 Published: `ebasic.toml` bumped to `0.6.0`, tagged `v0.6.0`,
 `ebpm-index` updated, registry resolution to `0.6.0` confirmed live.
 
+### `eb-qt6` Phase 7 - timers, clipboard, input dialogs, style sheets
+
+User again picked all four features offered: `QTimer`, `QClipboard`,
+`QInputDialog`, and widget style sheets. Same hand-written-shim
+architecture; style sheets specifically needed no new shim file at
+all - just one more function added to the existing generic `QWidget`
+shim (`shim_widget.h`/`.cpp`), since it applies to any widget rather
+than being its own type.
+
+A genuine naming collision found and fixed immediately at the first
+`ebpm build` attempt: `TYPE Timer` collided with eBasic's own built-in
+`Timer()` stdlib function (seconds elapsed) - identifiers are
+case-insensitive, so the two names were indistinguishable to the
+compiler. Renamed to `QTimer` (matching the real Qt class name
+directly, rather than the usual convention elsewhere in this package of
+dropping the `Q` prefix). `QInputDialog::getItem` needed a way to pass
+a list of choices across the FFI boundary - the first genuine list-of-
+strings marshaling need in this package - solved with a minimal
+`StringList`/`StringListAdd` builder mirroring `QComboBox`'s own
+create-then-add-item convention, with one deliberate deviation: the
+dialog call consumes and destroys the list it's given, unlike this
+package's usual "container now owns it forever" ownership convention.
+
+No new honest exceptions this phase - every signal and dialog round
+trip in the combined example (`examples/phase7_demo.bas`: a
+`QTimer`-driven counter label styled via `WidgetSetStyleSheet`,
+clipboard copy/paste, and all three `QInputDialog` variants) was
+confirmed live. Verification itself needed noticeably more care than
+earlier phases, though - blind `Tab`-count-then-`Space`/`Return`
+sequences landed on the wrong control more than once in this session
+(once accidentally opening a modal dialog several steps early, once
+triggering a dialog's Cancel instead of OK via `Return`) - resolved by
+screenshotting the visible focus ring after every single `Tab` press
+before activating anything, rather than assuming a fixed tab count.
+
+Published: `ebasic.toml` bumped to `0.7.0`, tagged `v0.7.0`,
+`ebpm-index` updated, registry resolution to `0.7.0` confirmed live.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
