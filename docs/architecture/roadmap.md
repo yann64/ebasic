@@ -3957,6 +3957,51 @@ before and after the call showed the exact expected change.
 Published: `ebasic.toml` bumped to `0.12.0`, tagged `v0.12.0`,
 `ebpm-index` updated, registry resolution to `0.12.0` confirmed live.
 
+### `eb-qt6` Phase 13 - drag-and-drop
+
+A focused, single-topic phase, unlike Phases 6-12's four-feature scope
+- drag-and-drop (`QDrag`/`QMimeData`) was explicitly deferred from
+Phase 12 as its own future candidate specifically because it needed a
+different architectural investment than everything folding into
+existing shims; this phase took it on deliberately.
+
+**Architecture**: `WidgetEnableDragSource`/`WidgetEnableDropTarget`
+use `QObject::installEventFilter` rather than a dedicated `Shim*`
+widget subclass (the approach every other custom-behavior widget in
+this package, e.g. `PainterWidget`'s `ShimWidget`, has needed so far) -
+two small `Q_OBJECT` filter classes intercept mouse/drag events on
+*any* existing widget without subclassing it, avoiding a combinatorial
+explosion of one dedicated drag/drop subclass per widget type. Each
+filter is parented to the widget it watches, so Qt manages its
+lifetime automatically - the same convention already used for
+`QIntValidator`/`QDoubleValidator` in Phase 8. Only plain-text MIME
+data is supported.
+
+**A genuinely new class of honest exception, more fundamental than
+every prior one**: this feature's actual runtime correctness could not
+be confirmed via *any* method attempted, not just live interaction. Real
+mouse-drag gestures didn't register (the sandbox's already-documented
+mouse limitation), but for the first time, the standalone-C++-spike
+technique that had resolved every prior "can't confirm live" case
+across 12 phases also came up empty - a manually-constructed
+`QDropEvent` sent via `QCoreApplication::sendEvent()` never reached the
+handler. Investigated further rather than assumed broken: the
+*identical* synthetic event was tested against a real `QWidget`
+subclass with `dropEvent()` overridden the textbook way (the
+alternative architecture), and it wasn't delivered there either -
+conclusively ruling out a flaw specific to the event-filter approach
+chosen here. Real interactive drag-and-drop evidently requires internal
+drag-session state (tied to a real `QDrag::exec()` call) that a bare
+synthetic `QDropEvent` cannot satisfy for either delivery mechanism.
+Shipped anyway, since the implementation follows Qt's own documented,
+standard pattern for filter-based drag-and-drop - but with this
+genuinely weaker confidence level stated plainly in the package's own
+README rather than glossed over or overclaimed as "proven correct" the
+way every earlier phase's exceptions were.
+
+Published: `ebasic.toml` bumped to `0.13.0`, tagged `v0.13.0`,
+`ebpm-index` updated, registry resolution to `0.13.0` confirmed live.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
