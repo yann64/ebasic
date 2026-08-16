@@ -3893,6 +3893,35 @@ completes here.
 Published: `ebasic.toml` bumped to `0.10.0`, tagged `v0.10.0`,
 `ebpm-index` updated, registry resolution to `0.10.0` confirmed live.
 
+### `eb-qt6` Phase 11 - enable/disable, visibility, font control, QScrollBar
+
+Scope chosen directly again. Before picking it, surveyed the existing
+surface across ten prior phases and found a real, surprising gap:
+`WidgetSetEnabled`/`IsEnabled` and font control hadn't been bound at
+all despite being fundamental widget operations any real app would
+need early. Added those plus `WidgetSetVisible`/`IsVisible`
+(deliberately distinct from `WidgetShow` - real
+`QWidget::hide()`/`setVisible(false)` semantics) and a standalone
+`QScrollBar` (mirrors `QSlider`'s own function shape exactly - both
+real `QAbstractSlider` subclasses). Three of the four folded into the
+existing widget shim with zero new widget `TYPE`s; only `QScrollBar`
+needed its own shim file.
+
+Confirmed live via keyboard: `WidgetSetEnabled` visibly graying out a
+line edit, `WidgetSetVisible` actually removing a label from its
+layout (not merely repositioning it), and `WidgetSetFont` rendering
+real serif/bold/italic text. One honest exception: `QScrollBar` never
+received keyboard focus via `Tab` in this sandbox - plausible real Qt
+behavior (its default focus policy often excludes it from the native
+style's tab order, unlike `QSlider`) rather than an input-delivery
+failure - proven correct anyway via the now-familiar standalone-C++-
+spike technique: calling `QScrollBar::setValue()` directly fired the
+connected `valueChanged` callback and updated the read-back value
+exactly as expected.
+
+Published: `ebasic.toml` bumped to `0.11.0`, tagged `v0.11.0`,
+`ebpm-index` updated, registry resolution to `0.11.0` confirmed live.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
