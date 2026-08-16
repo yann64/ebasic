@@ -3683,6 +3683,50 @@ screenshots again once the tool recovered.
 Published: `ebasic.toml` bumped to `0.5.0`, tagged `v0.5.0`,
 `ebpm-index` updated, registry resolution to `0.5.0` confirmed live.
 
+### `eb-qt6` Phase 6 - grid/form layouts, button groups, system tray, date/time/calendar
+
+User again picked all four features offered: `QGridLayout`/
+`QFormLayout`, `QButtonGroup`, `QSystemTrayIcon`, `QDateEdit`/
+`QTimeEdit`/`QCalendarWidget`. Same hand-written-shim architecture, one
+native shim file per feature.
+
+Notable design points: `WidgetSetLayout`'s parameter type was widened
+from `BoxLayout` to the shared `QtObject` base so it now accepts any
+real layout `TYPE` (`GridLayout`, `FormLayout`) without a separate
+per-layout-type setter. `QButtonGroup` - the cross-container radio
+exclusivity explicitly noted as unbound since v0.2.0 - needs a real
+parent widget at construction (it's a plain `QObject` organizer with no
+natural widget-tree owner otherwise) but does *not* take ownership of
+its buttons, matching real Qt semantics; a second real ownership
+deviation showed up with `QSystemTrayIcon`, which likewise does not own
+its context menu. `QSystemTrayIcon` reuses the existing `Menu`/`Action`
+types - required adding a standalone `NewMenu()` (previously menus
+could only be created through a menu bar). `QDateEdit`/`QTimeEdit`/
+`QCalendarWidget` marshal dates/times as separate int components rather
+than introducing a `QDate`/`QTime` wrapper `TYPE`, consistent with this
+package's existing preference for primitive-shaped signals over new
+value types.
+
+Caught and fixed a real bug while building the combined example:
+`ButtonGetText` casts internally to `QPushButton*`, which is an invalid
+cast when called on a `QCheckBox`/`QRadioButton` handle (sibling
+`QAbstractButton` subclasses, not related to `QPushButton` by
+inheritance) - added a dedicated `AbstractButtonGetText` casting to the
+shared `QAbstractButton*` base instead.
+
+One honest exception: `QSystemTrayIcon` construction and every API call
+succeeded without error (`isSystemTrayAvailable()` returned true, the
+desktop's tray-icon extension was confirmed active), but the icon's
+actual on-screen appearance in the desktop panel couldn't be
+screenshot-confirmed - capturing a specific application window worked
+fine in the same session, but a full-screen capture (needed to see the
+desktop panel, which isn't a window `QSystemTrayIcon` itself owns)
+failed for tooling reasons, a narrower variant of the
+previously-documented general screenshot-tool flake.
+
+Published: `ebasic.toml` bumped to `0.6.0`, tagged `v0.6.0`,
+`ebpm-index` updated, registry resolution to `0.6.0` confirmed live.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
