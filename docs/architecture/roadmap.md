@@ -3848,6 +3848,51 @@ delivery rather than the binding.
 Published: `ebasic.toml` bumped to `0.9.0`, tagged `v0.9.0`,
 `ebpm-index` updated, registry resolution to `0.9.0` confirmed live.
 
+### `eb-qt6` Phase 10 - images, rich text, widget size constraints, focus control
+
+Scope chosen directly again (same as Phase 9). Added images
+(`LabelSetPixmapFromFile`/`PainterDrawPixmap`, no separate `QPixmap`
+handle - matching Phase 9's icon convention), rich text in `QTextEdit`
+(`SetHtml`/`GetHtml`, an explicit opt-in alongside the existing
+plain-text functions), widget size constraints
+(`SetMinimumSize`/`SetMaximumSize`), and focus control
+(`SetFocus`/`HasFocus`). All four folded into existing shim files
+rather than new ones - no new widget `TYPE` this phase at all.
+
+Caught a real, non-obvious usability issue while wiring up the combined
+example's keyboard verification (not a binding bug, but worth knowing):
+a plain `QTextEdit` consumes `Tab` itself (inserts a tab character)
+rather than passing focus onward to the next widget - the example now
+explicitly starts keyboard focus on a button via `WidgetSetFocus` right
+after `WidgetShow`, dogfooding this same phase's own new function to
+sidestep it entirely.
+
+Found and correctly handled a real Qt semantic while verifying focus
+control itself: `WidgetSetFocus`/`WidgetHasFocus` are **not**
+synchronous - confirmed via a standalone spike that real
+`QWidget::setFocus()` only posts a focus-change event, applied once the
+Qt event loop processes it (not the binding's fault - the spike showed
+identical behavior calling the real Qt API directly with no eBasic
+involved at all). Fixed the example to defer the check via a
+single-shot `QTimer` instead of the wrong synchronous check - the
+textbook-correct pattern. Even with that fix, one honest,
+well-substantiated exception remained: `WidgetHasFocus` never returned
+true in this sandbox at all. Root-caused, not just observed:
+`xdotool getactivewindow` reports no active window whatsoever in this
+session, even immediately after `xdotool windowactivate` -
+`QWidget::hasFocus()` is gated on the widget's window being Qt's own
+notion of the "active window," which itself normally syncs from
+real window-manager-level activation this sandbox's WM never completes.
+This is narrower than the general "input doesn't reach the target"
+limitations already documented for other widgets - individual
+keystrokes still reach specific widgets and fire their handlers
+correctly throughout this whole session; it's specifically the
+WM-activation handshake Qt's *focus-tracking* depends on that never
+completes here.
+
+Published: `ebasic.toml` bumped to `0.10.0`, tagged `v0.10.0`,
+`ebpm-index` updated, registry resolution to `0.10.0` confirmed live.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
