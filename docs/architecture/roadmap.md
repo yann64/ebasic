@@ -3922,6 +3922,41 @@ exactly as expected.
 Published: `ebasic.toml` bumped to `0.11.0`, tagged `v0.11.0`,
 `ebpm-index` updated, registry resolution to `0.11.0` confirmed live.
 
+### `eb-qt6` Phase 12 - layout spacing/margins, label alignment/wrap, cursor control, item icons
+
+Scope chosen directly again. Added `BoxLayout` spacing/margins, `Label`
+alignment/word-wrap, `WidgetSetCursor`, and themed icons on `ComboBox`/
+`ListWidget` items - the last one another real gap found by surveying
+the existing surface (icons reached buttons/actions/windows/tray in
+Phase 9 but never item-based widgets). All four folded into existing
+shim files, zero new widget `TYPE`s or shim files this phase.
+
+Originally considered drag-and-drop (`QDrag`/`QMimeData`) for this slot
+but deliberately swapped it out mid-planning: it would need a whole new
+architectural piece (widget event-override subclasses, a second
+`Q_OBJECT`-requiring shim class alongside `ShimWidget`) disproportionate
+to this phase's scope, unlike everything else here which folded
+cleanly into existing shims. Noted as a real, larger future candidate
+if a later phase wants to take it on deliberately, not something to
+squeeze in casually.
+
+Confirmed live: real icons rendering in both a combo box and a list
+widget, a long sentence visibly wrapping across three centered lines,
+and generously custom layout spacing/margins clearly visible around and
+between widgets. One honest exception, a genuinely new *kind* of gap
+compared to every prior phase's exceptions: `WidgetSetCursor`'s visual
+effect couldn't be screenshot-confirmed, not because of any
+input-delivery limitation this time, but because the screenshot tool
+itself (`import`) doesn't capture the X11 mouse cursor overlay at all -
+it's composited by the X server, not part of a window's own pixel
+buffer (confirmed by checking `import -help` for a cursor-capture flag
+and finding none). Proven correct anyway via the by-now-standard
+standalone-C++-spike technique: reading `QWidget::cursor().shape()`
+before and after the call showed the exact expected change.
+
+Published: `ebasic.toml` bumped to `0.12.0`, tagged `v0.12.0`,
+`ebpm-index` updated, registry resolution to `0.12.0` confirmed live.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
