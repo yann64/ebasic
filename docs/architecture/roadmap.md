@@ -3765,6 +3765,48 @@ before activating anything, rather than assuming a fixed tab count.
 Published: `ebasic.toml` bumped to `0.7.0`, tagged `v0.7.0`,
 `ebpm-index` updated, registry resolution to `0.7.0` confirmed live.
 
+### `eb-qt6` Phase 8 - settings, shortcuts, validators, completers
+
+User again picked all four features offered: `QSettings`, `QShortcut`,
+`QIntValidator`/`QDoubleValidator`, `QCompleter`. Same
+hand-written-shim architecture; validators specifically needed no new
+shim file - just two more functions added to the existing `QLineEdit`
+shim, since a validator attaches to an existing line edit rather than
+being its own widget.
+
+Notable design points: `QSettings` was confirmed to write a real
+INI-format file at `~/.config/<organization>/<application>.conf` on
+this Linux host (read directly to verify, not just inferred from Qt's
+own docs). `QShortcut`, unlike `QTimer`/`QSettings`, has no meaningful
+null-parent case - real Qt requires a real parent widget at
+construction, since a shortcut is scoped to that widget's window by
+default. `QCompleter` reused Phase 7's `StringList` builder and its
+consume-and-destroy convention, but added one further ownership
+wrinkle: the line edit it's attached to then takes ownership of the
+completer itself.
+
+Caught and fixed a real crash before publishing, the same general class
+of bug found repeatedly across several earlier phases
+(`QTabWidget`/`QTreeWidget`/`QStackedWidget` firing a "current changed"
+signal synchronously during their own setup) but via a new trigger this
+time: the combined example's original draft called `LineEditSetText`
+to pre-fill an age field from a loaded `QSettings` value before the
+shared status label existed - `QLineEdit::setText` fires `textChanged`
+synchronously, and the connected handler touched the not-yet-
+constructed label. Confirmed via `gdb`, fixed the same way as every
+earlier instance of this pattern: construct the label first.
+
+No new honest exceptions - every feature in the combined example
+(`examples/phase8_demo.bas`) was confirmed live, including `QShortcut`'s
+`Ctrl+Q` verified via the launched process's own clean exit code rather
+than a screenshot, and `QSettings` persistence verified by relaunching
+the actual compiled binary as a fresh process (not just re-triggering
+the same running instance) and confirming the previously-saved value
+pre-loaded.
+
+Published: `ebasic.toml` bumped to `0.8.0`, tagged `v0.8.0`,
+`ebpm-index` updated, registry resolution to `0.8.0` confirmed live.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
