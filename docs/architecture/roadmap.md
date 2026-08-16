@@ -3807,6 +3807,47 @@ pre-loaded.
 Published: `ebasic.toml` bumped to `0.8.0`, tagged `v0.8.0`,
 `ebpm-index` updated, registry resolution to `0.8.0` confirmed live.
 
+### `eb-qt6` Phase 9 - icons, action groups, tooltips, frames
+
+Unlike Phases 2-8 (each scoped by a multi-select clarifying question the
+user answered), this phase's scope was chosen directly - the user
+declined the usual clarifying question and said "continue," so four
+reasonable, well-precedented features were picked and implemented
+without further confirmation: icons (buttons/actions/window titles),
+`QActionGroup`, tooltips, and `QFrame`.
+
+Notable design points: icons use no separate `QIcon` handle/`TYPE` -
+each function takes a theme name or file path directly, extending
+`QSystemTrayIcon`'s own `SetIconFromTheme` convention from v0.6.0 to
+buttons, actions, and window title bars. `QActionGroup` (the `QAction`
+equivalent of `QButtonGroup`) required adding
+`setCheckable`/`setChecked`/`isChecked` to the existing `QAction` shim
+first - a checkable action is a real Qt prerequisite for group
+exclusivity to be visible/usable at all, not just a nice-to-have.
+Tooltips folded into the existing generic widget shim, like style
+sheets before them - no new shim file.
+
+Two honest exceptions this phase, both variants of already-documented
+sandbox limitations: tooltips never appeared under synthetic mouse
+hover, even with a deliberate enter-then-settle mouse sequence (tooltip
+display depends on genuine hover dwell time, which `xdotool mousemove`
+doesn't reliably produce here - a new variant of the mouse-interaction
+limitation already noted for `QTableWidget::cellClicked`).
+`QActionGroup`'s own exclusivity behavior was not confirmed live either
+- one ambiguous popup window briefly appeared after an `Alt+V` menu
+mnemonic attempt, too fast to screenshot-capture and plausibly a
+delayed tooltip rather than the menu itself, with repeated follow-up
+attempts producing no popup at all. Rather than overclaim from an
+inconclusive signal, the binding was instead proven correct
+independently via a standalone C++ spike (the same technique used for
+`QToolBar` in v0.4.0): calling `QAction::trigger()` directly on one of
+the group's actions fired the connected callback and correctly flipped
+the other action's checked state to false, isolating the gap to input
+delivery rather than the binding.
+
+Published: `ebasic.toml` bumped to `0.9.0`, tagged `v0.9.0`,
+`ebpm-index` updated, registry resolution to `0.9.0` confirmed live.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
