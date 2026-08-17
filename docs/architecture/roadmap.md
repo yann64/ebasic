@@ -4203,6 +4203,50 @@ Published: `ebasic.toml` bumped to `0.17.0`, tagged `v0.17.0`,
 (same fetch/clone/compile-succeeds, link-fails-only-on-missing-manual-
 flags pattern as every prior phase's verification).
 
+### `eb-qt6` Phase 18 - LineEdit placeholder/max length, TableWidget headers, ComboBox InsertItem/ItemText, screen geometry
+
+Found by the same proactive-survey discipline as Phases 11/12/15-17:
+`QLineEdit` - one of the most-used widgets in the whole package since
+Phase 1 - had never gained placeholder text or a max-length cap through
+17 prior phases; `QTableWidget` had no column headers at all since its
+own Phase 3 introduction, a real usability gap for anything but a bare
+grid; `QComboBox` only ever exposed its *current* selection's text, no
+random access to any other item; and no primary-screen geometry query
+existed at all, despite window-centering being a near-universal real
+app need.
+
+`QTableWidget`'s new `SetHorizontalHeaderLabels` reuses the exact same
+`StringList` builder `QTreeWidget`'s own header labels (Phase 14)
+already established - the second consumer of that consume-and-destroy
+convention, confirming it generalizes cleanly to any future item-based
+widget needing a batch of strings crossing the FFI boundary.
+
+**Verification produced an unusually precise confirmation, not just a
+visual check**: the window's real on-screen position (via `WidgetMove`
+using the new `PrimaryScreenWidth`/`Height` to center it) was checked
+by direct arithmetic against `xdotool getwindowgeometry`'s own reported
+position, accounting for the window manager's decoration offset (the
+reported frame position was consistently 25px less on both axes than
+the raw centering math predicted, matching the same offset pattern
+observed in earlier phases) - confirming the centering math is exactly
+right, not just "looks roughly centered."
+
+**A fifth phase in a row (14-18) hitting the identical `xdotool
+windowactivate` flakiness** - by now treated as fully expected
+per-session sandbox behavior rather than investigated further (see
+Phase 16/17's own entries for the "now confirmed persistent" framing).
+`ComboBoxItemText`, `LineEditSetMaxLength`'s real truncation behavior,
+and `TableWidgetRowCount`/`ColumnCount` were all confirmed via the
+established standalone-C++-spike technique after one failed live
+retry, matching real Qt behavior exactly in every case (including
+confirming `setText` on an already-max-length-capped field truncates
+rather than errors or silently no-ops).
+
+Published: `ebasic.toml` bumped to `0.18.0`, tagged `v0.18.0`,
+`ebpm-index` updated, registry resolution to `0.18.0` confirmed live
+(same fetch/clone/compile-succeeds, link-fails-only-on-missing-manual-
+flags pattern as every prior phase's verification).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
