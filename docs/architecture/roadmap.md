@@ -4296,6 +4296,58 @@ Published: `ebasic.toml` bumped to `0.19.0`, tagged `v0.19.0`,
 (same fetch/clone/compile-succeeds, link-fails-only-on-missing-manual-
 flags pattern as every prior phase's verification).
 
+### `eb-qt6` Phase 20 - SpinBox suffix/prefix/step, checkable GroupBox, WidgetUpdate, QFontMetrics
+
+Four polish/fundamentals gaps, all found by the same proactive-survey
+discipline running since Phase 11: `QSpinBox` (bound since Phase 3) had
+never gained suffix/prefix text or a configurable step size;
+`QGroupBox` (also Phase 3) had never gained its checkable variant, a
+common real Qt pattern (a group box acting as an on/off section
+toggle, e.g. "Enable advanced options") that also auto-disables its own
+children when unchecked, no extra wiring needed; no forced-repaint
+primitive (`WidgetUpdate`) existed at all for a `PainterWidget` whose
+drawing depends on state changed outside the normal event/signal flow;
+and no text-measurement query existed at all despite being a
+near-universal need for any custom-drawing layout code.
+
+**`QFontMetrics` is deliberately stateless - no handle, unlike every
+other feature added since Phase 7** - each call constructs a real
+`QFont`/`QFontMetrics` internally from four plain values and returns a
+number, reusing the exact `(family, pointSize, bold, italic)` shape
+`WidgetSetFont` (Phase 11) already established for describing a font.
+The combined example proves it's actually wired into real layout, not
+just computed and discarded: a custom-drawn box is sized to exactly fit
+its own measured text, confirmed live via screenshot with no
+interaction needed (a box tightly wrapping "tick 0").
+
+**A new wrinkle in the standalone-C++-spike technique, worth recording
+distinctly**: verifying `WidgetUpdate` needed something no prior spike
+in this package's 19-phase history had needed - a real, non-trivial
+event-loop spin. Every previous spike could check state synchronously
+immediately after the call under test; `QWidget::update()` only
+*schedules* a repaint (Qt coalesces/batches it with other pending
+work), so an immediate post-call check found nothing yet happened. Only
+after wrapping the check in two chained `QTimer::singleShot(150, ...)`
+callbacks - genuinely letting ~300ms of real wall-clock event-loop time
+pass - did the paint-callback invocation count visibly increase. **How
+to apply**: for any future feature whose effect is asynchronous by real
+Qt design (scheduled/batched/deferred, not synchronous), budget for
+needing an actual timed event-loop spin in its spike, not just an
+immediate state check - recognize this class of feature before writing
+the spike, not after it produces a false negative.
+
+**A seventh phase in a row (14-20) hit the identical `xdotool
+windowactivate` flakiness** for the interactive checks - no new
+information, purely reconfirming the by-now-thoroughly-established
+pattern. `GroupBoxConnectToggled` and `SpinBox` prefix/single-step were
+both confirmed correct via the same spike technique, alongside the
+`WidgetUpdate` check above.
+
+Published: `ebasic.toml` bumped to `0.20.0`, tagged `v0.20.0`,
+`ebpm-index` updated, registry resolution to `0.20.0` confirmed live
+(same fetch/clone/compile-succeeds, link-fails-only-on-missing-manual-
+flags pattern as every prior phase's verification).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
