@@ -4247,6 +4247,55 @@ Published: `ebasic.toml` bumped to `0.18.0`, tagged `v0.18.0`,
 (same fetch/clone/compile-succeeds, link-fails-only-on-missing-manual-
 flags pattern as every prior phase's verification).
 
+### `eb-qt6` Phase 19 - QSyntaxHighlighter, TextEdit Clear/Undo/Redo, TableWidget row removal, LineEdit SelectAll/Clear
+
+**`QSyntaxHighlighter` is a genuinely new architectural shape, not
+another survey-found housekeeping gap** - built rule-based: a list of
+regex pattern -> color/bold rules applied to every line, rather than a
+full per-character callback into eBasic. This mirrors how most real
+syntax highlighters (including Qt's own official examples) are
+actually built, and deliberately avoids a per-keystroke FFI round trip
+into eBasic that a fully generic callback-based design would need.
+`ShimSyntaxHighlighter` is this package's 4th `Q_OBJECT` subclass
+(after `ShimWidget` in Phase 1, `ShimDragSourceFilter`/
+`ShimDropTargetFilter` in Phase 13) - needed because
+`QSyntaxHighlighter::highlightBlock()` can only be overridden by
+subclassing, the identical reason `PainterWidget` needed one for
+`paintEvent` back in v0.1.0.
+
+The other three features (`QTextEdit` `Clear`/`Undo`/`Redo`,
+`QTableWidget` row removal plus `CurrentRow`/`CurrentColumn`,
+`QLineEdit` `SelectAll`/`Clear`) round out basic editing operations on
+widgets bound since Phase 1-3 that had never gained them - the same
+proactive-survey discipline as Phases 11/12/15-18, still finding real
+gaps this deep into the package's history. `QTextEdit` also gained a
+`Document()` accessor purely as plumbing for the highlighter feature -
+the first function in this package returning a raw `QTextDocument*`
+handle with no other purpose than being passed straight to another
+shim function.
+
+**Verification needed no interaction at all for the headline
+feature**: a screenshot immediately after launch showed the
+highlighter correctly rendering three simultaneous rules on real
+eBasic-flavored sample code (bold blue keywords, a green comment, a red
+number), a strong, unambiguous confirmation with zero dependency on the
+session's unreliable input delivery. **A sixth phase in a row (14-19)
+hit the identical `xdotool windowactivate` flakiness** for the
+remaining interactive checks - `TableWidgetRemoveRow`, `LineEditSelectAll`,
+and `TextEditUndo`/`Redo`/`Clear` were all confirmed via the
+established standalone-C++-spike technique instead, matching real Qt
+behavior exactly (including catching and fixing a real bug in the
+*spike itself*, not the binding: an `insertPlainText` call landed at
+the wrong position because the text cursor wasn't explicitly moved to
+the document's end first - real `QTextCursor` semantics, not a shim
+defect, but worth remembering that spike code itself can have bugs
+too, not just the code under test).
+
+Published: `ebasic.toml` bumped to `0.19.0`, tagged `v0.19.0`,
+`ebpm-index` updated, registry resolution to `0.19.0` confirmed live
+(same fetch/clone/compile-succeeds, link-fails-only-on-missing-manual-
+flags pattern as every prior phase's verification).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
