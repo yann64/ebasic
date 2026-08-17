@@ -4002,6 +4002,66 @@ way every earlier phase's exceptions were.
 Published: `ebasic.toml` bumped to `0.13.0`, tagged `v0.13.0`,
 `ebpm-index` updated, registry resolution to `0.13.0` confirmed live.
 
+### `eb-qt6` Phase 14 - splash screens, wizards, PDF printing, multi-column trees
+
+Back to a four-feature scope after Phase 13's focused single-topic
+detour: `QSplashScreen`, `QWizard`/`QWizardPage`, PDF printing via
+`QPrinter`, and multi-column `QTreeWidget` support.
+
+**`QWizard`/`QWizardPage`** needed no new subclassing at all - a plain
+`QWizardPage` instance composes its contents via the existing
+`WidgetSetLayout` pattern (the same "compose an existing widget with an
+existing layout" convention used everywhere else in this package), and
+the wizard itself drives Next/Back/Finish/Cancel navigation
+automatically. `WizardConnectAccepted` wires the Finish-button signal
+using the same lambda+`connect` mechanism as every prior signal.
+
+**`QPrinter` is restricted to PDF-file output**, not a real printer/
+print dialog - this sandbox has no real printer to test against, and
+PDF-to-file is the one printing path fully testable without any
+interaction (write a file, check it exists and is non-empty).
+`PrinterBegin` returns the *same* painter handle every existing
+`Painter*` drawing primitive already operates on, so PDF output reuses
+the whole existing on-screen drawing surface for free - no new drawing
+API needed.
+
+**A new environment fact, found by direct reproduction, not assumed**:
+like `QApplication` itself, `QPrinter`'s constructor aborts the process
+(a Qt fatal log, not a catchable C++ exception) if called before a
+`QCoreApplication` exists. Caught via `gdb -batch -ex run -ex bt`
+during this phase's own pre-flight crash check - the same discipline
+applied to every phase - and fixed by reordering the example to
+construct the `Application` first, with the constraint now documented
+permanently in `shim_printer.h`.
+
+**Live verification was flakier for the modal `QWizard` window
+specifically than any prior phase's windows** - `xdotool windowactivate`
+intermittently failed against it (`XGetWindowProperty[_NET_WM_DESKTOP]
+failed`), more often than against a plain `QMainWindow`, plausibly
+because transient Qt dialogs don't get `_NET_WM_DESKTOP` set the way a
+top-level main window does - a narrower variant of the `WidgetHasFocus`
+WM-activation gap already documented in Phase 10. What *did* work live:
+opening the wizard via a real keyboard click on its launch button, the
+correct Back-disabled/Next-enabled button state on page 1, and
+`WidgetSetFocus` correctly focusing a `LineEdit` nested inside a wizard
+page's own layout. Page navigation and the `accepted` signal firing on
+Finish were instead confirmed via the established standalone-C++-spike
+technique - calling `QWizard::next()`/`accept()` directly on the real
+object and observing the connected callback fire exactly as expected,
+same pattern used for `QToolBar`/`QActionGroup`/`QScrollBar` in earlier
+phases. Splash-screen show/finish and the multi-column tree were both
+confirmed fully live via screenshot; PDF output was confirmed by
+checking the written file's non-zero size.
+
+Published: `ebasic.toml` bumped to `0.14.0`, tagged `v0.14.0`,
+`ebpm-index` updated, registry resolution to `0.14.0` confirmed live
+(registry fetch, tagged-repo clone, and full eBasic-level compilation
+of both the `qt6` lib and a throwaway consumer all succeeded; the
+consumer's final native link step failed only because the throwaway
+`ebasic.toml` didn't pass the package's own documented manual `-l`
+flags - the known, permanent gap already described in `eb-qt6`'s own
+README, not a new one).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
