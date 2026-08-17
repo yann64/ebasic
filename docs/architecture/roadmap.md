@@ -4105,6 +4105,51 @@ Published: `ebasic.toml` bumped to `0.15.0`, tagged `v0.15.0`,
 (same fetch/clone/compile-succeeds, link-fails-only-on-missing-manual-
 flags pattern as every prior phase's verification).
 
+### `eb-qt6` Phase 16 - QNetworkAccessManager (HTTP GET), item-widget Count/Clear, QMessageBox::critical, regex validator
+
+**`QNetworkAccessManager`/`QNetworkReply` (a simple HTTP GET, no POST/
+headers/auth) is the second feature in a row needing no GUI interaction
+to verify at all**, following `QProcess`'s own precedent from Phase 15
+- and the first feature in this package's history needing a live
+network connection to test (confirmed reachable via a plain `curl`
+check before committing to the scope). `NetworkReplyWaitForFinished`
+spins a local `QEventLoop` until the reply's own `finished` signal
+fires - the standard Qt idiom for a "synchronous-looking" async
+request, so callers don't need to wire up a callback just to block.
+Needed a second Qt component beyond `Widgets`/`Gui`/`Core`
+(`Qt6Network`, after `PrintSupport` in Phase 14) in
+`native/CMakeLists.txt`.
+
+The other three features were all found by the same proactive-survey
+discipline established in Phases 11/12/15: `Count`/`Clear` had never
+been bound on any of the three item-based widgets (`ListWidget`/
+`ComboBox`/`TreeWidget`) despite being basic housekeeping any real app
+eventually needs; `QMessageBox` had `Information`/`Warning`/`Question`
+but not `Critical`; `QLineEdit` had `Int`/`Double` validators (Phase 8)
+but nothing for arbitrary patterns like an email shape.
+
+**A continuation, not a new instance, of the `xdotool windowactivate`
+flakiness pattern** first seen against `QWizard` (Phase 14) and then a
+plain `QMainWindow` (Phase 15) - this phase's own window hit the same
+intermittent `XGetWindowProperty[_NET_WM_DESKTOP]` failures, and
+`Tab`/`Space` on the "Clear list" button didn't register afterward.
+What confirmed fully live in a single screenshot: the real HTTP GET's
+status code (`HTTP 200` against `https://example.com`) and the list's
+correct initial item count. `ListWidgetClear`/`Count` and the regex
+validator's accept/reject behavior were instead confirmed via the
+established standalone-C++-spike technique - both matched real Qt
+behavior exactly. `MessageBoxCritical` itself wasn't separately spiked:
+its shim function is structurally identical to the already-live-
+confirmed `MessageBoxInformation`/`Warning`/`Question` calls from
+Phases 1-3, just a different `QMessageBox::critical` call underneath
+the same pattern - not worth a spike for a near-zero-risk one-line
+addition.
+
+Published: `ebasic.toml` bumped to `0.16.0`, tagged `v0.16.0`,
+`ebpm-index` updated, registry resolution to `0.16.0` confirmed live
+(same fetch/clone/compile-succeeds, link-fails-only-on-missing-manual-
+flags pattern as every prior phase's verification).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
