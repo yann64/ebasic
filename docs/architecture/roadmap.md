@@ -4348,6 +4348,45 @@ Published: `ebasic.toml` bumped to `0.20.0`, tagged `v0.20.0`,
 (same fetch/clone/compile-succeeds, link-fails-only-on-missing-manual-
 flags pattern as every prior phase's verification).
 
+### `eb-qt6` Phase 21 - QClipboard image support, ListWidget multi-selection, window state, Application quit hooks
+
+`QClipboard` image support (`ClipboardSetPixmap`/`GetPixmap`)
+deliberately reuses the `Pixmap` handle introduced in Phase 17 rather
+than inventing a separate image type - the same handle already works
+as `PainterDrawPixmapHandle`'s argument, `LabelSetPixmap`'s argument,
+and now the clipboard's, confirming `Pixmap` generalizes cleanly as
+this package's one image-data type rather than needing per-consumer
+variants. `QListWidget` multi-selection (`SetSelectionMode`/
+`SelectedCount`/`SelectedRowAt`), window state (`WidgetShowMaximized`/
+`Minimized`/`FullScreen`/`Normal`, `IsMaximized`/`IsFullScreen`), and
+`Application` `SetQuitOnLastWindowClosed`/`ConnectAboutToQuit` round
+out fundamentals gaps found by the same proactive-survey discipline
+running since Phase 11.
+
+**The clipboard image round trip is the second feature in this
+package's history (after `QSyntaxHighlighter` in Phase 19) confirmed
+correct with zero interaction needed** - copy a real `Pixmap` onto the
+clipboard, read it back, compare dimensions (`64x64` both ways),
+entirely independent of the session's unreliable synthetic input.
+
+**The window-state check reused the real-timed-event-loop-spin spike
+technique introduced in Phase 20 for `WidgetUpdate`**, since
+`showMaximized()`/`showNormal()` round-trip through the window manager
+asynchronously by design, the same shape of async-by-design Qt behavior
+as `update()`'s scheduled repaint - confirming that technique
+generalizes to other WM-mediated state changes, not just repainting.
+
+**An eighth phase in a row (14-21) hit the identical `xdotool
+windowactivate` flakiness** - no new information, purely reconfirming
+the pattern. `ListWidget` multi-selection and `ApplicationConnectAboutToQuit`
+were both confirmed correct via the same spike, alongside the
+window-state check above.
+
+Published: `ebasic.toml` bumped to `0.21.0`, tagged `v0.21.0`,
+`ebpm-index` updated, registry resolution to `0.21.0` confirmed live
+(same fetch/clone/compile-succeeds, link-fails-only-on-missing-manual-
+flags pattern as every prior phase's verification).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
