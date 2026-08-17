@@ -4387,6 +4387,53 @@ Published: `ebasic.toml` bumped to `0.21.0`, tagged `v0.21.0`,
 (same fetch/clone/compile-succeeds, link-fails-only-on-missing-manual-
 flags pattern as every prior phase's verification).
 
+### `eb-qt6` Phase 22 - Button default/auto-default, TreeWidget expand/collapse/sort, Splitter sizing, programmatic ToolTip
+
+Four more fundamentals gaps found by the same proactive-survey
+discipline running since Phase 11: `QPushButton` (bound since Phase 1)
+had never gained `setDefault`/`setAutoDefault`, despite "press Enter to
+submit" being one of the most universal dialog patterns in any GUI
+toolkit; `QTreeWidget` (Phase 4) had no expand/collapse/sorting control
+at all; `QSplitter` (Phase 4) had no way to set initial pane
+proportions; and no programmatic tooltip existed independent of a
+widget's own passive hover behavior (`WidgetSetToolTip`, Phase 9).
+
+**`QToolTip` needed a genuinely new shim file, not folded into any
+existing widget's own** - `QToolTip::showText`/`hideText` are static
+Qt functions with no natural widget owner, the same shape as
+`QFontMetrics` (Phase 20) in that sense, though `QToolTip` has no
+handle at all either (matching `QFontMetrics`'s own stateless
+precedent) since there's no object to construct - just two static
+calls.
+
+**`QSplitter::setSizes` deliberately covers only the common two-pane
+case** (`SetSizes2`, two plain `int` parameters) rather than an
+arbitrary-length list - this package still has no int-array marshaling
+mechanism (unlike `StringList` for strings), and building one just for
+this one function wasn't judged worth the complexity given how
+overwhelmingly common two-pane splitters are in practice. **How to
+apply**: when a real Qt API's general form needs a marshaling
+mechanism this package doesn't have, check whether a narrower, common-
+case-covering binding meaningfully covers the real need before
+building new infrastructure - documented explicitly as a known
+scope-narrowing choice, not silently.
+
+**A ninth phase in a row (14-22) hit the identical `xdotool
+windowactivate` flakiness** for the interactive checks - no new
+information, purely reconfirming the pattern. `ButtonSetDefault`/
+`SetAutoDefault`, `TreeWidgetExpandAll`/`CollapseAll`, and
+`ToolTipShowText` were all confirmed correct via the established
+standalone-C++-spike technique instead. What confirmed fully live in
+one screenshot regardless: the splitter's actual pane widths matching
+the configured 300/100 sizes, and the tree visibly sorted in
+descending order (not insertion order) once `SetSortingEnabled` was
+turned on.
+
+Published: `ebasic.toml` bumped to `0.22.0`, tagged `v0.22.0`,
+`ebpm-index` updated, registry resolution to `0.22.0` confirmed live
+(same fetch/clone/compile-succeeds, link-fails-only-on-missing-manual-
+flags pattern as every prior phase's verification).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
