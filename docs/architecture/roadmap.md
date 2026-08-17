@@ -4482,6 +4482,42 @@ Published: `ebasic.toml` bumped to `0.23.0`, tagged `v0.23.0`,
 (same fetch/clone/compile-succeeds, link-fails-only-on-missing-manual-
 flags pattern as every prior phase's verification).
 
+### `eb-qt6` Phase 24 - LineEdit/TextEdit ReadOnly, StatusBar permanent widgets, ScrollArea scrollbar policy, standalone ToolButton
+
+Four more fundamentals gaps: `QLineEdit`/`QTextEdit` read-only support
+(bound since Phase 1/2 with none at all), `QStatusBar` permanent
+widgets (distinct from the existing temporary `ShowMessage`),
+`QScrollArea` scrollbar policy control, and a standalone `QToolButton`
+usable in any layout (not just a `QToolBar`, whose own action buttons
+are real `QToolButton`s Qt creates internally) - most commonly for a
+dropdown-menu-only "Options..." button.
+
+**`Qt::ScrollBarPolicy` and `QToolButton::ToolButtonPopupMode` were
+both verified against the real Qt header/runtime before shipping, not
+pattern-matched** - directly applying the lesson from Phase 23's own
+`Qt::FocusPolicy` bitmask bug. Both turned out to already be simple
+sequential integers (`0,1,2` and `0,1,2` respectively) - the guess
+would have been right either way, but the point is checking is now the
+default discipline for any future enum-shaped parameter in this
+package, not something to skip because the prior 22 phases of guesses
+mostly worked out.
+
+**An eleventh phase in a row (14-24) hit the identical `xdotool
+windowactivate` flakiness** for the tool button - no new information,
+purely reconfirming the pattern. `ToolButton`'s menu attachment/
+`clicked` signal, `LineEdit`/`TextEdit` `SetReadOnly`, and
+`ScrollArea`'s scrollbar policies were all confirmed correct via the
+established standalone-C++-spike technique. What confirmed fully live
+in one screenshot regardless: the read-only fields' real text
+rendering, both scrollbars forced always-visible, and the status bar's
+temporary and permanent text both showing simultaneously in their
+correct positions.
+
+Published: `ebasic.toml` bumped to `0.24.0`, tagged `v0.24.0`,
+`ebpm-index` updated, registry resolution to `0.24.0` confirmed live
+(same fetch/clone/compile-succeeds, link-fails-only-on-missing-manual-
+flags pattern as every prior phase's verification).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
