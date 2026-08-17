@@ -4150,6 +4150,59 @@ Published: `ebasic.toml` bumped to `0.16.0`, tagged `v0.16.0`,
 (same fetch/clone/compile-succeeds, link-fails-only-on-missing-manual-
 flags pattern as every prior phase's verification).
 
+### `eb-qt6` Phase 17 - QPixmap, QLabel hyperlinks, ListWidget row removal, Settings Contains/Remove
+
+**`QPixmap` closes a wart this package has named plainly in its own
+doc comments since v0.10.0**: `PainterDrawPixmap` "loads a fresh copy
+from disk every single call... a real app repainting often (animation,
+resize) should prefer `LabelSetPixmapFromFile` instead, which only
+loads once" - but that alternative only helped for labels, not custom
+drawing, and neither let one already-decoded image be reused across
+*both*. The new standalone `Pixmap` handle (`NewPixmapFromFile`, a
+plain value type with no natural widget-tree owner, so it needs an
+explicit `PixmapDestroy` - the first such handle since
+`eb_qt6_widget_destroy` itself) fixes this: `PainterDrawPixmapHandle`
+and `LabelSetPixmap` both accept the same handle, confirmed live side
+by side in the same window rendering identically from one decode.
+
+The other three features were found by the same proactive-survey
+discipline as Phases 11/12/15/16: `QLabel` had never gained signal
+support at all through 16 phases despite real Qt auto-detecting
+`<a href>` HTML in any label's text for free; `QListWidget` only had
+remove-everything (`Clear`, Phase 16) not single-row removal; `QSettings`
+had `SetString`/`GetString`/`SetInt`/`GetInt`/`Sync` but no
+`Contains`/`Remove`.
+
+**A real bug in the example itself, caught before the first
+screenshot, not a binding defect**: the pixmap render came up blank on
+the first run - traced to a plain relative-path mistake (`"assets/
+sample.png"` resolves against the *process's* working directory, not
+the `.bas` source file's own location; the compiled binary was first
+launched from the repo root instead of `examples/`) combined with
+`QPixmap`'s own documented silent-failure behavior (no error, just an
+empty image) masking the mistake instead of surfacing it. Fixed by
+relaunching with `examples/` as the working directory - the same
+requirement every other example in this package already has, just
+newly relevant here since this was the first phase loading an asset
+file from a fresh binary invocation outside the already-established
+per-phase verification routine.
+
+**A fourth phase in a row (14-17) hitting the identical `xdotool
+windowactivate` flakiness** - by now unambiguously a persistent
+per-session characteristic of this sandbox, not something to keep
+re-diagnosing (see Phase 16's own entry for the first "now confirmed
+recurring" framing). What confirmed fully live in one screenshot
+regardless: the shared pixmap rendering correctly via both consumers,
+the hyperlink's rendering, the full item list, and the real `QSettings`
+contains/remove round trip. `LabelConnectLinkActivated` and
+`ListWidgetRemoveRow` were instead confirmed via the established
+standalone-C++-spike technique - both matched real Qt behavior exactly.
+
+Published: `ebasic.toml` bumped to `0.17.0`, tagged `v0.17.0`,
+`ebpm-index` updated, registry resolution to `0.17.0` confirmed live
+(same fetch/clone/compile-succeeds, link-fails-only-on-missing-manual-
+flags pattern as every prior phase's verification).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
