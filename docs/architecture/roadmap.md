@@ -4434,6 +4434,54 @@ Published: `ebasic.toml` bumped to `0.22.0`, tagged `v0.22.0`,
 (same fetch/clone/compile-succeeds, link-fails-only-on-missing-manual-
 flags pattern as every prior phase's verification).
 
+### `eb-qt6` Phase 23 - widget focus policy, Action shortcuts, tristate CheckBox, Pixmap Save
+
+Four more fundamentals gaps: widget focus policy (`WidgetSetFocusPolicy`
+- a plain container `QWidget` had defaulted to never focusable at all
+since Phase 1, a limitation this package's own README had already
+referenced in passing back in v0.10.0's `WidgetSetFocus` discussion but
+never closed), `QAction` keyboard shortcuts (`ActionSetShortcut` -
+visible in the menu itself, distinct from the existing standalone
+`QShortcut`), tristate `QCheckBox`, and `QPixmap` file saving.
+
+**A real bug caught by this phase's own spike, before shipping, not
+after** - `Qt::FocusPolicy` is a bitmask, not small sequential
+integers. The naive guess (`0=NoFocus,1=TabFocus,2=ClickFocus,
+3=StrongFocus,4=WheelFocus`) looked entirely reasonable and matched
+every other small-enum binding in this package's own history (cursor
+shapes, alignment flags, ...) - but `StrongFocus`/`WheelFocus` are
+actually `11`/`15` (`TabFocus | ClickFocus | 0x8` and that `| 0x4`
+respectively). Caught during this phase's own standalone-spike
+verification - not live interaction, not a screenshot - by reading
+back the real `QWidget::focusPolicy()` after calling the new setter
+and finding it didn't equal `Qt::StrongFocus`. Fixed in this package's
+own `QtStrongFocus`/`QtWheelFocus` constants (`widget.bas`) before
+publishing, with the corrected values re-verified by the same spike.
+**How to apply**: this is a reminder that "looks like a small
+sequential Qt enum" is a pattern-matched guess, not a guarantee - even
+after 22 phases of mostly-correct enum-value guesses, verify against
+the real header/runtime value for any new enum-shaped parameter before
+shipping, especially bitmask-flavored ones (`Qt::FocusPolicy`,
+`Qt::AlignmentFlag`, `Qt::WindowFlags`, ... - several Qt enums are
+explicitly bit-combinable, a strong hint their values won't be
+sequential).
+
+**The Pixmap save/reload round trip is the third feature in this
+package's history (after `QSyntaxHighlighter` and the clipboard image
+round trip) confirmed correct with zero interaction needed** - write a
+real file, reload it, compare dimensions (`64x64` both ways).
+
+**A tenth phase in a row (14-23) hit the identical `xdotool
+windowactivate` flakiness** for the remaining interactive checks - no
+new information, purely reconfirming the pattern. `ActionSetShortcut`
+and `CheckBox` tristate were both confirmed correct via the same spike
+that caught the focus-policy bug above.
+
+Published: `ebasic.toml` bumped to `0.23.0`, tagged `v0.23.0`,
+`ebpm-index` updated, registry resolution to `0.23.0` confirmed live
+(same fetch/clone/compile-succeeds, link-fails-only-on-missing-manual-
+flags pattern as every prior phase's verification).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
