@@ -4062,6 +4062,49 @@ consumer's final native link step failed only because the throwaway
 flags - the known, permanent gap already described in `eb-qt6`'s own
 README, not a new one).
 
+### `eb-qt6` Phase 15 - QProcess, window geometry/position, LineEdit echo mode, editable ComboBox
+
+Found by proactively surveying the existing surface again (the same
+discipline established in Phases 11-12): widget positioning
+(`WidgetMove`/`SetGeometry`/`X`/`Y`/`Width`/`Height`/`Raise`) had never
+been bound at all through 14 prior phases despite being about as
+fundamental as `QWidget` operations get, and `QLineEdit`/`QComboBox`
+had no password-masking or free-text-entry support respectively.
+
+**`QProcess` is the headline feature - and needs no GUI/keyboard/mouse
+interaction to verify at all**, the first feature in this package's
+history with that property. Run a real command (`QProcess::
+startCommand`, which splits the string the same way a shell would,
+quoting-aware - not a raw single-program exec with no argument
+parsing), wait for it synchronously, read its real stdout/exit code.
+Follows the same plain-`QObject`-needs-a-real-parent lifetime
+convention already established for `QTimer` (Phase 7) - no destroy
+function, Qt's own parent-child teardown handles it.
+
+**A new instance of the same `xdotool windowactivate` flakiness first
+documented against v0.14.0's `QWizard` window, this time against a
+plain `QMainWindow`** - notable because every prior plain top-level
+window in this package's 14-phase history activated reliably; this is
+the first time the gap extended beyond a modal dialog specifically.
+What still confirmed live in a single screenshot: `QProcess`'s real
+stdout/exit code rendered correctly in a status label, the window
+appeared at its `WidgetMove`-requested position, and a password field
+showed masked dots instead of its real text. What couldn't be confirmed
+this way: subsequent `Tab`-focus keystrokes after that first screenshot
+didn't reliably land on the expected widget, so clicking a "reveal
+password" button and typing into the editable combo box live weren't
+confirmed by direct interaction. **Resolved via the established
+standalone-C++-spike technique**: `ComboBoxConnectEditTextChanged`
+fired with the exact text set via `eb_qt6_combobox_set_edit_text`, and
+the password `QLineEdit`'s real underlying `text()` read back correctly
+despite its masked on-screen display - both confirmed correct,
+isolating the friction to session input delivery, not either binding.
+
+Published: `ebasic.toml` bumped to `0.15.0`, tagged `v0.15.0`,
+`ebpm-index` updated, registry resolution to `0.15.0` confirmed live
+(same fetch/clone/compile-succeeds, link-fails-only-on-missing-manual-
+flags pattern as every prior phase's verification).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
