@@ -5212,6 +5212,75 @@ equivalents - `gtk_widget_set_size_request`/`QWidget::setMinimumSize`/
 RadioButton/ComboBox (a three-way widget gap, unrelated to
 constraints); the Win32 adapter.
 
+## `eb-gui` Widget/Layout Round 3 - explicit min/max size
+
+Closed the min/max-size half of Round 2's own deferred list (research
+this round found "unconfirmed equivalents" was pessimistic - GTK4/Qt6
+had already-bound min-size functions, and Qt6 had max-size too). 2
+parallel Explore agents (GTK4 + Qt6) confirmed the exact matrix: **min
+size already bound everywhere** (`eb-gtk4`'s `WidgetSetSizeRequest`,
+`eb-qt6`'s `WidgetSetMinimumSize`, `eb-haiku`'s
+`HViewSetExplicitMinSize` - all pre-existing); **max size already
+bound on Qt6/Haiku** (`WidgetSetMaximumSize`/`HViewSetExplicitMaxSize`)
+**but genuinely absent from real GTK4** (confirmed via this host's own
+`gtkwidget.h` - zero `max_width`/`max_height`/`maximum` symbols on the
+generic `GtkWidget` API, only unrelated per-class properties like
+`GtkLabel`'s own); **"preferred size" is a real, settable override only
+on Haiku** (`HViewSetExplicitPreferredSize`) - GTK4's
+`gtk_widget_measure`/Qt6's `sizeHint()` are both read-only queries
+computed per-widget-type, not settable properties on the generic
+widget base, so approximating "preferred" via `min=max` would silently
+change the semantics to "force exact size" rather than "prefer this
+but still allow flex" - deliberately left out of the contract rather
+than shipped as a misleading approximation.
+
+**Needed zero prerequisite native work anywhere** - the smallest round
+yet, pure contract + adapter wiring: `GuiWidgetSetMinSize(handle,
+width, height)` and `GuiWidgetSetMaxSize(handle, width, height)`
+(`eb-gui` v0.6.0), both operating on any widget's own `.handle`
+directly (not a box/grid-add-time parameter, matching how all three
+underlying toolkits already expose these as plain widget-level
+setters). `GuiWidgetSetMaxSize` is a documented, accepted no-op on
+`eb-gui-gtk4`, same "document the loss" precedent as Round 2's grid
+weight.
+
+**A real, non-obvious finding caught by deliberately chasing down an
+inconclusive screenshot rather than accepting a shallow "looks about
+right"**: an initial live-screenshot demo (an entry field given
+`GuiWidgetSetMinSize(200,60)` inside `eb-gui-haiku`'s own
+`widgets_form.bas`) showed only a subtle, ambiguous size change - not
+the clean "visibly taller" result expected. Rather than either
+declaring it broken or declaring it fine without checking, two
+follow-up spikes settled it: a button given a large min-size (250x150)
+in a spacious window rendered at its own small NATURAL size, centered
+within a large blank reserved area - and cross-checking against
+`eb-haiku`'s own pre-existing, already-passing
+`tests/nested_layout_basics.bas` showed it always pairs
+`HViewSetExplicitMinSize` with a nonzero `HGroupLayoutSetItemWeight`.
+**Conclusion, confirmed not assumed**: min/max size are a floor/
+ceiling on what the layout is ALLOWED to allocate, not a growth
+mechanism by themselves - exactly matching every other real box-layout
+system (GTK4's `hexpand`/`vexpand`, Qt6's stretch factor, both already
+shipped in Round 2) - an item with no weight just gets clamped up to
+its floor only when the layout needs to squeeze it, and does not claim
+leftover slack on its own. Not a bug in this round's implementation;
+the misleading demo was removed from `widgets_form.bas` (reverted to
+its Round 2 shape) rather than shipped, and the real interaction
+(pair `SetMinSize`/`SetMaxSize` with Round 2's own `expand` parameter
+for visible growth) is documented in each adapter's own README instead.
+
+Verified per-adapter: `eb-gui-gtk4`/`eb-gui-qt6` via extended
+`examples/verify` (headless - calls don't crash); `eb-gui-haiku` via
+the same headless check over SSH on real Haiku hardware, plus the two
+screenshot spikes above that produced the min/max-size-is-a-floor
+finding (not a shipped demo, a diagnostic). Published `eb-gui` v0.6.0,
+`eb-gui-gtk4` v0.6.0, `eb-gui-qt6` v0.6.0, `eb-gui-haiku` v0.4.0,
+`ebpm-index` updated, live resolution reconfirmed (`ebpm search gui`).
+
+Explicitly still deferred: settable "preferred size" (real only on
+Haiku, see above); CheckBox/RadioButton/ComboBox (three-way widget
+gap); the Win32 adapter.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
