@@ -5281,6 +5281,105 @@ Explicitly still deferred: settable "preferred size" (real only on
 Haiku, see above); CheckBox/RadioButton/ComboBox (three-way widget
 gap); the Win32 adapter.
 
+## `eb-gui` Widget Round 4 - CheckBox, RadioButton, ComboBox
+
+Closed the last deferred widget gap. Unlike every layout-constraints
+round (Haiku anchored the shape), **`eb-qt6` anchored this round's
+whole contract shape** - it already had rich, working `CheckBox`/
+`RadioButton`/`ComboBox`/`ButtonGroup` bindings, while `eb-gtk4`/
+`eb-haiku` had nothing for any of the three (confirmed via 3 parallel
+Explore agents, one per backend, not assumed).
+
+**Prerequisite native work**: `eb-gtk4` (v0.13.0) bound `GtkCheckButton`
+- real GTK4 unifies checkbox/radio-button into one widget class
+entirely (`GtkRadioButton` was removed upstream), grouped by chaining
+one `GtkCheckButton` directly to another via `gtk_check_button_set_group`
+- no separate group object exists in real GTK4 at all. Also bound
+`GtkComboBoxText`, deliberately chosen over the current, non-deprecated
+`GtkDropDown` (needs a `GListModel`/`GtkStringList`/`GtkStringObject`
+indirection layer and has no plain `"changed"` signal) - matching this
+project's own established preference for the simplest working API.
+`eb-haiku` (v0.15.0) needed genuinely new shim constructors for
+`BCheckBox`/`BRadioButton` (mirroring `eb_haiku_button_create`'s own
+shape) plus `SetValue`/`Value`; the combo-box role needed nothing new,
+the pre-existing `HMenuField` already covers it.
+
+**A real, previously-shipped bug found and fixed while building this
+round, not merely avoided in new code**: `eb-gui-gtk4`'s own
+`GuiButtonConnectClicked`/`GuiEntryConnectChanged` had used a direct
+`ObjConnect` pass-through since Round 1, silently delivering the
+**wrong value** - real GTK4 signal marshaling always calls a handler as
+`(instance, user_data)`, so the contract's own 1-parameter handler
+shape bound its sole parameter to `instance`, never the real
+`user_data` a caller actually passed. Confirmed by direct reproduction
+(a standalone spike connecting a real signal, firing it via
+`g_signal_emit_by_name`, and printing the received pointer against both
+candidates), not assumed - `eb-gui-qt6`/`eb-gui-haiku` were checked and
+confirmed unaffected, since both use real per-call custom C++ dispatch
+(a lambda, or `ShimHandler`) rather than a generic signal pass-through.
+Fixed via a new, reusable native shim (`shim_userdatasignal.cpp`), the
+same "one struct + one trampoline" technique `shim_actiontrigger.cpp`
+already used for `GuiActionConnectTriggered` - generalized since every
+affected signal (`"clicked"`/`"changed"`/`"toggled"`) reduces to the
+identical real shape. Verified via a new regression check in
+`examples/verify` (connects with a known marker address, fires the
+signal, asserts the handler received exactly that address).
+
+**A second real design correction, caught before any adapter besides
+`eb-gui-gtk4` had implemented it**: the contract's first draft
+documented `GuiCheckBoxConnectToggled`/`GuiRadioButtonConnectToggled`/
+`GuiComboBoxConnectChanged`'s handler shape as `SUB(userData, checked/
+index)`, matching only Qt6's own richer lambda-shim capability. GTK4's
+generic signal trampoline can't cleanly synthesize that extra value
+without per-widget-type native code, and Haiku's `HHandler` mechanism
+has the same limitation. Applying Round 1's own `GuiEntryConnectChanged`
+precedent (no extra param, call the getter yourself inside the
+handler) instead - fixed as a documentation-only patch (`eb-gui` v0.7.1,
+no signature/TYPE change) before it could propagate further.
+
+**The one real 3-way grouping asymmetry, hidden per-adapter**: Qt6
+needs an explicit `ButtonGroup` object for cross-container exclusivity;
+GTK4 chains to a reference button (no object); Haiku enforces
+exclusivity automatically among `BRadioButton` siblings in a shared
+container (no object). `GuiRadioButtonSetGroup(rb, firstInGroup)`
+matches GTK4's simpler shape directly in the contract; `eb-gui-qt6`
+lazily creates and tracks a real `ButtonGroup` internally (reusing
+Round 1's own `EbGuiQt6LayoutOf` association-table pattern);
+`eb-gui-haiku` treats it as a no-op.
+
+**A real, non-obvious Haiku finding, caught by an inconclusive first
+test rather than accepted at face value**: the automatic sibling
+exclusivity `eb-haiku` v0.15.0 confirmed only activates once the radio
+buttons are actually attached to a shared container - a first test
+(set values, then attach) showed both buttons independently holding
+`1` at once; a second test (attach, then set values) showed correct
+exclusivity. Not a bug - real Haiku's sibling-scan almost certainly
+runs from an `AttachedToWindow()`-style hook with nothing to scan
+before attachment.
+
+`eb-gui-haiku`'s `GuiComboBox` wraps `HMenuField`/`HMenu` in radio mode
+plus `HMenuSetLabelFromMarked`; since neither `HMenuItem` nor
+`HMenuField` expose a label-getter or a which-item-is-selected query,
+this adapter tracks each combo's own items (handle + text, insertion
+order) in a small internal table, the same pattern used elsewhere in
+this package.
+
+Verified per-adapter: `eb-gui-gtk4`/`eb-gui-qt6` via extended
+`examples/verify` (headless - real programmatic state changes, not
+synthetic signal emission, correctly firing connected handlers and
+round-tripping checked/selected state); `eb-gui-haiku` via the same
+checks over SSH on real Haiku hardware, with the corrected radio-button
+attachment ordering. Published `eb-gtk4` v0.13.0, `eb-haiku` v0.15.0,
+`eb-gui` v0.7.0/v0.7.1, `eb-gui-gtk4` v0.7.0, `eb-gui-qt6` v0.7.0,
+`eb-gui-haiku` v0.5.0, `ebpm-index` updated, live resolution
+reconfirmed (`ebpm search gui`).
+
+Explicitly still deferred: other widgets (ListBox/TextView/Slider/
+etc.); settable "preferred size" (Round 3's own deferral); the Win32
+adapter (unstarted, and impractical to build/verify in this
+environment - no Windows machine available, unlike Haiku's real
+SSH-reachable hardware).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
