@@ -4679,6 +4679,94 @@ than assumed to still work unchanged.
   on the version-bump commit, pushed to both remotes (`origin`,
   `github`) alongside the commit itself.
 
+## `eb-gui` - a universal, cross-toolkit GUI API (three new ecosystem repos)
+
+Prompted by the user's own request for application/window/menu/toolbar/
+statusbar/timer/widget libraries usable unchanged across GTK4, Qt6,
+Haiku, and Win32 - scoped, after a planning pass, to `Application`/
+`Window` only for this first slice, over the two richest existing
+bindings (`eb-gtk4`, `eb-qt6`).
+
+**Key finding governing the whole design**: eBasic's `TYPE` has no
+virtual methods/interfaces (a plain value struct - `docs/reference/
+type-oop.md`), and each toolkit is a separate native library anyway, so
+runtime backend-swapping (the wxWidgets/SDL model) isn't achievable -
+the backend has to be a compile-time/package-time choice. Chosen shape:
+one native-dependency-free contract package (`eb-gui`, just the shared
+`GuiApplication`/`GuiWindow` `TYPE`s) plus one thin adapter package per
+toolkit (`eb-gui-gtk4`, `eb-gui-qt6`) implementing the same function
+surface by calling into the real binding - needs zero new compiler/
+`ebpm` features, built entirely on the existing `[lib]`/auto-generated-
+`.iface.bas`/dependency mechanism. What ISN'T compiler-enforced: an
+ordinary eBasic `FUNCTION`/`SUB` can't be forward-declared without a
+body the way an `Extern` declaration can, so the adapters' shared
+function surface is a documented convention, verified by each adapter's
+own tests and by near-identical cross-backend examples, not by the type
+system.
+
+**Prerequisite work landed first** in both existing bindings (neither
+had real modal-window or window-quit support before this): `eb-gtk4`
+v0.9.0 added `ApplicationQuit`, `WindowSetModal`/`ClearModal` (`gtk_
+window_set_modal`/`set_transient_for` were unbound despite GTK4
+supporting both), `WidgetSetEnabled` (`gtk_widget_set_sensitive` was
+unbound - GTK4 has no window-level disable concept at all), and wired/
+tested the `"close-request"` signal; `eb-qt6` v0.25.0 added generic
+`WidgetSetModal`/`WidgetSetParentWindow` (previously only `Dialog.
+Exec()`'s own blocking modal loop existed) and a vetoable `MainWindow`
+close handler via a new `ShimMainWindow` (this package's 5th `Q_OBJECT`
+subclass).
+
+**Two real, confirmed-not-assumed findings shaped the adapters**:
+- Constructing/presenting a `GtkApplicationWindow` before its
+  `GApplication` is registered segfaults - `eb-gui`'s own contract lets
+  application code create/show windows synchronously with no
+  `"activate"` handler (unlike `eb-gtk4`'s own idiomatic convention), so
+  `eb-gui-gtk4` calls `g_application_register()` explicitly inside
+  `NewGuiApplication` to make that safe.
+- The plan's own assumption that Qt6 needed manual live-window-count
+  bookkeeping to auto-quit on last-window-close was wrong - real Qt's
+  `quitOnLastWindowClosed` genuinely handles it, as long as the close
+  happens while the event loop is actually running (true of any real
+  interaction) - `eb-gui-qt6` needs none of the planned bookkeeping.
+- A smaller, related asymmetry: `GuiApplicationQuit` called *before*
+  `GuiApplicationRun` starts hangs on the Qt6 backend (a posted quit
+  request needs a running loop to process) but only warns on GTK4 - a
+  genuine toolkit difference, documented, not a bug in either adapter.
+
+**Why `eb-gui-gtk4` needs a tiny native shim and `eb-gui-qt6` needs
+none**: `eb-gui`'s `GuiWindowSetCloseCallback` contract was deliberately
+chosen to match `eb-haiku`'s real `BWindow::QuitRequested` shape exactly
+(`FUNCTION(userData) AS INTEGER`, nonzero = allow) - `eb-qt6`'s own
+`MainWindowSetCloseCallback` already matches this verbatim, so
+`eb-gui-qt6`'s implementation is a direct pass-through. GTK4's real
+`"close-request"` signal has a different shape and the opposite
+polarity, and eBasic itself has no way to call through an arbitrary
+stored function pointer (confirmed via the compiler's own `extern-
+interop.md`/`namespaces-pointers-unions.md` - every existing callback
+mechanism in this ecosystem passes a `@ProcName` straight through as
+the *real* native callback; none ever redispatch through a second,
+dynamically-stored pointer) - so `eb-gui-gtk4` carries one small native
+trampoline (`native/shim_closecallback.h`/`.cpp`, a plain C function,
+no `Q_OBJECT` needed) to bridge it.
+
+Verified: a near-identical `examples/hello_window.bas` per adapter
+(same calls, differing only in the `#include` target and two string
+literals), screenshot-verified live on this host producing the same
+behavior; a per-adapter headless `examples/verify` exercising every
+contract function (`GuiWindowCanMove()` correctly reads `0` on GTK4 vs.
+`1` on Qt6, matching each toolkit's real capability); live `ebpm`
+registry resolution confirmed end-to-end (`ebpm add gui-qt6` against
+the real index, full fetch/clone-at-tag/transitive-dependency-resolve/
+compile chain).
+
+Published: three new public GitHub repos (`yann64/eb-gui`,
+`yann64/eb-gui-gtk4`, `yann64/eb-gui-qt6`), each tagged `v0.1.0`,
+`ebpm-index` updated for all three. Haiku (needs `eb-haiku` prerequisite
+work first - window move/resize/title aren't bound there at all despite
+`BWindow` supporting them natively) and Win32 (no eBasic binding exists
+yet at all) adapters, plus menu/toolbar/statusbar/timer/widget-layout,
+are explicit, separate follow-on phases - not started.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
