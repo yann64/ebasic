@@ -4839,6 +4839,68 @@ live. `ebpm-index` updated for `eb-gtk4` (`0.10.0`) and all three
 `eb-gui*` packages (`0.2.0`), live resolution reconfirmed
 (`ebpm add gui-gtk4` against the real index).
 
+## `eb-gui` Phase 2 (complete) - Menu, Toolbar, Action
+
+Closes the gap the previous slice deliberately left open. Real GTK4
+removed `GtkMenuBar`/`GtkMenuItem`/`GtkToolbar` upstream entirely - no
+non-deprecated replacement widget exists for either role - so
+`eb-gtk4` (v0.11.0) needed a real design pass over the modern
+replacement: `GMenu`/`GSimpleAction`/`GtkPopoverMenuBar` for menus
+(window-scoped actions referenced internally as `"win.<name>"`), and a
+plain `Box` of `Button`s for toolbars (GTK4 has no toolbar widget at
+all any more). A new `WindowContentBox` mechanism
+(`g_object_get_data`/`set_data` on the window's own `GObject`) lets
+`MenuBar`/`ToolBar`/main content/`StatusBar` all share one window's
+single child slot regardless of construction order - a real
+constraint of GTK4's window model (exactly one direct child) that
+menu/toolbar/status-bar composition would otherwise hit.
+
+**A real capability mismatch surfaced writing `eb-gui`'s own
+contract**: real GTK4 actions (`GSimpleAction`) are shareable,
+window-scoped objects independent of any menu, but `eb-qt6`'s own
+existing `Action` binding creates a fresh `QAction` per
+`MenuAddAction`/`ToolBarAddAction` call, with no way to add one action
+to more than one menu/toolbar through this ecosystem's bindings. The
+contract adopted the simpler, lower-common-denominator shape (Qt6's
+"create fresh per call") rather than exposing GTK4's richer
+action-sharing - so `eb-gui-gtk4` fakes that shape on top of GTK4's
+model (a fresh, uniquely-named window-scoped action registered on
+every `GuiMenuAddAction`/`GuiToolBarAddAction` call, tracked via the
+adapter's own small association table, since `eb-gtk4`'s own
+`g_object_get_data`/`set_data` are raw-layer-only and don't cross the
+`--lib` boundary into the adapter's public surface), while
+`eb-gui-qt6`'s side is a direct pass-through needing zero adapter-side
+logic. Prerequisite work landed in `eb-qt6` (v0.26.0) first:
+`ActionSetEnabled`/`IsEnabled`/`Trigger` (the last fires an action's
+`triggered` signal programmatically, for testability without a real
+click) and `MainWindowToolBar` (a "the window's own tool bar"
+singleton - real `QMainWindow` has no such built-in concept, unlike
+its own `menuBar()`, so this is backed by a small per-window lookup in
+the native shim).
+
+Two new native shims total across the round: `eb-gtk4`'s own
+`shim_menu.cpp` (builds the `"win.<name>"` detailed-action string
+`GMenu` needs) and `eb-gui-gtk4`'s new `shim_actiontrigger.cpp`
+(bridges `GuiActionConnectTriggered`'s contract shape to
+`GSimpleAction`'s real, differently-shaped `"activate"` signal - the
+same reasoning as that package's existing close-callback shim).
+`eb-gui-gtk4`'s own `GuiWindowStatusBar` was also fixed in passing to
+route through the new shared `WindowContentBox` instead of calling
+`WindowSetChild` directly (a real, if minor, pre-existing gap - it
+previously had no auto-created-once memory of its own and would
+silently clobber a window's child if called twice), so it now composes
+correctly with menu/toolbar regardless of call order.
+
+Verified: `eb-gtk4`'s own `examples/menu_toolbar` (live screenshot: menu
+bar + tool bar + content + status bar all correctly stacked) and
+`examples/menu_verify` (headless); both `eb-gui-gtk4`/`eb-gui-qt6`
+`examples/verify` extended and passing (`GuiActionTrigger` genuinely
+reaches a connected handler for both a menu action and a tool bar
+action on each backend; auto-created-once handles stable across
+repeated calls). `ebpm-index` updated for `eb-gtk4` (`0.11.0`), `eb-qt6`
+(`0.26.0`), and all three `eb-gui*` packages (`0.3.0`), live resolution
+reconfirmed.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
