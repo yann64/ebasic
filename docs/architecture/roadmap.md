@@ -5041,6 +5041,84 @@ matching the discipline established for `eb-gui-gtk4`/`eb-gui-qt6`).
 Published as `eb-gui-haiku` v0.1.0, `ebpm-index` updated, live
 resolution reconfirmed.
 
+## `eb-gui` Widget/Layout Round 1 - Button/Label/Entry, Box/Grid
+
+The one piece of the user's original request ("widgets managed using a
+vertical/horizontal/grid layout system with constraints") left after
+all three backend adapters existed. Researched current capabilities
+directly first (3 parallel Explore agents, one per backend) rather than
+assuming parity - the findings reshaped the plan: **real per-child
+expand/weight/alignment constraints exist on Haiku only today**
+(`HViewSetExplicitMinSize`/`MaxSize`/`PreferredSize`/`Alignment`, plus
+per-item/column/row weight) - GTK4's raw layer has no `hexpand`/
+`vexpand`/`halign`/`valign` binding at all, and Qt6 has no stretch
+factor, alignment-in-layout, or `QSizePolicy` binding either. A
+"constraints" contract today would silently do nothing on two of three
+backends, so this round ships only what's already real everywhere
+(create, append/attach-with-span, whole-layout spacing) - "with
+constraints" is explicitly deferred to a follow-on round needing real
+prerequisite native work in `eb-gtk4`/`eb-qt6` first.
+
+**A real nesting asymmetry, hidden per-adapter rather than exposed in
+the contract**: GTK4's `Box`/`Grid` are themselves widgets and nest
+directly into each other. Qt6's `BoxLayout`/`GridLayout` and Haiku's
+`HGroupLayout`/`HGridLayout` are NOT widgets/views at all and need an
+intermediate holder (a plain widget/view with the layout applied to
+it) before they can be added as a child of another layout.
+`eb-gui-gtk4`'s `GuiBox`/`GuiGrid.handle` are the real widget handles
+directly; `eb-gui-qt6`/`eb-gui-haiku` each create the holder internally
+and track the real layout object via their own small association
+table - from the contract's own perspective a `GuiBox`/`GuiGrid` is
+always "a thing you can hand to `GuiBoxAddChild`/`GuiGridAttach`/
+`GuiWindowSetContent` uniformly," regardless of backend.
+
+**`GuiWindowSetContent` per backend reflects a real structural
+difference already known from earlier rounds**: `eb-gui-gtk4`/
+`eb-gui-haiku` append into their existing shared content area
+(`WindowContentBox`/`EbGuiHaikuContentLayout`, same call-order
+convention as Menu/ToolBar/StatusBar); `eb-gui-qt6` sets it directly as
+`QMainWindow`'s own central widget, structurally independent of
+menu/toolbar/status/dock chrome, no ordering concern at all.
+
+**Real per-backend gaps and fixes, found building the adapters**:
+- `eb-gui-gtk4`: `GuiButtonConnectClicked` has no programmatic "invoke
+  this click" counterpart - real GTK4 removed `gtk_button_clicked()`
+  upstream and has no generic activate-by-action-name path for a plain
+  button - `examples/verify` only confirms connecting doesn't crash.
+- `eb-gui-qt6`: `GuiButtonGetText`/`GuiEntryGetText` intentionally leak
+  one small heap buffer per call - real Qt's own text getters return a
+  freshly allocated buffer every time (unlike GTK4/Haiku's borrowed,
+  long-lived storage), and the contract has no matching free function.
+- `eb-gui-haiku`: needed THREE small prerequisite additions to
+  `eb-haiku` (`v0.14.1`-`v0.14.3`): `HButtonSetTarget` (toolbar
+  buttons need the same per-object redirect menu items already had),
+  `HTextControlSetTarget` (ditto for text fields), and
+  `HApplicationAddHandler` (a widget-level `HHandler` created before
+  any window is known needs SOME running `BLooper` to attach to; real
+  `BApplication` is one). Each kept as its own separate function
+  rather than one generic `void*`-to-`BInvoker*`/`BLooper*` cast, for
+  the same reason established earlier this session (casting an erased
+  `void*` to a non-first base of a multiply-inherited class needs the
+  compiler to know the real concrete type at the cast site - the
+  `BFile` MI-pointer lesson). Real, worth-documenting consequence:
+  `BApplication` runs its message loop on the SAME thread that calls
+  `GuiApplicationRun`, unlike a `BWindow`'s own separate thread (which
+  already runs pre-`Run()`) - so a widget-level callback genuinely
+  cannot fire until `GuiApplicationRun` is actually executing, unlike
+  a menu/toolbar action's own callback.
+
+Verified per-adapter: `eb-gui-gtk4`/`eb-gui-qt6` via extended
+`examples/verify` (headless: `GuiEntrySetText`/`GetText` round-trip
+through a `GuiGrid` nested inside a `GuiBox`; `GuiWindowSetContent`
+composes without crashing) plus a new `examples/widgets_form` (runs
+without crashing on this host; live screenshot tooling wasn't
+available in this environment for these two, unlike the Haiku-hosted
+examples); `eb-gui-haiku` via the same headless checks over SSH plus a
+live, screenshot-verified `examples/widgets_form.bas` on real Haiku
+hardware. Published `eb-gui`/`eb-gui-gtk4`/`eb-gui-qt6` v0.4.0 and
+`eb-gui-haiku` v0.2.0, `ebpm-index` updated, live resolution
+reconfirmed.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
