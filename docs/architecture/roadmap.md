@@ -4613,6 +4613,72 @@ first. 64/64 tests passed, hrev60030, ~58s total - the five new
 `std::filesystem::canonical` (already relied on by `#include`) behave
 the same there as on Linux.
 
+## v1.1.0: Second Tagged Release
+
+With M9 (FreeBASIC-parity preprocessor directives) implemented, tested,
+and Haiku-verified, the user asked to bump/tag `1.1.0` and publish
+accordingly - the same `project(ebasic VERSION ...)` → packaging → tag
+sequence as `v1.0.0` above, re-applied to a real second release rather
+than assumed to still work unchanged.
+
+- `project(ebasic VERSION 1.1.0 ...)` (top-level `CMakeLists.txt`) -
+  confirmed live: `ebc`/`ebpm`/`docgen --version` all report
+  `1.1.0 (<hash>)` after rebuilding.
+- `packaging/rpm/ebasic.spec` (`Version:` + a new, appended `%changelog`
+  entry) and `debian/changelog` (a new `ebasic (1.1.0)` entry stacked
+  above `1.0.0`, same append-only convention as before).
+  `packaging/flatpak/io.github.yann64.ebasic.metainfo.xml` gained a new
+  `<release version="1.1.0">` **appended above** the existing `1.0.0`
+  entry this time, not replacing it - `1.0.0` was a real shipped
+  release (unlike `0.1.0` when `v1.0.0` was cut), so AppStream's
+  "list actual shipped versions" convention now means accumulating, not
+  overwriting. `README.md`'s Status line bumped to match.
+- CI confirmed green on all four platforms (`linux-gcc`/`linux-clang`/
+  `macos`/`windows-mingw`) for the version-bump commit specifically,
+  via `gh run watch`, before creating the tag - not assumed from the
+  preceding feature commit's own already-green run.
+- **A real, pre-existing packaging bug found while rebuilding the
+  `.rpm`, not a regression from this bump**: `packaging/rpm/ebasic.spec`'s
+  `%files` list predates `ebasic_lsp` (added back in M7) and never
+  listed it - `rpmbuild`'s stricter "installed but unpackaged file"
+  check failed outright building `1.1.0-1`. The `.deb` build has no
+  equivalent check (`debhelper` just packages whatever `make install`
+  produced), which is exactly why this had gone unnoticed until now.
+  Fixed as `%{_bindir}/ebasic_lsp` added to `%files` and a `Release`
+  bump to `1.1.0-2` (a packaging-only fix - no source change, so no new
+  git tag; RPM's own `Release` field is exactly what exists for this
+  case) - re-verified by re-extracting the rebuilt `.rpm` and confirming
+  all four binaries (`ebc`/`ebpm`/`docgen`/`ebasic_lsp`) are present.
+  `packaging/haiku/ebasic-1.1.0.recipe`'s own `PROVIDES` gained the
+  analogous `cmd:ebasic_lsp` line proactively, for the same reason,
+  even though `haikuporter` doesn't enforce it as strictly as `rpmbuild`
+  does.
+- Both `.deb` (`dpkg-buildpackage -us -uc -b`, working tree) and `.rpm`
+  (`git archive HEAD` into `~/rpmbuild/SOURCES`, then `rpmbuild -bb`)
+  rebuilt and extracted-and-version-checked, matching `v1.0.0`'s own
+  verification depth - the working-tree-vs-archive sequencing lesson
+  from that release (commit before an archive-based build) was already
+  satisfied by committing the version bump first this time.
+- `packaging/haiku/ebasic-1.0.0.recipe` renamed to `ebasic-1.1.0.recipe`,
+  with a real tarball downloaded from the freshly-pushed
+  `https://github.com/yann64/ebasic/archive/refs/tags/v1.1.0.tar.gz` tag
+  and its genuine sha256 computed (not a `git archive`-derived
+  approximation, same reasoning as `v1.0.0`'s recipe). **Scoped
+  narrower than `v1.0.0`'s own Haiku packaging work on purpose**: since
+  this release changes only the preprocessor (already verified
+  end-to-end on real Haiku hardware via `scripts/haiku_verify.sh`
+  earlier this session) and the recipe's `BUILD()`/`INSTALL()` steps are
+  unchanged from the `v1.0.0` recipe already fully validated through a
+  real `haikuporter` chroot build and install, a second full
+  chroot-build-and-install verification was judged not worth repeating
+  for a metadata-only recipe bump - flagged here explicitly as a
+  deliberate scoping choice, not an oversight, in case a future release
+  should reconsider it.
+- **The `v1.1.0` tag itself**: created as a real, annotated tag (quoting
+  the M9 feature summary and the CI/Haiku verification it already had)
+  on the version-bump commit, pushed to both remotes (`origin`,
+  `github`) alongside the commit itself.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
