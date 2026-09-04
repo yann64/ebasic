@@ -4687,11 +4687,23 @@ Haiku, and Win32 - scoped, after a planning pass, to `Application`/
 `Window` only for this first slice, over the two richest existing
 bindings (`eb-gtk4`, `eb-qt6`).
 
-**Key finding governing the whole design**: eBasic's `TYPE` has no
-virtual methods/interfaces (a plain value struct - `docs/reference/
-type-oop.md`), and each toolkit is a separate native library anyway, so
-runtime backend-swapping (the wxWidgets/SDL model) isn't achievable -
-the backend has to be a compile-time/package-time choice. Chosen shape:
+**Key finding governing the whole design (corrected after initial
+publication)**: eBasic actually *does* support real virtual dispatch
+through a vtable (`Declare Virtual Function`/`Override`,
+`docs/reference/type-oop.md`'s `EXTENDS` section) - the original design
+rationale here wrongly claimed otherwise, a case-sensitive-grep miss of
+the real `Virtual`/`Override` keywords. The real, confirmed reason a
+polymorphic interface still isn't viable across `eb-gui`/`eb-gui-gtk4`/
+`eb-gui-qt6`: a `TYPE` using a virtual method has a vtable, which
+breaks the plain-data/standard-layout requirement for crossing an
+`Extern`/`ebc --lib` package boundary - `Sema` explicitly rejects such a
+`TYPE` on a boundary signature (the M4-era `Extern` ABI-compatibility
+check). Since the three packages are separately-compiled `--lib`
+archives, this rules out a shared virtual-dispatch interface regardless
+of the language's own capability. Combined with each toolkit being a
+separate native library anyway, runtime backend-swapping (the
+wxWidgets/SDL model) still isn't achievable - the backend has to be a
+compile-time/package-time choice either way. Chosen shape:
 one native-dependency-free contract package (`eb-gui`, just the shared
 `GuiApplication`/`GuiWindow` `TYPE`s) plus one thin adapter package per
 toolkit (`eb-gui-gtk4`, `eb-gui-qt6`) implementing the same function
