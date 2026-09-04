@@ -4965,6 +4965,82 @@ Haiku's own `screenshot` CLI needs `-s` (silent) or it opens its own
 interactive dialog that then requires cleanup as if it were the
 observed pid.
 
+## `eb-gui-haiku` - the native BWindow adapter, built anyway
+
+User asked to proceed with a from-scratch, native `BWindow`-based
+`eb-gui-haiku` despite the feasibility finding above (GTK4/Qt6 already
+work on Haiku) - the narrower goal being zero GTK4/Qt6 runtime
+dependency, not "make Haiku a supported target." Full plan at
+`/home/yann64/.claude/plans/lazy-bouncing-quasar.md`.
+
+**Prerequisite work landed in `eb-haiku` first** (`v0.14.0`/`v0.14.1`,
+published), since `eb-haiku`'s own binding was missing several things
+the contract needed: `HWindowSetTitle`/`MoveTo`/`ResizeTo` (previously
+constructor-only), `HWindowSetEnabled` (a recursive `BControl` walk -
+Haiku has no `BWindow`/`BView`-level enabled concept at all),
+`HWindowSetModal`/`ClearModal` (`SetFeel(B_MODAL_SUBSET_WINDOW_FEEL)` +
+`AddToSubset`/`RemoveFromSubset`), a new `HHandler` TYPE (a small,
+reusable `BHandler` subclass giving each action/timer its own
+per-object callback target - real Haiku's `BMenuItem`/`BMessageRunner`/
+`BButton` otherwise all deliver via a shared window `BMessage`, no
+native per-object signal the way GTK4/Qt6 both have), `HMenuItemSetTarget`/
+`HButtonSetTarget` (redirect an item's/button's own invocation to a
+specific `HHandler`), and a new `HTimer` TYPE (`BMessageRunner`-backed,
+the same "needs a from-scratch shim, real object is one-shot-lifecycle"
+situation `eb-gtk4`'s own `GtkTimer` hit). **A real bug caught during
+this prerequisite work**: `eb_haiku_window_add_handler` initially had
+no lock, and hung indefinitely (not a crash) when called on an
+already-shown window - the same cross-thread mutation hazard an
+earlier `eb-haiku` round already hit for `SetLabel`/`SetEnabled`, fixed
+with the same `WindowAutolock` pattern.
+
+**`eb-gui-haiku` itself needed zero native code** - a pure eBasic
+composition over `eb-haiku`'s now-complete primitives. Two real,
+confirmed-by-direct-reproduction findings surfaced building it,
+documented in its own README:
+
+1. **`GuiActionTrigger`'s delivery is ALWAYS asynchronous on this
+   backend**, unlike GTK4/Qt6's synchronous signal delivery - a real
+   `BMessenger`/`BHandler` round-trip, even for a locally-attached
+   target. Found via a genuinely confusing debugging session: an
+   action fired correctly in isolation but silently failed (count
+   stayed at 0, no crash, no hang) inside the full verify example -
+   bisected via ~8 minimal spike variants before realizing the ONLY
+   difference between passing and failing spikes was a `Sleep()` after
+   the trigger call, not any window-count/ordering factor as initially
+   suspected. Real lesson: don't assume a per-object callback fires
+   synchronously just because it does on every other backend already
+   built this session.
+2. **A permanently-vetoing close callback blocks
+   `GuiApplicationQuit` application-wide even on a window that was
+   NEVER SHOWN** - a stricter version of the same asymmetry already
+   documented for Qt6 (there, only a *visible* window's veto has this
+   effect). Real `BApplication::QuitRequested()`'s default
+   implementation asks every open window regardless of visibility.
+
+**A real bug caught in the adapter's own design, before shipping**:
+`GuiTimer`'s `NewGuiTimer` initially only preserved `HTimer.handle`
+across the `GuiTimer`/`HTimer` TYPE boundary, silently dropping
+`HTimer`'s own second field (`target AS HHandler`) - `GuiTimerConnectTimeout`
+then passed a zeroed/null handler into `HHandlerSetCallback`, which
+hung (not crashed) on real Haiku. Fixed by tracking the target
+handler's own handle separately via the adapter's association table
+and reattaching it in `GuiTimerConnectTimeout`. A second, similar
+class of bug (three of `GuiWindowMenuBar`/`ToolBar`/`StatusBar` all
+using the SAME association table keyed by the SAME window handle,
+silently clobbering each other's singleton) was caught and fixed
+*during* design, before ever running on hardware, by reasoning through
+the key-collision risk explicitly - documented in the adapter's own
+`src/lib.bas` as the reason it uses several small per-purpose tables
+instead of one shared one.
+
+Verified on real Haiku hardware via SSH: `examples/hello_window` and
+`examples/menu_toolbar_statusbar` (live screenshots, native Haiku
+window decorations), `examples/verify` (every contract function,
+matching the discipline established for `eb-gui-gtk4`/`eb-gui-qt6`).
+Published as `eb-gui-haiku` v0.1.0, `ebpm-index` updated, live
+resolution reconfirmed.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
