@@ -4901,6 +4901,70 @@ repeated calls). `ebpm-index` updated for `eb-gtk4` (`0.11.0`), `eb-qt6`
 (`0.26.0`), and all three `eb-gui*` packages (`0.3.0`), live resolution
 reconfirmed.
 
+## `eb-gui` Haiku feasibility - GTK4 and Qt6 both already work, unmodified
+
+The user asked to "start" a Haiku backend adapter, then redirected mid-
+investigation: "gtk4 and qt6 should also work on Haiku" - prompting a
+real feasibility check (SSH to the project's real Haiku test box,
+`hrev60030`) before writing any new BWindow-native adapter code. Both
+toolkits already ship as real HaikuPorts packages, and **both bind and
+run through `eb-gtk4`/`eb-qt6` with zero source changes anywhere**:
+
+- **`eb-gtk4`**: `native/CMakeLists.txt`'s `pkg_check_modules` finds
+  real HaikuPorts `gtk4`/`gio-2.0` (4.23.2) unmodified; native shim
+  builds clean; all 8 `ebpm test` cases pass; `examples/hello_window`
+  and `examples/menu_toolbar` (the newer Menu/Toolbar/StatusBar
+  composition) both render live with Haiku's own native window
+  decorations. Haiku's GTK4 port ships its own native GDK backend
+  (confirmed via a `strings` scan of `libgtk-4.so`, alongside wayland/
+  broadway) - though the actual runtime connection log line
+  (`wl_ips_client_connected`) suggests it may route through a
+  Haiku-specific IPC bridge rather than a literal Wayland compositor;
+  not investigated further since the practical result (a correctly
+  rendered, natively-decorated window) is what matters here.
+- **`eb-qt6`**: needed `qt6_base_devel` installed (`pkgman install`,
+  no elevated privileges required - Haiku packages are user-space);
+  `moc` ships at `/boot/system/lib/Qt6/moc`, not on `PATH` but found
+  automatically by CMake's own `find_package(Qt6)` regardless. The
+  full native shim (55+ files, every `Q_OBJECT`-based `Shim*` class
+  included) builds clean; `examples/hello_window` compiled via the
+  same manual `ebc -l Qt6Widgets ...` invocation Linux needs (the
+  package's own documented "no `.libs` auto-forwarding" gap, unrelated
+  to Haiku) and rendered live with Haiku's own native window
+  decorations, no `QT_QPA_PLATFORM` override needed.
+- **`eb-gui-gtk4`/`eb-gui-qt6`**: each package's own `examples/verify`
+  passes in full on Haiku, identical output to Linux.
+
+**Conclusion, reported back to the user rather than decided
+unilaterally**: a separate, from-scratch `eb-gui-haiku` adapter (real
+`BWindow`/`BView`, the architecture originally scoped for this track)
+is **not required** just to get eBasic GUI apps running on Haiku - the
+existing GTK4/Qt6 adapters already cover that. A native BWindow-based
+adapter would still be worth building for a narrower, different reason:
+apps that want to avoid a GTK4/Qt6 runtime dependency in favor of
+Haiku's own always-present native toolkit (smaller binaries, no
+HaikuPorts runtime deps, matches-the-OS look for free) - a real but
+different motivation than "make Haiku a supported target at all",
+which is already satisfied. Prerequisite gap if that track is picked up
+later: `eb-haiku`'s own `BWindow` binding still doesn't expose move/
+resize/title get-or-set despite `BWindow` supporting all three natively
+(a pre-existing, unrelated gap, not something this investigation
+changed).
+
+**SSH remote-build lessons for this Haiku box, worth remembering**:
+detaching a long-running GUI process cleanly over SSH is unreliable
+with `nohup ... & disown` alone (repeatedly left either a hung SSH
+session or an undetached-but-still-running orphan) - the reliable path
+was the coordinating harness's own background-task execution, not a
+shell-level backgrounding trick. `ps aux` doesn't exist on Haiku (BSD-
+style flags unsupported, silently return nothing); use plain `ps`
+(columns: team/PID, thread count, gid, uid) and match on the literal
+command-name prefix instead of assuming a fixed column position for the
+PID, since long commands get name-padded before the PID column.
+Haiku's own `screenshot` CLI needs `-s` (silent) or it opens its own
+interactive dialog that then requires cleanup as if it were the
+observed pid.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
