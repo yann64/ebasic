@@ -68,6 +68,31 @@ add_test(
 )
 
 add_test(
+    NAME e2e_preprocessor_conditionals
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/preprocessor_conditionals
+)
+
+add_test(
+    NAME e2e_preprocessor_function_macros
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/preprocessor_function_macros
+)
+
+add_test(
+    NAME e2e_preprocessor_multiline_macro
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/preprocessor_multiline_macro
+)
+
+add_test(
+    NAME e2e_preprocessor_builtins
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/preprocessor_builtins
+)
+
+add_test(
+    NAME e2e_preprocessor_errors
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/preprocessor_errors.sh $<TARGET_FILE:ebc>
+)
+
+add_test(
     NAME e2e_type_records
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/type_records
 )

@@ -4518,6 +4518,88 @@ Published: `ebasic.toml` bumped to `0.24.0`, tagged `v0.24.0`,
 (same fetch/clone/compile-succeeds, link-fails-only-on-missing-manual-
 flags pattern as every prior phase's verification).
 
+## M9 Plan Summary (FreeBASIC-parity preprocessor directives, done)
+
+With M0-M8 and the `eb-qt6` phase series both well underway, evaluated
+(via a feasibility plan, then implemented in full) closing the core
+compiler's own long-standing preprocessor gap: FreeBASIC-identical
+directives beyond the M1c/M2/M5-era `#define`(object-like only)/
+`#ifdef`/`#ifndef`/`#else`/`#endif`/`#include`/`#include once`/platform-
+macro set (see the M1c/M2/M5 notes above). `docs/reference/preprocessor.md`
+had explicitly called out "there is no `#elif`" as a known limitation
+since M5 - this milestone closes that and the rest of the practically-used
+FreeBASIC preprocessor surface, scoped deliberately short of full parity
+(see "Deviations from FreeBASIC" in that same doc).
+
+**Implemented, all inside `compiler/src/preprocessor/` - zero changes to
+the Lexer/Parser/Sema/Codegen**:
+
+- `#elseif`/`#elseifdef`/`#elseifndef`, alongside the pre-existing
+  `#ifdef`/`#ifndef`/`#else`/`#endif` - `IfFrame` (replacing the old flat
+  `vector<bool>` if-stack) tracks "any branch already taken" per chain so
+  only one branch ever fires, matching ordinary `If`/`ElseIf` semantics.
+- `#if`/`#elseif` **expression evaluation** - a new, deliberately small
+  recursive-descent evaluator (`preprocessor/pp_expr.{hpp,cpp}`): integer
+  arithmetic/comparisons, `and`/`or`/`not`, parens, and `defined(NAME)`
+  (resolved *before* general macro substitution, exactly like C's own
+  `defined` - otherwise `defined(NAME)` would test whether `NAME`'s
+  *expansion* is defined, not `NAME` itself). Also supports string `=`/
+  `<>` comparison (not ordering/arithmetic) specifically for the
+  `#if #arg = ""` idiom FreeBASIC's own variadic-macro docs use.
+- `#undef`.
+- **Function-like `#define`**, including a trailing variadic parameter
+  (`name...`), and the `#` stringize / `##` concatenate operators -
+  `PPState::macros` changed from `unordered_map<string,string>` to
+  `unordered_map<string,MacroDef>` (empty `params` = today's exact
+  object-like behavior, zero regression risk to the existing surface).
+- `#macro`/`#endmacro` - the multi-line form. **The one design decision
+  worth calling out**: a `#macro` body can itself contain real directives
+  (FreeBASIC's own `test1` example nests `#if #arg2 = ""` inside one), so
+  after argument substitution its body is fed back through the very same
+  `expandSource` used for `#include` - reusing that machinery rather than
+  inventing new directive-interpretation logic, at the cost of a
+  documented rough edge (diagnostics/`__LINE__`/`__FILE__` inside a
+  `#macro` invocation point at the call site, not a precise in-body line).
+  A consequence of supporting nested directives: a `#macro` can only be
+  invoked as a whole source line (not embedded mid-expression, unlike a
+  function-like `#define`).
+- `#print`/`#error`/`#assert`.
+- Predefined `__LINE__`/`__FILE__` (resolved dynamically per use site,
+  checked in `expandText` before any macro-table lookup) and `__DATE__`/
+  `__TIME__` (seeded once, like the existing platform macros).
+
+**Two real bugs caught before shipping, both in the new stringize/concat
+substitution logic, not the rest of the pipeline**:
+
+- Stringizing initially escaped embedded `"` with a backslash (the C
+  convention) - but eBasic strings escape `"` by *doubling* it (classic
+  BASIC, confirmed against `Lexer::lexString`), so `#if #arg = ""` for a
+  quoted-string argument produced a mis-tokenized `#if` expression.
+  Fixed in both the stringize substitution itself and `pp_expr`'s own
+  string-literal tokenizer (which had the same latent gap).
+- The stringize pass (Pass A) initially mishandled `##`: on seeing the
+  first `#` of the pair it correctly deferred to Pass C (concat), but
+  then reprocessed the *second* `#` on the next loop iteration as a
+  fresh, independent stringize candidate rather than treating `##` as
+  one atomic token - caught by the `Concat(hello, world)` e2e case,
+  fixed by consuming both characters of a `##` pair together.
+
+**Testing**: five new e2e cases mirroring FreeBASIC's own documented
+examples almost verbatim - `preprocessor_conditionals` (`#elseif` chains,
+`#undef`, `defined()`, arithmetic), `preprocessor_function_macros`
+(parameterized/variadic `#define`, stringize, concat, recursive
+expansion), `preprocessor_multiline_macro` (`#macro`/`#endmacro`,
+including the nested-`#if` variadic-argument-detection example),
+`preprocessor_builtins` (`__LINE__`/`__FILE__`/`__DATE__`/`__TIME__` -
+checked by format/length, never by literal value, so the test doesn't
+rot on a later run), and `preprocessor_errors.sh` (a `default_params_
+errors.sh`-style negative-test script: `#error`, failing `#assert`,
+unmatched `#elseif`/`#endmacro`, an unclosed `#macro`, too many arguments
+to a non-variadic macro). Every existing test (64/64, including the four
+`preprocess()` call sites: `ebc`, `docgen`, and the LSP's diagnostics/
+symbols) stayed green throughout - confirming the additive, dispatch-
+only nature of the change. Every `examples/*.bas` file recompiled clean.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

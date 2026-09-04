@@ -17,6 +17,7 @@ add_library(ebasic_frontend STATIC
     src/diagnostics/diagnostics.cpp
     src/lexer/lexer.cpp
     src/preprocessor/preprocessor.cpp
+    src/preprocessor/pp_expr.cpp
     src/parser/parser.cpp
 )
 target_include_directories(ebasic_frontend PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)

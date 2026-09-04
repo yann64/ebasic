@@ -19,11 +19,19 @@ struct PreprocessResult {
 };
 
 /// A line-based textual preprocessing pass run on the raw source before
-/// lexing: object-like #define (no parameters), #ifdef/#ifndef/#else/#endif
-/// conditional compilation, and #include/#include once (recursively, with
-/// circular-include detection). Macro names are case-sensitive (unlike the
-/// rest of the case-insensitive BASIC language), and so are directive
-/// keywords themselves (#define, #include, once, ...).
+/// lexing, closely matching real FreeBASIC's own preprocessor (see
+/// docs/reference/preprocessor.md for the exact feature list and
+/// documented deviations): object-like and function-like #define
+/// (including a variadic trailing parameter, and the # stringize/##
+/// concatenate operators), #macro/#endmacro (the multi-line, directive-
+/// aware form), #undef, #if/#elseif (a small integer/string expression
+/// evaluator - see pp_expr.hpp) alongside #ifdef/#ifndef/#elseifdef/
+/// #elseifndef/#else/#endif, #print/#error/#assert, the predefined
+/// __LINE__/__FILE__/__DATE__/__TIME__ macros, and #include/#include once
+/// (recursively, with circular-include detection). Macro names are
+/// case-sensitive (unlike the rest of the case-insensitive BASIC
+/// language), and so are directive keywords themselves (#define,
+/// #include, once, ...).
 ///
 /// Excluded/replaced text is blanked rather than removed, and #include'd
 /// content is spliced in place, so that `lineMap` - and therefore

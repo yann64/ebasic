@@ -1,0 +1,8 @@
+level 2
+first true branch
+A on
+B off
+A undefined after #undef
+defined() and arithmetic together
+not defined
+expression math ok
