@@ -5380,6 +5380,67 @@ adapter (unstarted, and impractical to build/verify in this
 environment - no Windows machine available, unlike Haiku's real
 SSH-reachable hardware).
 
+## `eb-gui` Widget Round 5 - ProgressBar, Slider
+
+`eb-qt6` again already had rich, working `ProgressBar`/`Slider`
+bindings; `eb-gtk4`/`eb-haiku` had nothing for either, needing real
+prerequisite native work (`GtkProgressBar`/`GtkScale`, `eb-gtk4`
+v0.14.0; `BStatusBar`/`BSlider`, `eb-haiku` v0.16.0) - confirmed via 3
+parallel Explore agents, not assumed. Switch and Spinner were
+considered and explicitly excluded: Switch has no Qt6/Haiku equivalent
+at all and is functionally redundant with the already-shipped
+`GuiCheckBox`; Spinner has no real widget on Haiku's Interface Kit at
+all (real apps there fake indeterminate progress by looping
+`BStatusBar::Update()`) - a genuine 1-of-3 absence with no reasonable
+fallback.
+
+**A real semantic mismatch, handled rather than papered over**: real
+GTK4's `GtkProgressBar` has no integer min/max/value model at all,
+only a `0.0-1.0` double fraction. The contract keeps the richer,
+already-real integer min/max/value shape (matching Qt6/Haiku
+directly) - `eb-gui-gtk4` tracks each progress bar's own `(min, max,
+value)` in a small internal association table, computing the fraction
+for display and returning the tracked integer directly for `GetValue`
+(never re-deriving it from the lossy fraction). Real Haiku's
+`BStatusBar` has no minimum-value concept at all (always effectively
+`0`) - `GuiProgressBarSetRange`'s own `min` is a documented, accepted
+no-op on `eb-gui-haiku`, matching the "document the loss, don't block
+the feature" precedent already established for GTK4's own missing
+grid weight (Round 2) and missing max-size (Round 3).
+
+`GuiSliderConnectValueChanged`'s handler shape has no value param,
+same reasoning as `GuiEntryConnectChanged`/`GuiCheckBoxConnectToggled` -
+`eb-qt6`'s own real shim passes an extra value the contract doesn't
+declare (safe, ignored, same established ABI rule); `eb-gui-gtk4`
+reuses the Round 4 `eb_gui_gtk4_connect_userdata_signal` trampoline
+directly on `GtkRange`'s own `"value-changed"` signal, already
+correctly fixed to deliver only `userData` - reconfirmed by a second
+regression check this round.
+
+A real, confirmed-not-assumed default-value difference was found and
+documented rather than "fixed": a freshly created `GuiProgressBar`
+reads `-1` on `eb-gui-qt6` (real Qt's own documented "no value set
+yet" sentinel for `QProgressBar`), not `0` like `eb-gui-gtk4`'s own
+default - a genuine toolkit convention, not a bug.
+
+Verified per-adapter: `eb-gui-gtk4`/`eb-gui-qt6` via extended
+`examples/verify` (headless - real programmatic range/value round-trips,
+a second `userData`-delivery regression check on the reused GTK4
+trampoline); `eb-gui-haiku` via the same over SSH on real Haiku
+hardware, plus a live screenshot confirming both widgets render
+correctly (the progress bar's fill and the slider's thumb position
+both visually matched the values set, not just "didn't crash").
+Published `eb-gtk4` v0.14.0, `eb-haiku` v0.16.0, `eb-gui` v0.8.0,
+`eb-gui-gtk4`/`eb-gui-qt6` v0.8.0, `eb-gui-haiku` v0.6.0, `ebpm-index`
+updated, live resolution reconfirmed (`ebpm search gui`).
+
+Explicitly still deferred: Switch, Spinner/indeterminate progress (see
+above); `BListView`/`BScrollBar`/`GtkListBox`-completion (selection
+get/set, `row-activated` wiring - noted during this round's own
+research as other real gaps, unrelated to ProgressBar/Slider scope);
+settable "preferred size" (Round 3's own deferral); the Win32 adapter
+(unstarted, impractical to build/verify in this environment).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
