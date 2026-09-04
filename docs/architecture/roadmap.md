@@ -5441,6 +5441,108 @@ research as other real gaps, unrelated to ProgressBar/Slider scope);
 settable "preferred size" (Round 3's own deferral); the Win32 adapter
 (unstarted, impractical to build/verify in this environment).
 
+## `eb-gui` Widget Round 6 - ListBox, TextView
+
+User chose "ListBox/TextView/ScrollBar" as the next widget family
+after confirming Round 5 closed out the original widget/layout/
+constraints scope. Research (3 parallel Explore agents) found a very
+different effort profile than expected: `TextView` needed **zero**
+prerequisite native work anywhere (already fully bound and generic on
+all three backends) while `ListBox` needed real new work on all
+three - including a genuine ABI trap this round's own research caught
+BEFORE it could become a second version of the Round 4 bug.
+`ScrollBar` was excluded entirely: all three backends' own research
+independently concluded the auto-scrollbar container each toolkit
+already has (`GtkScrolledWindow`/`QScrollArea`/`BScrollView`) covers
+the real common case, making a standalone scrollbar binding low-value.
+
+**A real ABI trap caught by research, before implementation, not by a
+bug report**: real GTK4's `"row-selected"` signal has the shape
+`(GtkListBox*, GtkListBoxRow*, gpointer)` - three real arguments, not
+two. The existing Round 4 generic trampoline
+(`eb_gui_gtk4_connect_userdata_signal`, fixed at exactly two
+parameters) would have silently misdelivered the real `GtkListBoxRow*`
+in place of `userData` if reused here - the exact same failure class
+the Round 4 investigation found and fixed for
+`GuiButtonConnectClicked`. `eb-gui-gtk4` v0.9.0 instead ships a NEW,
+dedicated 3-parameter native trampoline (`shim_listboxselection.cpp`,
+mirroring `shim_actiontrigger.cpp`'s own technique for `GSimpleAction`'s
+real 3-arg `"activate"` signal) that discards the leading
+`GtkListBox*`/`GtkListBoxRow*` arguments before forwarding only
+`userData` - verified correct via a standalone spike (a known marker
+address, a programmatic row selection, asserting the received pointer
+matched the marker - not the row, not the list box) BEFORE being wired
+into the permanent adapter code, matching the exact rigor that caught
+the original Round 4 bug. `examples/verify` carries the same
+regression check, triggered via a genuine `GuiListBoxSetSelectedIndex`
+call rather than a faked signal emission.
+
+Real `eb-qt6`'s `QListWidget`/`QTextEdit` were already rich and fully
+bound, but a real, confirmed gap surfaced: `QListWidget` has no
+by-index item-text getter at all (only `currentText()`, for whichever
+row is current). `eb-gui-qt6` v0.9.0 tracks each list box's own item
+texts itself in a small parallel-array table keyed by handle - the
+same technique already used for `eb-gui-haiku`'s own `GuiComboBox`
+(where `HMenuItem` has an analogous gap). `GuiListBoxClear` compacts
+the table so a later `AddItem` after `Clear` can't read back stale
+text - verified directly in `examples/verify`. No new native work was
+needed on `eb-qt6` itself - its own per-call lambda-based shims were
+never subject to the Round 4 misdelivery bug class in the first place.
+
+`eb-haiku` needed genuinely new native work from scratch (v0.17.0):
+`HListView`/`HStringItem`, wrapping real `BListView`/`BStringItem`.
+**A real, confirmed-not-assumed Haiku finding**: real `BListView` has
+NO `BInvoker`/target+message mechanism for per-selection-change
+notification at all - unlike every other `BControl`-based widget bound
+so far, which all use the application-attached `HHandler` pattern.
+`BListView` only exposes `SetInvocationMessage`, firing on
+double-click/Enter, not every selection change - confirmed against a
+real, independently hardware-verified sibling FreeBASIC Haiku binding
+project's own header files, since no local Haiku SDK headers exist on
+the Linux development machine this research happened on. The only way
+to observe every change is the protected virtual `SelectionChanged()`
+hook, so `eb-haiku`'s own `listview.bas` adds a
+`ShimListView : public BListView` subclass overriding it - the same
+"no other way to reach a virtual from eBasic" reasoning already used
+for `HWindow`/`HView`'s own callbacks. `GuiListBoxConnectSelectionChanged`
+on `eb-gui-haiku` is therefore a DIRECT pass-through to
+`HListViewSetSelectionChangedCallback`, not the usual
+`HApplicationAddHandler`+`SetTarget` pattern - and fires SYNCHRONOUSLY
+(confirmed via `examples/verify.bas`, no `Sleep` needed), unlike the
+menu/toolbar action handlers' own real `BMessenger`/`BLooper`
+round-trip. Real `BListView` also has no by-index item-text getter -
+`eb-gui-haiku` tracks item texts itself, same technique as
+`eb-gui-qt6` above. Real `BStringItem::Text()` IS a direct label
+getter (unlike `BMenuItem`, which needed `GuiComboBox`'s own internal
+tracking for the item HANDLE-to-text mapping too) - confirmed via the
+same reference FreeBASIC binding.
+
+`GuiTextView` wraps each backend's already-generic
+`TextView`/`TextEdit`/`HTextView` directly - no new native work needed
+on any of the three. It deliberately has no `ConnectTextChanged` this
+round: real Haiku's `BTextView` isn't a `BControl` and has no existing
+target/message mechanism for live text-change notification (unlike
+`BTextControl`, which already got this in Round 1) - a real, scoped
+prerequisite (a new `ShimTextView` virtual-forwarding subclass,
+mirroring `ShimListView`'s own technique) for a future round, not
+silently dropped.
+
+Verified per-adapter: `eb-gui-gtk4`/`eb-gui-qt6` via extended
+`examples/verify` (headless, including the two respective real-bug/
+real-gap regression checks above); `eb-gui-haiku` via the same over
+SSH on real Haiku hardware, plus a live screenshot confirming a 3-item
+list box (3rd item correctly highlighted as selected) and a text view
+both render correctly. Published `eb-gtk4` v0.15.0, `eb-haiku` v0.17.0,
+`eb-gui` v0.9.0, `eb-gui-gtk4`/`eb-gui-qt6` v0.9.0, `eb-gui-haiku`
+v0.7.0, `ebpm-index` updated, live resolution reconfirmed
+(`ebpm search gui`).
+
+Explicitly still deferred: `GuiTextViewConnectTextChanged` (needs a new
+`ShimTextView` on `eb-haiku`, see above); standalone `GuiScrollBar`
+(unanimously low-value per this round's own research); settable
+"preferred size" (Round 3's own deferral); the Win32 adapter
+(unstarted, impractical to build/verify in this environment).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
