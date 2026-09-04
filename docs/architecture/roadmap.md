@@ -4779,6 +4779,66 @@ work first - window move/resize/title aren't bound there at all despite
 yet at all) adapters, plus menu/toolbar/statusbar/timer/widget-layout,
 are explicit, separate follow-on phases - not started.
 
+**Correction, same day**: the "eBasic's `TYPE` has no virtual methods"
+claim above was wrong - a case-sensitive grep (`VIRTUAL\|OVERRIDE\|
+virtual\|polymorph`) missed the real title-case `Virtual`/`Override`
+keywords the language actually uses (`docs/reference/type-oop.md`'s own
+`EXTENDS` section documents real vtable-based dispatch). The design
+conclusion is unaffected - a `TYPE` using a virtual method can't cross
+an `Extern`/`ebc --lib` package boundary at all (`Sema` rejects it, a
+vtable breaks the plain-data/standard-layout requirement), and
+`eb-gui`/`eb-gui-gtk4`/`eb-gui-qt6` are three separately-compiled `--lib`
+archives - but the *reason* stated for it was fixed everywhere it had
+been published (this file, `eb-gui`'s own README/source comment, and
+session memory).
+
+## `eb-gui` Phase 2 (partial) - StatusBar and Timer
+
+The next slice of the universal API, scoped down from the full
+Menu/Toolbar/StatusBar/Timer set originally planned: `StatusBar` and
+`Timer` only this round (symmetric, well-understood across both
+toolkits), leaving `Menu`/`Toolbar` for later - GTK4 removed its own
+classic `GtkMenuBar`/`GtkToolbar` widgets entirely (real upstream GTK4
+has no non-deprecated replacement widget for either role at all as of
+this writing), so that half needs a real design pass over
+`GMenuModel`/`GAction`, not just adapter glue.
+
+**Prerequisite work landed in `eb-gtk4` first** (v0.10.0): `GtkStatusbar`
+(deprecated upstream since GTK 4.10 but the only concrete statusbar
+widget GTK4 offers at all) and `GtkTimer` - this package's first-ever
+native code (`native/shim_timer.h`/`.cpp`). Real GLib has no
+persistent, configurable timer object, only a fire-and-forget
+`g_timeout_add` primitive whose own callback decides repeat-vs-stop
+*reactively* per firing - bridging that to a `Start`/`Stop`/
+`SetSingleShot` object model (matching `eb-qt6`'s own richer `QTimer`
+shape) needed a real trampoline, the same class of reason
+`eb-gui-gtk4` needed one for its own close-callback (eBasic has no way
+to call through an arbitrary stored function pointer). `eb-qt6` itself
+needed no changes - its own `StatusBar`/`QTimer` already existed and
+mapped directly onto the new contract functions.
+
+**A second real, confirmed-not-assumed Qt semantic found while
+extending `eb-gui-qt6`'s own tests**: real `QCoreApplication::quit()`
+implicitly tries to close every *visible* top-level window first, so a
+permanently-vetoing `GuiWindowSetCloseCallback` on a *shown* window
+silently blocks `GuiApplicationQuit` too, not just a real close -
+caught when the adapter's own `examples/verify` started hanging after
+gaining a real `GuiTimer`-driven quit test that ran alongside an
+already-present, permanently-vetoing, *shown* test window. An invisible
+window's veto has no such effect. GTK4 has no equivalent negotiation -
+`GuiApplicationQuit` there always stops unconditionally. Documented in
+`eb-qt6`'s own `MainWindowSetCloseCallback` doc comment, and in both
+`eb-gui`'s and both adapters' own READMEs.
+
+Verified: both adapters' `examples/verify` extended and passing,
+including - closing gaps those files used to flag - a real
+`GuiTimer`-driven `GuiApplicationQuit` on each backend (previously
+untestable purely through the contract); `eb-gtk4`'s own new
+`examples/statusbar_timer` screenshot-confirms `StatusBar` rendering
+live. `ebpm-index` updated for `eb-gtk4` (`0.10.0`) and all three
+`eb-gui*` packages (`0.2.0`), live resolution reconfirmed
+(`ebpm add gui-gtk4` against the real index).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
