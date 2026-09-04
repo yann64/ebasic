@@ -1,3 +1,12 @@
+ebasic (1.1.0) unstable; urgency=medium
+
+  * M9: FreeBASIC-parity preprocessor directives (#elseif, #if
+    expressions, #undef, function-like/variadic #define, #macro/
+    #endmacro, stringize/concatenate, #print/#error/#assert,
+    __LINE__/__FILE__/__DATE__/__TIME__).
+
+ -- eBasic contributors <noreply@example.com>  Fri, 04 Sep 2026 09:59:34 +0200
+
 ebasic (1.0.0) unstable; urgency=medium
 
   * First tagged release (v1.0.0): all planned milestones complete, plus

@@ -1,5 +1,5 @@
 Name:           ebasic
-Version:        1.0.0
+Version:        1.1.0
 Release:        1%{?dist}
 Summary:        BASIC-to-C++ transpiler with package manager and doc generator
 Group:          Development/Tools
@@ -7,9 +7,6 @@ Packager:       eBasic contributors <noreply@example.com>
 
 License:        MIT
 URL:            https://github.com/yann64/ebasic
-# No tagged release exists yet - Source0 is a placeholder, matching the
-# same honest gap already documented in packaging/haiku/ebasic-0.1.0.recipe
-# and debian/changelog. Update once a real vX.Y.Z tag exists.
 Source0:        https://github.com/yann64/ebasic/archive/refs/tags/v%{version}/ebasic-%{version}.tar.gz
 
 BuildRequires:  cmake >= 3.20
@@ -63,6 +60,12 @@ ctest --test-dir build --output-on-failure
 %{_mandir}/man1/docgen.1*
 
 %changelog
+* Fri Sep 04 2026 eBasic contributors <noreply@example.com> - 1.1.0-1
+- v1.1.0: M9 - FreeBASIC-parity preprocessor directives (#elseif/#if
+  expressions/#undef/function-like and variadic #define/#macro-
+  #endmacro/stringize+concatenate/#print/#error/#assert/__LINE__/
+  __FILE__/__DATE__/__TIME__).
+
 * Tue Jul 28 2026 eBasic contributors <noreply@example.com> - 1.0.0-1
 - First tagged release (v1.0.0): all planned milestones complete, plus
   OS-conditional dependencies and Linux packaging.
