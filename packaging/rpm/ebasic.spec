@@ -1,6 +1,6 @@
 Name:           ebasic
 Version:        1.1.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        BASIC-to-C++ transpiler with package manager and doc generator
 Group:          Development/Tools
 Packager:       eBasic contributors <noreply@example.com>
@@ -54,12 +54,20 @@ ctest --test-dir build --output-on-failure
 %{_bindir}/ebc
 %{_bindir}/ebpm
 %{_bindir}/docgen
+%{_bindir}/ebasic_lsp
 %{_datadir}/ebasic/
 %{_mandir}/man1/ebc.1*
 %{_mandir}/man1/ebpm.1*
 %{_mandir}/man1/docgen.1*
 
 %changelog
+* Fri Sep 04 2026 eBasic contributors <noreply@example.com> - 1.1.0-2
+- Packaging fix: %files was missing %{_bindir}/ebasic_lsp (the LSP
+  binary, shipped since M7 but never added here) - rpmbuild's stricter
+  "installed but unpackaged file" check caught it building this very
+  release; the .deb never needed a %files-equivalent list, so this went
+  unnoticed there. No source change - Release bump only.
+
 * Fri Sep 04 2026 eBasic contributors <noreply@example.com> - 1.1.0-1
 - v1.1.0: M9 - FreeBASIC-parity preprocessor directives (#elseif/#if
   expressions/#undef/function-like and variadic #define/#macro-
