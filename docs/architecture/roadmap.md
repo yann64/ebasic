@@ -5119,6 +5119,99 @@ hardware. Published `eb-gui`/`eb-gui-gtk4`/`eb-gui-qt6` v0.4.0 and
 `eb-gui-haiku` v0.2.0, `ebpm-index` updated, live resolution
 reconfirmed.
 
+## `eb-gui` Widget/Layout Round 2 - per-child constraints (expand/align/weight)
+
+Round 1 deliberately shipped `GuiBox`/`GuiGrid` with no constraints,
+since a capability-matrix research pass found real per-child expand/
+alignment/weight support on Haiku only. Round 2 re-confirmed that gap
+via 3 parallel Explore agents (one per backend) and closed it with real
+prerequisite native work in the two backends that lacked it, rather
+than assuming parity or shipping a contract that would silently do
+nothing on two of three adapters.
+
+**Confirmed capabilities, not assumed**: `eb-gtk4` had ZERO binding for
+`gtk_widget_set_hexpand`/`set_vexpand`/`set_halign`/`set_valign` (grep,
+zero hits) - added as plain raw `Extern "C" Lib "gtk-4"` declares, no
+native shim needed (GTK4 puts expand/align on the CHILD widget itself,
+matching the existing `WidgetSetEnabled` pattern exactly), plus
+`GTK_ALIGN_*` constants confirmed against this system's own
+`gtkenums.h` (`FILL=0,START=1,END=2,CENTER=3`) rather than assumed from
+memory. `eb-qt6` had no stretch factor, alignment-in-layout, or
+per-column/row stretch binding - added via two new native shim
+functions per layout type (`eb_qt6_boxlayout_add_widget_stretch_align`/
+`set_stretch_factor`, `eb_qt6_gridlayout_add_widget_align`/
+`set_row_stretch`/`set_column_stretch`) calling straight through to
+real, already-existing Qt overloads - reusing the `Qt::AlignmentFlag`
+constants already exposed for `QLabel::setAlignment`. `eb-haiku` needed
+zero prerequisite native work for expand/align (`HGroupLayoutSetItemWeight`,
+`HGridLayoutSetColumnWeight`/`SetRowWeight`, `HViewSetExplicitAlignment`
+already existed) - but DID need one small addition mid-round (below).
+
+**Contract additions** (`eb-gui` v0.5.0, purely additive - existing
+`GuiBoxAddChild`/`GuiGridAttach` unchanged): `GUI_ALIGN_FILL`/`START`/
+`CENTER`/`END` constants (toolkit-neutral, each adapter maps them to
+its own real enum internally); `GuiBoxAddChildEx(box, child, expand AS
+SINGLE, halign, valign)` and `GuiGridAttachEx(grid, child, column, row,
+columnSpan, rowSpan, halign, valign)`; `GuiGridSetColumnWeight`/
+`SetRowWeight(grid, index, weight AS SINGLE)`. `expand`'s magnitude is
+a real proportional ratio on `eb-gui-qt6` (Qt stretch factor, cast via
+`CInt`) and `eb-gui-haiku` (real `SINGLE` weight) but only the
+zero/nonzero distinction survives on `eb-gui-gtk4` (GTK4 has no
+fractional-ratio expand, boolean only) - documented, accepted loss,
+same precedent as Round 1's Action model. `GuiGridSetColumnWeight`/
+`SetRowWeight` are a documented, accepted NO-OP on `eb-gui-gtk4` -
+`GtkGrid` has no per-column/row weight concept in real GTK4 at all,
+not a binding gap, a real absence upstream.
+
+**Real, found-the-hard-way bug this round, caught by a live screenshot
+rather than assumed correct from the headless pass**: `eb-gui-haiku`'s
+alignment mapping initially approximated the contract's `GUI_ALIGN_FILL`
+as Haiku's own `H_ALIGN_CENTER`, reasoning that Haiku "has no distinct
+fill concept." A live screenshot of the extended `widgets_form.bas`
+example (a button given `expand=1.0`/`GUI_ALIGN_FILL`) showed it
+rendering CENTERED at its natural size instead of stretched - worse
+than doing nothing, because calling `HViewSetExplicitAlignment` at all
+REPLACES a view's real default alignment, which is already fill/
+stretch on both axes. Real Haiku DOES have an exact sentinel for this
+(`InterfaceDefs.h`'s `B_ALIGN_USE_FULL_WIDTH`/`B_ALIGN_USE_FULL_HEIGHT`,
+both `-2`, confirmed via this system's own headers, not previously
+bound) - fixed by adding two plain `Const`s to `eb-haiku` (`v0.14.4`,
+`H_ALIGN_USE_FULL_WIDTH`/`HEIGHT`) rather than working around the gap
+in the adapter. Re-verified via the same screenshot: the button now
+correctly spans the full box width. **Lesson, consistent with this
+project's own established discipline**: a plausible-sounding
+approximation for a missing enum value can be actively wrong, not just
+imprecise - worth a real visual check before accepting it, exactly why
+this round budgeted a live screenshot rather than trusting the headless
+pass alone.
+
+**`eb-gui-haiku`'s own index-tracking problem**: `HGroupLayoutSetItemWeight`
+is index-based (0-based insertion order into the group layout), not
+view-identity-based like `eb-qt6`'s own stretch-factor-on-the-widget-
+itself shape - `GuiBoxAddChild`/`AddChildEx` both now call a new
+`EbGuiHaikuBoxNextChildIndex` (a small per-box running-count table,
+same shape as the existing association tables) so mixing plain and
+`Ex` calls on the same box still assigns each later `Ex` child the
+correct real index.
+
+Verified per-adapter, same discipline as every prior round:
+`eb-gui-gtk4`/`eb-gui-qt6` via extended `examples/verify` (headless -
+constraints applied without crashing, including a `GuiGrid` nested
+inside a constrained `GuiBox`); `eb-gui-haiku` via the same headless
+checks over SSH plus a live, re-screenshot-verified
+`examples/widgets_form.bas` on real Haiku hardware (the screenshot that
+caught the fill-vs-center bug above, then confirmed the fix). Published
+`eb-haiku` v0.14.4, `eb-gtk4` v0.12.0, `eb-qt6` v0.27.0, `eb-gui`
+v0.5.0, `eb-gui-gtk4` v0.5.0, `eb-gui-qt6` v0.5.0, `eb-gui-haiku` v0.3.0,
+`ebpm-index` updated, live resolution reconfirmed (`ebpm search gui`).
+
+Explicitly still deferred: explicit min/max/preferred per-child size
+(Haiku has this fully today; GTK4/Qt6 have partial, unconfirmed
+equivalents - `gtk_widget_set_size_request`/`QWidget::setMinimumSize`/
+`setMaximumSize` - not yet bound into this contract); CheckBox/
+RadioButton/ComboBox (a three-way widget gap, unrelated to
+constraints); the Win32 adapter.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
