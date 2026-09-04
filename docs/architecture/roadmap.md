@@ -4600,6 +4600,19 @@ to a non-variadic macro). Every existing test (64/64, including the four
 symbols) stayed green throughout - confirming the additive, dispatch-
 only nature of the change. Every `examples/*.bas` file recompiled clean.
 
+## M9 Implementation Notes (FreeBASIC-parity preprocessor directives, done)
+
+Verified for real on the Haiku box (`scripts/haiku_verify.sh`, which
+transfers exactly the pushed commit via `git archive` rather than the
+working tree) after the plan above was implemented and pushed - not just
+on `linux-gcc` locally. Its SSH `Host haiku` alias had gone stale (the
+box's DHCP lease moved from `192.168.1.30` to `.37`) and was updated
+first. 64/64 tests passed, hrev60030, ~58s total - the five new
+`preprocessor_*` cases included, with no platform-specific surprises:
+`std::localtime`/`std::snprintf` (for `__DATE__`/`__TIME__`) and
+`std::filesystem::canonical` (already relied on by `#include`) behave
+the same there as on Linux.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
