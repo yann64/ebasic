@@ -6370,6 +6370,27 @@ function-pointer parameters, DIMs, and TYPE fields" section of
 examples for each), replacing the two "not yet provided" bullets that
 section carried since the original typed-function-pointer work.
 
+## v1.6.0: Seventh Tagged Release
+
+With calling through a stored function pointer and Stdcall on
+eBasic-defined callbacks both done and CI-green on all five platforms,
+the user asked to bump/tag `1.6.0` and publish - the same sequence as
+`v1.2.0`-`v1.5.0` above.
+
+- `project(ebasic VERSION 1.6.0 ...)`, `packaging/rpm/ebasic.spec`
+  (`Version:` + a new `%changelog` entry), `debian/changelog` (a new
+  `ebasic (1.6.0)` entry stacked above `1.5.0`), the Flatpak metainfo's
+  `<release>` list, and `README.md`'s Status line - all following the
+  same pattern as every prior bump.
+- `packaging/haiku/ebasic-1.5.0.recipe` fast-followed to
+  `ebasic-1.6.0.recipe` immediately after the tag was pushed, same
+  ordering constraint as every prior version (`CHECKSUM_SHA256` needs the
+  real tag archive to exist first) - real sha256 of the actually-
+  downloaded `v1.6.0` tarball via `curl`+`sha256sum`.
+- Local `windows-mingw` rebuild confirmed live: `ebc --version` reports
+  `ebc 1.6.0 (9df9a7f)` - no Smart App Control lock this round, unlike
+  several prior bumps.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

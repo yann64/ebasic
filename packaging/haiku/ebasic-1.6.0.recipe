@@ -9,17 +9,17 @@ COPYRIGHT="2026 yann64"
 LICENSE="MIT"
 REVISION="1"
 
-# v1.5.0 (typed function-pointer EXTERN/DECLARE parameters + a real MSVC
-# precompiled-header rule) - SOURCE_URI/CHECKSUM_SHA256 below point at the
-# real, published tag, verified by actually downloading it
-# (https://github.com/yann64/ebasic/archive/refs/tags/v1.5.0.tar.gz) and
-# computing its real sha256, same as the v1.4.0/v1.3.0/v1.2.0/v1.1.0/
-# v1.0.0 recipes before it. Still not yet submitted upstream to
+# v1.6.0 (calling through a stored function pointer + Stdcall on
+# eBasic-defined callbacks) - SOURCE_URI/CHECKSUM_SHA256 below point at
+# the real, published tag, verified by actually downloading it
+# (https://github.com/yann64/ebasic/archive/refs/tags/v1.6.0.tar.gz) and
+# computing its real sha256, same as the v1.5.0/v1.4.0/v1.3.0/v1.2.0/
+# v1.1.0/v1.0.0 recipes before it. Still not yet submitted upstream to
 # haikuports - haikuporter's own recipe-format conventions were dry-run-
 # verified against real Haiku hardware (M8e), cross-checked against
 # app-arch/brotli's real recipe.
 SOURCE_URI="https://github.com/yann64/ebasic/archive/refs/tags/v$portVersion.tar.gz"
-CHECKSUM_SHA256="a6116d02ecb01a19867b40d96c4224e4ca6b91639e47a26c84a9023fb0d28015"
+CHECKSUM_SHA256="058e0fe982676285353e3acfa27ce9191de6aaee1c71eefd74bbf23b1e308954"
 SOURCE_FILENAME="ebasic-$portVersion.tar.gz"
 
 ARCHITECTURES="all !x86_gcc2"
