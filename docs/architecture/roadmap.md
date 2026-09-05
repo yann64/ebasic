@@ -5626,6 +5626,63 @@ is not the same bar as "the layout actually uses it" - only a
 decisive, numeric, ground-truth behavioral probe (not a screenshot,
 not a header, not a getter round-trip) settles a question like this.
 
+## `eb-gui` Widget Round 8 - `GuiTextViewConnectTextChanged`
+
+User asked directly to close the gap Round 6 deliberately left open
+(a real, scoped prerequisite flagged at the time, not speculative
+scope creep).
+
+**A real, confirmed-not-assumed Haiku finding, checked via direct
+header inspection** (real Haiku SDK headers ARE reachable over SSH,
+unlike the Linux dev machine): unlike `BListView`'s own single
+`SelectionChanged()` hook (Round 6), real `BTextView` has NO single
+"TextChanged" virtual at all - only two SEPARATE protected virtuals,
+`InsertText`/`DeleteText`, each firing on every real text mutation. A
+standalone hardware probe confirmed `SetText()` itself internally
+calls `DeleteText()` then `InsertText()`, so `eb-haiku`'s own new
+`ShimTextView : public BTextView` (v0.18.0) overrides both and fires
+one plain callback from each, catching interactive AND programmatic
+changes alike with a single notification - existing
+`eb_haiku_textview_*` functions are unaffected (single inheritance,
+safe `static_cast` to `BTextView*`, same reasoning as `ShimListView`'s
+identical situation for `BListView`). `eb-gui-qt6` needed zero
+prerequisite work (real `eb-qt6` already had
+`TextEditConnectTextChanged`, matching the contract's shape exactly);
+`eb-gui-gtk4` reuses the Round 4 generic trampoline on the text view's
+own `GtkTextBuffer` (not the view itself) - real `GtkTextBuffer`'s
+`"changed"` signal has the identical 2-arg shape, verified via a
+standalone spike before wiring in (this ecosystem's now-standard
+practice, sharpened by Round 7's own lesson that a plausible-sounding
+shape still needs a decisive check).
+
+**A second real bug found and fixed while building this round's own
+verification, not a bug in any `eb-gui-*` adapter**: calling
+`GuiTextViewSetText` on a text view already attached to an
+already-shown window hung indefinitely - a real, previously-latent
+`eb-haiku` bug (`eb_haiku_textview_set_text` had no cross-thread lock,
+the same hazard class already fixed for `HButtonSetLabel`/`SetEnabled`
+and other widgets), never triggered before because every prior
+`HTextView` test only ever called `SetText` on a still-detached view.
+Fixed in `eb-haiku` v0.18.1 with the same established `ViewAutolock`
+guard, re-verified via the full 46-test `scripts/haiku_verify.sh`
+suite plus the exact `eb-gui-haiku` scenario that caught it.
+
+Verified per-adapter: `eb-gui-gtk4`/`eb-gui-qt6` via extended
+`examples/verify` (headless - a genuine `GuiTextViewSetText` call
+firing the connected handler, `userData` delivery checked against a
+known marker); `eb-gui-haiku` via the same over SSH on real Haiku
+hardware, backed by `eb-haiku`'s own new `tests/textview_basics.bas`
+check (confirming the callback fires exactly twice - `DeleteText` +
+`InsertText` - for a `SetText` replacing existing content). Published
+`eb-haiku` v0.18.0 then v0.18.1 (bug fix), `eb-gui` v0.11.0,
+`eb-gui-gtk4`/`eb-gui-qt6` v0.11.0, `eb-gui-haiku` v0.9.0, `ebpm-index`
+updated, live resolution reconfirmed (`ebpm search gui`).
+
+This closes every widget/layout gap this track has ever deliberately
+deferred. The only remaining unstarted item is the Win32 adapter
+(`eb-win32` doesn't exist yet - impractical to build/verify in this
+environment, no Windows machine available).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
