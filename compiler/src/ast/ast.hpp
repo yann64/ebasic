@@ -47,6 +47,15 @@ enum class TypeKind {
     ZStringT,
     UserDefined, // a TYPE/CLASS instance; see Type::typeName
     Pointer,     // a PTR type; see Type::pointee (not used until M3c)
+    /// A typed function pointer (`SUB (...)`/`FUNCTION (...) AS T`, with an
+    /// optional Cdecl/Stdcall convention) - see Type::funcReturnType/
+    /// funcParamTypes/funcCallConv. Distinct from a bare Pointer (never
+    /// nested inside Pointer::pointee) so it gets its own assign-
+    /// compatibility rules in Sema: identical FunctionPointer types match
+    /// structurally, and it bridges freely to/from a bare ANY PTR (a
+    /// Pointer with a null pointee) in both directions, matching how
+    /// AddressOf's existing untyped ANY PTR callers keep working unchanged.
+    FunctionPointer,
 };
 
 /// Every expression form Expr can represent - see Expr for which fields each
@@ -221,6 +230,11 @@ struct Type {
     TypeKind kind = TypeKind::Unknown;
     std::string typeName;              // set when kind == UserDefined
     std::shared_ptr<Type> pointee;     // set when kind == Pointer
+
+    // set when kind == FunctionPointer:
+    std::shared_ptr<Type> funcReturnType;              // null == SUB (no return)
+    std::shared_ptr<std::vector<Type>> funcParamTypes;  // ByVal-only, in order
+    std::string funcCallConv;                           // "" (cdecl) or "stdcall"
 
     Type() = default;
     Type(TypeKind k) : kind(k) {}

@@ -41,6 +41,44 @@ std::string Codegen::cppType(const Type& type) {
         case TypeKind::Pointer:
             /// ANY PTR (null pointee) is FB's void*-equivalent.
             return type.pointee ? (cppType(*type.pointee) + "*") : "void*";
+        case TypeKind::FunctionPointer: {
+            /// C's function-pointer declarator (`RetType (*)(Args...)`)
+            /// doesn't fit the "type token, then a name" shape every caller
+            /// of cppType relies on, so this lowers to a synthesized
+            /// `using` alias instead - a plain identifier, exactly what
+            /// every existing call site already expects. The alias line
+            /// itself is appended to funcPtrAliasesOut_ (never written
+            /// into whatever stream the caller is mid-line on - see that
+            /// field's own doc comment), deduplicated by a canonical
+            /// signature key so two identical function-pointer types share
+            /// one alias. Recursing into funcReturnType/funcParamTypes via
+            /// this same cppType call naturally emits any *their* aliases
+            /// need first, so nested function-pointer types (a function
+            /// pointer returning a function pointer) declare in the right
+            /// order with no special-casing here.
+            std::string retTok = type.funcReturnType ? cppType(*type.funcReturnType) : "void";
+            std::vector<std::string> paramToks;
+            if (type.funcParamTypes) {
+                for (const Type& pt : *type.funcParamTypes) paramToks.push_back(cppType(pt));
+            }
+            std::string key = type.funcCallConv + "|" + retTok + "|";
+            for (size_t i = 0; i < paramToks.size(); ++i) {
+                if (i) key += ",";
+                key += paramToks[i];
+            }
+            auto cached = funcPtrAliasCache_.find(key);
+            if (cached != funcPtrAliasCache_.end()) return cached->second;
+            std::string alias = "eb_fp" + std::to_string(funcPtrCounter_++);
+            std::string callConvTok = type.funcCallConv == "stdcall" ? "EBASIC_STDCALL " : "";
+            funcPtrAliasesOut_ << "using " << alias << " = " << retTok << "(" << callConvTok << "*)(";
+            for (size_t i = 0; i < paramToks.size(); ++i) {
+                if (i) funcPtrAliasesOut_ << ", ";
+                funcPtrAliasesOut_ << paramToks[i];
+            }
+            funcPtrAliasesOut_ << ");\n";
+            funcPtrAliasCache_.emplace(key, alias);
+            return alias;
+        }
         case TypeKind::Unknown: break;
     }
     throw std::runtime_error("codegen: unresolved type reached codegen");
@@ -170,7 +208,17 @@ std::string Codegen::genExpr(const Expr& expr) {
     }
     std::string result = genExprBase(expr);
     if (expr.pointerCastTo) {
-        result = "static_cast<" + cppType(*expr.pointerCastTo) + ">(" + result + ")";
+        /// Function-pointer<->object-pointer conversions are never valid
+        /// via static_cast in C++ (only reinterpret_cast) - matches the
+        /// existing precedent for @ProcName's own AddressOf cast below.
+        /// Every other pointerCastTo case (typed-PTR<->ANY-PTR,
+        /// ANY-PTR-as-ZSTRING) is a plain object-pointer conversion, where
+        /// static_cast is both valid and, being the stricter of the two,
+        /// preferable.
+        bool needsReinterpret = expr.pointerCastTo->kind == TypeKind::FunctionPointer ||
+                                 expr.type.kind == TypeKind::FunctionPointer;
+        const char* castKind = needsReinterpret ? "reinterpret_cast<" : "static_cast<";
+        result = castKind + cppType(*expr.pointerCastTo) + ">(" + result + ")";
     }
     return result;
 }
@@ -250,14 +298,21 @@ std::string Codegen::genExprBase(const Expr& expr) {
             return prefix + mangleName(expr.stringValue);
         }
         case ExprKind::AddressOf:
-            /// `@ProcName` (Expr::isProcAddress, set by Sema) - a real C
-            /// function pointer converted to `void*` (ANY PTR at the
-            /// eBasic level) via an explicit cast, since C++ has no
-            /// implicit function-pointer-to-object-pointer conversion
-            /// (unlike most other pointer conversions this language
-            /// already allows implicitly).
+            /// `@ProcName` (Expr::isProcAddress, set by Sema) - cast to
+            /// `expr.type`'s own cppType (a real typed function-pointer
+            /// alias, or - via the ANY-PTR bridge in isAssignCompatible/
+            /// annotatePointerBridge - `void*` when the surrounding
+            /// context wants the untyped ANY-PTR form, in which case
+            /// genExpr's own pointerCastTo wrap adds that second,
+            /// outer cast). Always an explicit cast, never relying on the
+            /// (actually implicit, since `&eb_name` already has exactly
+            /// this signature) conversion - matches this rendering's own
+            /// existing style, and stays correct/uniform for the ANY-PTR
+            /// bridge, which does need an explicit cast (C++ has no
+            /// implicit function-pointer-to-object-pointer conversion).
             if (expr.isProcAddress) {
-                return "reinterpret_cast<void*>(&" + mangleName(expr.lhs->stringValue) + ")";
+                return "reinterpret_cast<" + cppType(expr.type) + ">(&" +
+                       mangleName(expr.lhs->stringValue) + ")";
             }
             return "(&(" + genExpr(*expr.lhs) + "))";
         case ExprKind::Deref:
@@ -1069,6 +1124,14 @@ std::string Codegen::generate(const Module& module, bool libMode, bool sharedLib
     out << "#else\n";
     out << "#define EBASIC_STDCALL\n";
     out << "#endif\n\n";
+    /// Typed function-pointer aliases (`using eb_fpN = ...;`), one per
+    /// distinct signature cppType saw anywhere in this module - collected
+    /// as a side effect of every genProcedure/genTypeDecl/genStmt call
+    /// already made above, so funcPtrAliasesOut_ is fully populated by this
+    /// point. Spliced in before typesOut_/globalsOut_/protoOut_/procOut_ so
+    /// every one of them sees each alias already declared, regardless of
+    /// which specific stream first used it.
+    if (!funcPtrAliasesOut_.str().empty()) out << funcPtrAliasesOut_.str() << "\n";
     /// Shared-library support: only meaningful (and only emitted) when this
     /// is a real `--shared-lib`/`-dll` build - an isExported procedure's
     /// definition uses this macro instead of plain `extern "C"` (see
@@ -1118,6 +1181,20 @@ std::string Codegen::basicTypeName(const Type& type) {
         case TypeKind::UserDefined: return type.typeName;
         case TypeKind::Pointer:
             return (type.pointee ? basicTypeName(*type.pointee) : std::string("ANY")) + " PTR";
+        case TypeKind::FunctionPointer: {
+            std::string kw = type.funcReturnType ? "FUNCTION" : "SUB";
+            if (type.funcCallConv == "stdcall") kw += " Stdcall";
+            std::string params;
+            if (type.funcParamTypes) {
+                for (size_t i = 0; i < type.funcParamTypes->size(); ++i) {
+                    if (i) params += ", ";
+                    params += "BYVAL AS " + basicTypeName((*type.funcParamTypes)[i]);
+                }
+            }
+            std::string result = kw + " (" + params + ")";
+            if (type.funcReturnType) result += " AS " + basicTypeName(*type.funcReturnType);
+            return result;
+        }
         case TypeKind::Unknown: return "INTEGER"; // unreachable for a resolved signature
     }
     return "INTEGER";

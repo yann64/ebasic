@@ -132,6 +132,7 @@ private:
     static ExprPtr makeBinary(BinOp op, SourceLoc loc, ExprPtr lhs, ExprPtr rhs);
 
     Type parseTypeKeyword();
+    Type parseFunctionPointerType();
 
     std::vector<Token> tokens_;
     size_t pos_ = 0;

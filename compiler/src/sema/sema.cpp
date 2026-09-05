@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <functional>
 
 namespace ebasic {
 
@@ -29,6 +30,28 @@ bool pointeesIdentical(const Type& a, const Type& b) {
         if (!a.pointee || !b.pointee) return true;
         return pointeesIdentical(*a.pointee, *b.pointee);
     }
+    if (a.kind == TypeKind::FunctionPointer) {
+        /// Structural match: same calling convention, same SUB-vs-FUNCTION-
+        /// ness (a null funcReturnType on either side means SUB), same
+        /// return type (recursively - handles a function pointer that
+        /// itself returns a function pointer), and the exact same
+        /// parameter-type list. Unlike Pointer's own null-pointee "either
+        /// side is ANY PTR" bridge, there is no untyped function-pointer
+        /// spelling within FunctionPointer itself - that bridge is handled
+        /// one level up, in isAssignCompatible, via a bare ANY PTR
+        /// (TypeKind::Pointer with a null pointee), not by anything in
+        /// this function.
+        if ((a.funcReturnType == nullptr) != (b.funcReturnType == nullptr)) return false;
+        if (a.funcCallConv != b.funcCallConv) return false;
+        if (a.funcReturnType && !pointeesIdentical(*a.funcReturnType, *b.funcReturnType)) return false;
+        const auto& aParams = a.funcParamTypes ? *a.funcParamTypes : std::vector<Type>{};
+        const auto& bParams = b.funcParamTypes ? *b.funcParamTypes : std::vector<Type>{};
+        if (aParams.size() != bParams.size()) return false;
+        for (size_t i = 0; i < aParams.size(); ++i) {
+            if (!pointeesIdentical(aParams[i], bParams[i])) return false;
+        }
+        return true;
+    }
     return true;
 }
 
@@ -44,6 +67,21 @@ bool pointeesIdentical(const Type& a, const Type& b) {
 void annotatePointerBridge(const Type& target, Expr& value) {
     if (target.kind == TypeKind::Pointer && value.type.kind == TypeKind::Pointer &&
         !value.type.pointee) {
+        value.pointerCastTo = std::make_shared<Type>(target);
+    } else if (target.kind == TypeKind::FunctionPointer && value.type.kind == TypeKind::Pointer &&
+               !value.type.pointee) {
+        /// A bare ANY PTR value passed where a typed function pointer is
+        /// expected: C++ has no implicit void* -> FnPtr conversion, same
+        /// reasoning as the typed-object-PTR case above.
+        value.pointerCastTo = std::make_shared<Type>(target);
+    } else if (target.kind == TypeKind::Pointer && !target.pointee &&
+               value.type.kind == TypeKind::FunctionPointer) {
+        /// The reverse direction, and the one place this bridge is
+        /// asymmetric with the ordinary object-pointer case: unlike
+        /// `T* -> void*` (implicit in C++), `FnPtr -> void*` is NOT
+        /// implicit, so a FunctionPointer-typed value (typically an
+        /// `@ProcName` result) passed where a bare ANY PTR is expected
+        /// also needs an explicit reinterpret_cast.
         value.pointerCastTo = std::make_shared<Type>(target);
     } else if (target.kind == TypeKind::ZStringT && value.type.kind == TypeKind::Pointer &&
                !value.type.pointee) {
@@ -521,7 +559,8 @@ void Sema::collectOperators(std::vector<StmtPtr>& stmts) {
 }
 
 void Sema::collectExternSignatureChecks(std::vector<StmtPtr>& stmts) {
-    auto checkType = [&](const Type& type, SourceLoc loc, const std::string& what) {
+    std::function<void(const Type&, SourceLoc, const std::string&)> checkType =
+        [&](const Type& type, SourceLoc loc, const std::string& what) {
         /// `STRING` (a real C++ class, `ebasic::rt::BString` - not a
         /// C-layout value) is rejected in a real, user-written EXTERN/
         /// DECLARE signature: it can't safely cross into an arbitrary,
@@ -537,6 +576,20 @@ void Sema::collectExternSignatureChecks(std::vector<StmtPtr>& stmts) {
             diags_.fileName(loc.fileId) != kBuiltinPreludeFileName) {
             diags_.error(loc, what + " cannot be STRING in an EXTERN/DECLARE signature - use "
                                "ZSTRING (or ZSTRING PTR) for a C-compatible string");
+            return;
+        }
+        if (type.kind == TypeKind::FunctionPointer) {
+            /// Recurse into the callback's own signature - otherwise a
+            /// `FUNCTION (BYVAL AS STRING) AS INTEGER` parameter would slip
+            /// straight past the STRING-at-the-boundary gate above, since
+            /// FunctionPointer itself isn't UserDefined and would
+            /// otherwise hit the early return just below untouched.
+            if (type.funcReturnType) checkType(*type.funcReturnType, loc, what + " (callback return type)");
+            if (type.funcParamTypes) {
+                for (const Type& pt : *type.funcParamTypes) {
+                    checkType(pt, loc, what + " (callback parameter)");
+                }
+            }
             return;
         }
         if (type.kind != TypeKind::UserDefined) return;
@@ -734,6 +787,24 @@ bool Sema::isAssignCompatible(const Type& targetType, const Type& valueType) con
     /// non-pointer-constant case, the same "defer to the backend" pattern
     /// used elsewhere in this codebase. Assigning a pointer to a non-pointer
     /// target is never allowed.
+    /// FunctionPointer is a distinct TypeKind from Pointer (never nested
+    /// inside Pointer::pointee), so this must be checked before the
+    /// targetIsPtr/valueIsPtr block below - otherwise a FunctionPointer on
+    /// either side would simply fall through every one of that block's
+    /// `==TypeKind::Pointer` checks and be silently treated as "not a
+    /// pointer at all". Two identical FunctionPointer types match
+    /// structurally; either side may also be a bare ANY PTR (Pointer with a
+    /// null pointee) - this is the bridge that keeps every existing
+    /// untyped `@ProcName`-to-ANY-PTR caller compiling unchanged, in both
+    /// directions.
+    bool targetIsFn = targetType.kind == TypeKind::FunctionPointer;
+    bool valueIsFn = valueType.kind == TypeKind::FunctionPointer;
+    if (targetIsFn || valueIsFn) {
+        if (targetIsFn && valueIsFn) return pointeesIdentical(targetType, valueType);
+        if (targetIsFn) return valueType.kind == TypeKind::Pointer && !valueType.pointee;
+        return targetType.kind == TypeKind::Pointer && !targetType.pointee;
+    }
+
     bool targetIsPtr = targetType.kind == TypeKind::Pointer;
     bool valueIsPtr = valueType.kind == TypeKind::Pointer;
 
@@ -1621,11 +1692,16 @@ Type Sema::checkExpr(Expr& expr) {
             /// `g_signal_connect`). Checked before the ordinary lvalue path
             /// since a bare procedure name is never itself a valid Ident
             /// expression (checkExpr(Ident) only knows about
-            /// variables/fields, not procedures). Deliberately narrow
-            /// scope: produces ANY PTR (matching how such APIs take the
-            /// callback as an untyped pointer) rather than a distinct
-            /// function-pointer type - see Expr::isProcAddress for the
-            /// Codegen side.
+            /// variables/fields, not procedures). Produces a real
+            /// FunctionPointer type built from the addressed procedure's
+            /// own signature - isAssignCompatible below then lets it bridge
+            /// freely to/from a bare ANY PTR (so every existing untyped
+            /// caller keeps working unchanged) while ALSO letting it be
+            /// checked structurally against a real typed function-pointer
+            /// parameter, which a bare ANY PTR never could be. See
+            /// Expr::isProcAddress for the Codegen side (unchanged -
+            /// Codegen always emits the same `&mangleName(name)` cast
+            /// regardless of expr.type).
             if (expr.lhs->kind == ExprKind::Ident) {
                 std::string key = canonicalName(expr.lhs->stringValue);
                 if (const ProcedureInfo* proc = findProcedure(key)) {
@@ -1646,8 +1722,14 @@ Type Sema::checkExpr(Expr& expr) {
                     }
                     expr.isProcAddress = true;
                     Type result;
-                    result.kind = TypeKind::Pointer;
-                    result.pointee = nullptr; // ANY PTR
+                    result.kind = TypeKind::FunctionPointer;
+                    if (proc->isFunction) result.funcReturnType = std::make_shared<Type>(proc->returnType);
+                    result.funcParamTypes = std::make_shared<std::vector<Type>>();
+                    for (const Param& p : proc->params) result.funcParamTypes->push_back(p.type);
+                    // A plain eBasic SUB/FUNCTION has no Cdecl/Stdcall of its
+                    // own yet (funcCallConv left "" == cdecl) - see M8f's own
+                    // note that eBasic-side Stdcall bodies are a separate,
+                    // unimplemented need.
                     expr.type = result;
                     return expr.type;
                 }

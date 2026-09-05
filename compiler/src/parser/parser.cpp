@@ -148,6 +148,8 @@ Type Parser::parseTypeKeyword() {
         base.pointee = nullptr;
         /// Fall through to the trailing-PTR loop below (ANY PTR PTR is legal
         /// per FB docs: an Any Ptr Ptr may be dereferenced to yield an Any Ptr).
+    } else if (check(TokenKind::KwSub) || check(TokenKind::KwFunction)) {
+        base = parseFunctionPointerType();
     } else if (check(TokenKind::Identifier)) {
         /// A user-defined TYPE name. Whether this identifier actually names a
         /// declared TYPE is a Sema question, not a parser one - same
@@ -171,6 +173,56 @@ Type Parser::parseTypeKeyword() {
         base = wrapped;
     }
     return base;
+}
+
+/// A typed function-pointer type spec: `SUB|FUNCTION [Cdecl|Stdcall]
+/// ([ByVal] AS Type, ...) [AS ReturnType]` - real FreeBASIC's own
+/// anonymous-parameter convention for this exact construct (each entry is
+/// an ordinary parameter with its name omitted: `[ByVal|ByRef] AS Type`
+/// minus the name - not a bare type list), reused here rather than
+/// invented fresh; same Cdecl/Stdcall/ByVal vocabulary parseExternDecl/
+/// parseParamList already use. BYREF is rejected here (unlike the ordinary
+/// parameter list): a real function pointer's parameters are exactly what
+/// the callee's own C ABI says they are, not something eBasic can
+/// renegotiate at the call site. Called from parseTypeKeyword, so this
+/// itself never consumes/expects a trailing PTR - the type IS already a
+/// pointer.
+Type Parser::parseFunctionPointerType() {
+    bool isFunction = match(TokenKind::KwFunction);
+    if (!isFunction) expect(TokenKind::KwSub, "expected SUB or FUNCTION");
+
+    Type t;
+    t.kind = TypeKind::FunctionPointer;
+    t.funcParamTypes = std::make_shared<std::vector<Type>>();
+
+    if (match(TokenKind::KwCdecl)) {
+        // no-op, matches parseExternDecl's own Cdecl handling: "" means cdecl.
+    } else if (match(TokenKind::KwStdcall)) {
+        t.funcCallConv = "stdcall";
+    }
+
+    expect(TokenKind::LParen, "expected '(' after SUB/FUNCTION in a function-pointer type");
+    if (!check(TokenKind::RParen)) {
+        for (;;) {
+            if (check(TokenKind::KwByRef)) {
+                diags_.error(peek().loc,
+                              "a function-pointer parameter type cannot be BYREF - it always "
+                              "matches the callee's own C ABI, which this spec cannot renegotiate");
+                advance();
+            }
+            match(TokenKind::KwByVal); // optional, always implied - matches ByVal's own default
+            expect(TokenKind::KwAs, "expected AS before a function-pointer parameter's type");
+            t.funcParamTypes->push_back(parseTypeKeyword());
+            if (!match(TokenKind::Comma)) break;
+        }
+    }
+    expect(TokenKind::RParen, "expected ')' after function-pointer parameter types");
+
+    if (isFunction) {
+        expect(TokenKind::KwAs, "expected AS <return type> after a FUNCTION-pointer type's parameter list");
+        t.funcReturnType = std::make_shared<Type>(parseTypeKeyword());
+    }
+    return t;
 }
 
 StmtPtr Parser::parseDim() {

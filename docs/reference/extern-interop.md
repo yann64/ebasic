@@ -189,12 +189,9 @@ CALL eb_fixture_invoke_callback(@OnFixtureCallback, 42, 0)
 `@` (AddressOf) accepts a top-level, non-`Extern`, non-method `SUB`/
 `FUNCTION` name (not just an lvalue, its ordinary use - see [Pointers](
 namespaces-pointers-unions.md#pointers-ptr--)) and produces a real C
-function pointer, typed as `ANY PTR` - matching how C callback-style APIs
-conventionally take a callback as an untyped pointer (e.g. GLib's own
-`GCallback`, used by every `g_signal_connect`-family GTK function). This
-lets separately-compiled C/C++ code call back into eBasic-compiled code,
-the mirror image of an ordinary `Extern` `Declare` (which lets eBasic call
-into external code).
+function pointer. This lets separately-compiled C/C++ code call back into
+eBasic-compiled code, the mirror image of an ordinary `Extern` `Declare`
+(which lets eBasic call into external code).
 
 - Only a **plain, bodied, top-level** `SUB`/`FUNCTION` is addressable this
   way - not an `Extern`-declared one (it has no eBasic-compiled body to
@@ -203,12 +200,69 @@ into external code).
 - Every parameter, and the return type (for a `FUNCTION`), must be
   C-ABI-compatible - `STRING` isn't (it's a C++ class, not a C-layout
   value); use `ZSTRING` instead, same as an ordinary `Extern` signature.
-- Deliberately narrow scope: produces `ANY PTR`, not a distinct,
-  structurally-checked function-pointer *type* - the receiving C parameter
-  can be typed however that library's own real header declares it (a
-  function-pointer typedef, `void*`, ...); eBasic never inspects real
-  headers regardless (see above), so only the *value* needs to line up,
-  not a matching declared type on the eBasic side.
+- The parameter it's assigned/passed to may be typed either as `ANY PTR`
+  (the example above - the receiving C parameter can be typed however
+  that library's own real header declares it, and eBasic never inspects
+  real headers, so only the *value* needs to line up) **or** as a real,
+  structurally-checked function-pointer type (below) - `@ProcName`
+  produces whichever shape the destination needs.
+
+### Typed function-pointer parameters, DIMs, and TYPE fields
+
+```
+SUB (ByVal AS Type, ...)
+FUNCTION [Cdecl|Stdcall] (ByVal AS Type, ...) AS ReturnType
+```
+
+A parameter, `DIM`, or `TYPE` field may be typed as a real function
+pointer - `SUB (...)` for a callback with no return value, `FUNCTION (...)
+AS ReturnType` for one that returns a value. Each entry inside the
+parentheses is written the same way FreeBASIC itself writes an anonymous
+parameter - `ByVal AS Type` (the name is omitted; `ByVal` may be too, it's
+always implied). Unlike `ANY PTR`, Sema checks the assigned/passed value's
+*actual signature* against the declared type - calling convention,
+parameter types, and return type must all match:
+
+```basic
+Extern "C" Lib "ebfixturec"
+    Declare Function eb_fixture_invoke_comparator Cdecl (ByVal cmp AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER, ByVal a AS INTEGER, ByVal b AS INTEGER) AS INTEGER
+End Extern
+
+FUNCTION Compare(BYVAL a AS INTEGER, BYVAL b AS INTEGER) AS INTEGER
+    IF a < b THEN
+        RETURN -1
+    ELSEIF a > b THEN
+        RETURN 1
+    ELSE
+        RETURN 0
+    END IF
+END FUNCTION
+
+PRINT eb_fixture_invoke_comparator(@Compare, 3, 7)   ' -1
+
+' Also storable, not just usable inline:
+DIM cb AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER
+cb = @Compare
+PRINT eb_fixture_invoke_comparator(cb, 7, 3)         ' 1
+```
+
+A typed function pointer and a bare `ANY PTR` are freely bridgeable in
+both directions (assigning one to the other needs no cast on the eBasic
+side) - this is what keeps every existing untyped `@ProcName` use working
+unchanged, and lets a typed callback flow through code that only knows
+about `ANY PTR` (e.g. storing it in a generic `void*`-shaped field for
+later use).
+
+Two things this does **not** provide:
+
+- **Calling through** a stored function-pointer value from eBasic code
+  (e.g. `cb(1, 2)` where `cb` is a `DIM`'d function pointer) - eBasic can
+  pass a typed function pointer to external code and receive one back, but
+  not yet invoke one directly itself.
+- An eBasic-defined `SUB`/`FUNCTION` (the thing `@ProcName` addresses)
+  cannot itself be marked `Stdcall` yet - only meaningful (as a real ABI
+  difference, not just syntax) on 32-bit x86 Windows, where a C library
+  expecting a `Stdcall` callback wouldn't yet accept one.
 
 ## Exporting eBasic code (`Extern "C"` with a real body)
 

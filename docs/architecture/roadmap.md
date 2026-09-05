@@ -6062,6 +6062,90 @@ publish - the same sequence as `v1.2.0`/`v1.3.0` above.
   it's a single version-string literal flowing through the existing
   `PROJECT_VERSION` mechanism used unchanged by every prior bump).
 
+## Typed function-pointer parameters in EXTERN/DECLARE
+
+Planned via a dedicated research+design pass (two Explore agents over the
+exact current EXTERN/DECLARE and OOP-codegen source, then a Plan pass
+verifying the hard design questions directly against the code, all before
+any implementation) alongside a real MSVC PCH rule - see that plan's own
+"Context" section for why: `@ProcName`, the only callback mechanism
+EXTERN/DECLARE had, always degraded to an untyped `ANY PTR`, blocking
+clean interop with any C API taking a typed callback (`qsort`, `atexit`,
+`EnumWindows`, GLib signal handlers, SQLite callbacks, ...) - a real,
+common FFI shape, explicitly scoped far short of the templates/COM/
+coroutine gaps the WinUI3 study found genuinely out of reach.
+
+- New `TypeKind::FunctionPointer` (`ast.hpp`) with `funcReturnType`/
+  `funcParamTypes`/`funcCallConv` fields, parsed in
+  `Parser::parseTypeKeyword()` via real FreeBASIC's own anonymous-
+  parameter convention: `SUB|FUNCTION [Cdecl|Stdcall] ([ByVal] AS Type,
+  ...) [AS ReturnType]` (each entry is an ordinary parameter with its name
+  omitted - `[ByVal] AS Type`, not a bare type list; caught and fixed
+  during implementation when the first hand-written smoke test using a
+  bare-type-list guess didn't parse).
+- Sema's `AddressOf` case (`@ProcName`) now builds a real
+  `FunctionPointer` type from the addressed procedure's actual signature
+  instead of always degrading to `ANY PTR` - this single change is what
+  makes the entire type-checking problem fall out of the *existing*,
+  generic `isAssignCompatible`/`pointeesIdentical`/`checkCallArgs`
+  machinery (extended with a `FunctionPointer` branch each) rather than
+  needing new call sites anywhere. `FunctionPointer` bridges freely
+  to/from a bare `ANY PTR` in both directions (needed both ways, not just
+  one - unlike the ordinary object-pointer bridge, `FnPtr -> void*` is
+  *not* an implicit conversion in C++ the way `T* -> void*` is), which is
+  what keeps the pre-existing untyped `tests/e2e/function_pointers` case
+  compiling and passing byte-for-byte unchanged.
+  `collectExternSignatureChecks` recurses into a function-pointer type's
+  own return/parameter types so `FUNCTION (BYVAL AS STRING) AS INTEGER`
+  is still caught by the STRING-at-the-boundary gate.
+- Codegen (`Codegen::cppType`, made a non-`static` instance method):
+  C's function-pointer declarator (`RetType (*)(Args...)`) doesn't fit
+  the "type token, then a name" shape every existing call site relies on,
+  so a `FunctionPointer` type lowers to a synthesized, deduplicated
+  `using eb_fpN = RetType(EBASIC_STDCALL *)(ParamTypes...);` alias instead
+  - a plain identifier, exactly what every caller already expects, with
+  zero changes needed at any of them. The alias lines accumulate in their
+  own buffer (never interleaved into whichever stream `cppType`'s caller
+  is mid-line on) and are spliced into the output once, before every
+  other stream, in `generate()`.
+- Verified live end-to-end (`windows-mingw`): a `qsort`-comparator-shaped
+  round trip through a new fixture function
+  (`eb_fixture_invoke_comparator`, `fixture.c`) - inline `@ProcName`, a
+  `DIM`'d function-pointer variable, and a `TYPE` field all correctly
+  produce/consume the real typed C function pointer (confirmed by
+  inspecting the generated `.gen.cpp`: a real `eb_fpN` alias, never
+  `void*`, on the EXTERN prototype). A deliberately mismatched signature
+  (`FUNCTION (BYVAL AS DOUBLE...)` receiving `@Compare`, an
+  `INTEGER`-typed proc) is correctly rejected at compile time - real
+  structural checking, not just "it compiles". Full local suite
+  (`ctest --preset windows-mingw`) green modulo this same session's
+  already-documented antivirus/Smart-App-Control scan-lock flakiness on
+  freshly-built binaries (a different random subset each run, every one
+  of which cleared on an isolated rerun except `docgen.exe`, which stayed
+  blocked the same way `ebc.exe`/`docgen.exe` have both done earlier in
+  this session - unrelated to this feature, since `docgen`'s own source
+  wasn't touched, only relinked against the changed frontend/sema
+  libraries; deferred to CI for the authoritative confirmation).
+- New tests: `tests/e2e/typed_function_pointers` (the accepted round
+  trip, including the `DIM`/`TYPE`-field storage and the `ANY PTR`
+  bridge in both directions) and
+  `tests/e2e/typed_function_pointer_errors.sh` (rejected shapes: wrong
+  parameter type, wrong arity, a `SUB` where a `FUNCTION` pointer is
+  expected, `STRING` inside a callback parameter/return type) - same
+  `check_rejected`-table pattern `default_params_errors.sh` already
+  established.
+- `docs/reference/extern-interop.md`'s `@ProcName` section revised: the
+  old "deliberately narrow scope: produces `ANY PTR`" bullet is no longer
+  accurate, replaced with the typed-function-pointer syntax, a worked
+  example, and an explicit callout of what's still not provided (calling
+  through a stored function pointer from eBasic code; an eBasic-defined
+  callback still can't be marked `Stdcall` itself, relevant only on
+  32-bit x86 Windows).
+- Deliberately not pursued (flagged in the docs, not scope-crept into):
+  calling through a stored function-pointer value from eBasic code
+  (`cb(1, 2)`) needs new `Call`-callee resolution for a function-pointer-
+  typed lvalue, a genuinely separate addition.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

@@ -152,6 +152,21 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/function_pointers ${EBASIC_FIXTURE_LIB_DIR}
 )
 
+# Typed function-pointer EXTERN/DECLARE parameters (distinct from the
+# untyped ANY-PTR-based e2e_function_pointers above): proves real C
+# function-pointer codegen (never void*), signature checking via @ProcName,
+# storage in a DIM'd variable and a TYPE field, and bridging to/from a bare
+# ANY PTR in both directions - see eb_fixture_invoke_comparator (fixture.c).
+add_test(
+    NAME e2e_typed_function_pointers
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/typed_function_pointers ${EBASIC_FIXTURE_LIB_DIR}
+)
+
+add_test(
+    NAME e2e_typed_function_pointer_errors
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/typed_function_pointer_errors.sh $<TARGET_FILE:ebc>
+)
+
 # M8f: Stdcall calling convention on a DECLARE - a real ABI difference from
 # the plain-Cdecl e2e_extern_c above, not just syntax: eb_fixture_stdcall_add
 # is genuinely compiled __stdcall (fixture.c), proving caller/callee actually

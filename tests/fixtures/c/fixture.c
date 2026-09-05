@@ -95,6 +95,16 @@ void eb_fixture_invoke_callback(eb_fixture_callback cb, int value, void* user_da
     cb(value, user_data);
 }
 
+/** A properly-typed comparator callback (the `qsort`-comparator shape),
+ * distinct from eb_fixture_callback above: exercises eBasic's typed
+ * function-pointer EXTERN/DECLARE parameters end to end (parse -> sema
+ * signature match -> real C function-pointer codegen, not `void*`). */
+typedef int (*eb_fixture_comparator)(int a, int b);
+
+int eb_fixture_invoke_comparator(eb_fixture_comparator cmp, int a, int b) {
+    return cmp(a, b);
+}
+
 /** Returns a freshly malloc'd copy of a fixed string, as a plain void* (the
  * same shape a real void*-returning C API - g_malloc/g_strdup, glib's
  * gtk_text_buffer_get_text, etc. - hands back) - the caller must free it via

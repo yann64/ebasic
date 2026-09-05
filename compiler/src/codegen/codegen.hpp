@@ -145,16 +145,25 @@ private:
     std::string nextName(const std::string& prefix);
 
     static std::string ind(int indent);
-    static std::string cppType(const Type& type);
+    /// Turns any Type into a C++ type token. Not `static`: a FunctionPointer
+    /// type lowers to a synthesized `using eb_fpN = RetType(*)(Args...);`
+    /// alias (C's function-pointer declarator doesn't fit the "type token,
+    /// then a name" shape every call site of this function relies on), and
+    /// that alias line is accumulated in the instance's own
+    /// funcPtrAliasesOut_ - see that field's doc comment for why (and why
+    /// the alias is appended there rather than wherever cppType happens to
+    /// be called from).
+    std::string cppType(const Type& type);
     static std::string mangleName(const std::string& name);
     /// Renders a C++ parameter list ("T1 a, T2& b, ...") from BASIC params -
     /// shared by a free SUB/FUNCTION's prototype+definition and a TYPE
     /// method's declaration+out-of-line definition. `includeDefaults`
     /// governs whether a defaulted parameter's `= <value>` is rendered -
     /// only the first signature emission a translation unit sees may have
-    /// it (see the .cpp's own doc comment on this parameter).  Not
-    /// `static` (unlike `buildOperatorParamList`) - a defaulted param's
-    /// value is rendered via `genExpr`, an instance method.
+    /// it (see the .cpp's own doc comment on this parameter). Not `static`
+    /// - a defaulted param's value is rendered via `genExpr`, an instance
+    /// method (and, like `buildOperatorParamList` below, it also now calls
+    /// the instance-method `cppType`).
     std::string buildParamList(const std::vector<Param>& params, bool includeDefaults);
     /// Same, but for an Operator overload's parameter list specifically: a
     /// UserDefined-typed parameter is always rendered `const T&` regardless
@@ -163,8 +172,9 @@ private:
     /// expression like `a + b + c` passes the `a + b` temporary as an
     /// operand, so this would otherwise fail to compile the moment any
     /// operator overload is used in a chain). A primitive-typed parameter
-    /// is rendered by plain value, same as always.
-    static std::string buildOperatorParamList(const std::vector<Param>& params);
+    /// is rendered by plain value, same as always. Not `static` - calls the
+    /// instance-method `cppType`.
+    std::string buildOperatorParamList(const std::vector<Param>& params);
     /// The literal C++ operator token for a BinOp, used both to name an
     /// Operator overload's own C++ function and, in genExpr's Binary case,
     /// to render a UserDefined operand's expression when the built-in
@@ -236,6 +246,26 @@ private:
     /// currently being emitted (by genMethodDefinition), or empty. Mirrors
     /// Sema::currentClassName_ - needed to resolve `Base.Method(args)`.
     std::string currentOwnerType_;
+
+    /// `using eb_fpN = RetType(EBASIC_STDCALL *)(ParamTypes...);` alias
+    /// lines, one per distinct FunctionPointer signature seen by cppType,
+    /// accumulated here rather than written directly into whatever stream
+    /// cppType's caller happens to be mid-line on (typesOut_/globalsOut_/
+    /// protoOut_/procOut_ are all built via `stream << ind(1) << cppType(...)
+    /// << " " << name` chains - C++17's guaranteed left-to-right `<<`
+    /// evaluation means a side-effecting write inside cppType would
+    /// otherwise land *inside* the caller's own half-built line). Spliced
+    /// into the final output exactly once, in generate(), before
+    /// typesOut_/globalsOut_/protoOut_/procOut_ - every consumer of an
+    /// alias must see it already declared, so nothing that emits type
+    /// tokens may be spliced in ahead of this without breaking that
+    /// invariant.
+    std::ostringstream funcPtrAliasesOut_;
+    /// Canonical signature key -> already-synthesized alias name, so two
+    /// parameters/fields/etc. sharing the exact same function-pointer
+    /// signature reuse one alias instead of each minting their own.
+    std::unordered_map<std::string, std::string> funcPtrAliasCache_;
+    int funcPtrCounter_ = 0;
 };
 
 } // namespace ebasic
