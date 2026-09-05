@@ -5543,6 +5543,89 @@ Explicitly still deferred: `GuiTextViewConnectTextChanged` (needs a new
 "preferred size" (Round 3's own deferral); the Win32 adapter
 (unstarted, impractical to build/verify in this environment).
 
+## `eb-gui` Widget Round 7 - settable preferred size, a real hardware finding overturns the plan
+
+User chose "Settable preferred size" from an `AskUserQuestion` offered
+after Round 6, over the alternative of moving on or pausing the
+`eb-gui` track entirely. This round was scoped on the strength of
+Round 3's own deferred finding: GTK4's `gtk_widget_measure`/Qt6's
+`sizeHint()` are read-only queries with no settable equivalent, but
+real Haiku's `BView::SetExplicitPreferredSize` genuinely exists on the
+generic base widget class, making Haiku expected to be the one
+backend where this could ship as real, not merely a documented no-op.
+
+**A reconfirmation-before-implementation research pass (matching this
+track's own established discipline) found GTK4/Qt6's side of that
+finding unchanged**: a fresh agent re-inspected the actual installed
+GTK4/Qt6 headers on this host and confirmed `gtk_widget_measure`'s
+`natural` output remains a pure vfunc-computed getter, and
+`QWidget::sizeHint()` remains `Q_PROPERTY(... READ sizeHint)` with no
+`WRITE` accessor - both overridable only by subclassing, which neither
+this contract nor an eBasic caller can do to a foreign class.
+`QSizePolicy` was checked too and confirmed to hold only policy flags
+and stretch factors, never a real size number. No new workaround was
+found on either backend.
+
+**But real Haiku hardware testing overturned the Haiku half of the
+plan entirely.** After wiring `GuiWidgetSetPreferredSize` as a real
+pass-through to `HViewSetExplicitPreferredSize` on `eb-gui-haiku` and
+publishing `eb-gui` v0.10.0 documenting it as genuinely real there,
+the planned live-screenshot verification step (pairing it against
+`GuiWidgetSetMinSize` in a side-by-side comparison, matching every
+prior round's own "don't stop at didn't-crash" discipline) produced a
+screenshot showing NO visible difference between the two buttons -
+inconclusive rather than confirming. Rather than accepting an
+ambiguous screenshot as either "verified" or "broken" (the same
+discipline Round 3 itself already established for exactly this kind
+of situation), six separate standalone C++ probes were built directly
+against a real `BButton` inside a real `BGroupLayout` - the exact
+combination `eb-gui-haiku`'s own `GuiBox` uses - to get numeric ground
+truth instead of eyeballing pixels. The result, confirmed across every
+probe: real `BView::SetExplicitPreferredSize` correctly STORES the
+value (a direct `PreferredSize()` query reports it back exactly), but
+`BGroupLayout` never actually CONSULTS that stored value when
+computing a child's real rendered size - not with `SetExplicitAlignment`
+set to fill on both axes, not with a nonzero layout weight, not under
+a forced window resize or a genuine squeeze (window smaller than the
+sum of children's sizes), not even in how the enclosing window
+auto-sizes itself. The identical probes run against
+`SetExplicitMinSize` (already shipped as `GuiWidgetSetMinSize`, Round
+3) DID reliably enforce their floor in every one of those same
+scenarios, on the same hardware - ruling out a probe-methodology
+mistake and confirming this is a real, specific gap in how
+`BGroupLayout` itself uses `PreferredSize()`, not an error in the
+adapter's own call.
+
+**Reported to the user rather than decided unilaterally**: presented
+via `AskUserQuestion` (ship as a no-op everywhere / investigate other
+Haiku layout types further / revert Round 7 entirely) once the finding
+was confirmed - user chose to ship as a documented no-op on all three
+backends, keeping the function in the contract for API completeness.
+`eb-gui`'s own v0.10.0 (which had documented Haiku as real) was
+corrected in a same-day v0.10.1 patch release rather than amended, per
+this project's own established commit discipline; `eb-gui-haiku`'s own
+implementation was changed from a real pass-through to a genuine empty
+no-op (removing the now-known-ineffective native call rather than
+leaving a call that silently does nothing observable).
+
+Verified: headless "doesn't crash" checks in `examples/verify` on all
+three backends (the only meaningful bar for a no-op); the real
+evidence for the underlying finding is the six standalone C++ probes
+on real Haiku hardware, not a screenshot. Published `eb-gui` v0.10.0
+then v0.10.1 (correction), `eb-gui-gtk4`/`eb-gui-qt6` v0.10.0,
+`eb-gui-haiku` v0.8.0, `ebpm-index` updated, live resolution
+reconfirmed (`ebpm search gui`).
+
+**Lesson, worth remembering broadly, sharper than Round 3's own
+version of it**: a plausible-sounding capability claim can survive
+BOTH a header-inspection pass AND a direct object-level query
+(`PreferredSize()` genuinely returning the set value) and still be
+completely inert in the one place that matters - the actual consuming
+layout algorithm. "The setter exists and the getter echoes it back"
+is not the same bar as "the layout actually uses it" - only a
+decisive, numeric, ground-truth behavioral probe (not a screenshot,
+not a header, not a getter round-trip) settles a question like this.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
