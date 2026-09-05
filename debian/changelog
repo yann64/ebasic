@@ -1,3 +1,14 @@
+ebasic (1.6.0) unstable; urgency=medium
+
+  * Calling through a stored function pointer (cb(1, 2)), including
+    through a function-pointer parameter inside a higher-order FUNCTION -
+    turned out to need no Codegen changes at all, only Sema.
+  * Stdcall on a plain eBasic-defined SUB/FUNCTION - @ProcName can now
+    target real Win32 Stdcall callback APIs (EnumWindows, SetTimer) on
+    32-bit x86. Verified live against real cl.exe as well as g++.
+
+ -- eBasic contributors <noreply@example.com>  Sat, 05 Sep 2026 21:10:00 +0200
+
 ebasic (1.5.0) unstable; urgency=medium
 
   * Typed function-pointer parameters in EXTERN/DECLARE - @ProcName can

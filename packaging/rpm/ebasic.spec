@@ -1,5 +1,5 @@
 Name:           ebasic
-Version:        1.5.0
+Version:        1.6.0
 Release:        1%{?dist}
 Summary:        BASIC-to-C++ transpiler with package manager and doc generator
 Group:          Development/Tools
@@ -61,6 +61,13 @@ ctest --test-dir build --output-on-failure
 %{_mandir}/man1/docgen.1*
 
 %changelog
+* Sat Sep 05 2026 eBasic contributors <noreply@example.com> - 1.6.0-1
+- v1.6.0: calling through a stored function pointer (cb(1, 2), including
+  through a function-pointer parameter inside a higher-order FUNCTION),
+  and Stdcall on a plain eBasic-defined SUB/FUNCTION so @ProcName can
+  target real Win32 Stdcall callback APIs (EnumWindows, SetTimer) on
+  32-bit x86. Verified live against real cl.exe as well as g++.
+
 * Sat Sep 05 2026 eBasic contributors <noreply@example.com> - 1.5.0-1
 - v1.5.0: typed function-pointer parameters in EXTERN/DECLARE (@ProcName
   can now produce a real, structurally-checked function-pointer type
