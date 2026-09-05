@@ -5776,6 +5776,40 @@ support nothing in `ebc` has today, entirely separate from this).
   `windows-mingw` itself stays at its own pre-existing pass rate,
   unaffected - confirmed by rebuilding and rerunning its full suite too,
   since every new code path here is strictly behind `if (msvc)`.
+- A `windows-msvc` CI job followed in the same spirit as the local
+  verification above: `ilammy/msvc-dev-cmd` sets up the same INCLUDE/LIB/
+  PATH environment `vcvarsall.bat` provides locally, since `windows-latest`
+  already ships Visual Studio preinstalled (no separate MSYS2-style
+  toolchain install needed, unlike `windows-mingw`'s own job).
+
+## v1.2.0: Third Tagged Release
+
+With the MSVC backend done and CI-wired, the user asked to bump/tag
+`1.2.0` and publish - the same sequence as `v1.1.0` above.
+
+- `project(ebasic VERSION 1.2.0 ...)` (top-level `CMakeLists.txt`).
+- `packaging/rpm/ebasic.spec` (`Version:` + a new, appended `%changelog`
+  entry, `Release` reset to `1` for the new upstream version) and
+  `debian/changelog` (a new `ebasic (1.2.0)` entry stacked above `1.1.0`,
+  same append-only convention as before).
+  `packaging/flatpak/io.github.yann64.ebasic.metainfo.xml` gained a new
+  `<release version="1.2.0">` appended above the existing `1.1.0` entry.
+  `README.md`'s Status line bumped to match, and its own top-of-file
+  one-line description ("compiled with a real backend compiler
+  (g++/clang++)") gained MSVC - left unchanged in the RPM spec/Flatpak
+  metainfo's own descriptions, since those are Linux-only packaging
+  formats where MSVC is never actually the backend compiler being
+  described.
+- Unlike `v1.1.0`, this bump could not be watched through CI via `gh run
+  watch` before tagging - no `gh` CLI available in this environment (a
+  gap from the M8 Plan Summary's own environment, not a new one this
+  bump introduced). Noted here rather than silently skipped.
+- `packaging/haiku/ebasic-1.1.0.recipe` intentionally *not* renamed/
+  updated in this same commit - haikuporter's `$portVersion`/
+  `CHECKSUM_SHA256` need the tag to actually exist on GitHub first (the
+  archive URL and its real sha256 only exist once `v1.2.0` is pushed),
+  exactly the same ordering constraint noted when `v1.1.0`'s own recipe
+  was created - a deliberate fast-follow, not an oversight.
 
 ## Testing Strategy
 

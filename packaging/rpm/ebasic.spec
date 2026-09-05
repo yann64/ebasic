@@ -1,6 +1,6 @@
 Name:           ebasic
-Version:        1.1.0
-Release:        2%{?dist}
+Version:        1.2.0
+Release:        1%{?dist}
 Summary:        BASIC-to-C++ transpiler with package manager and doc generator
 Group:          Development/Tools
 Packager:       eBasic contributors <noreply@example.com>
@@ -61,6 +61,11 @@ ctest --test-dir build --output-on-failure
 %{_mandir}/man1/docgen.1*
 
 %changelog
+* Sat Sep 05 2026 eBasic contributors <noreply@example.com> - 1.2.0-1
+- v1.2.0: MSVC backend support for ebc (new windows-msvc CMake preset and
+  CI job) - ebc now detects cl/clang-cl on -cxx/CXX and switches to
+  MSVC-style command-line flags, alongside the existing g++/clang++ path.
+
 * Fri Sep 04 2026 eBasic contributors <noreply@example.com> - 1.1.0-2
 - Packaging fix: %files was missing %{_bindir}/ebasic_lsp (the LSP
   binary, shipped since M7 but never added here) - rpmbuild's stricter

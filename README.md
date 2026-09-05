@@ -1,7 +1,7 @@
 # eBasic
 
 eBasic is an extended dialect of the BASIC programming language, transpiled
-to C++ and compiled with a real backend compiler (g++/clang++).
+to C++ and compiled with a real backend compiler (g++/clang++/MSVC).
 
 ## Features
 
@@ -28,12 +28,13 @@ and live on real hardware (Haiku).
 
 ## Status
 
-`1.1.0`. All phased milestones (M0-M8: core language, C/C++ interop, `ebpm`,
+`1.2.0`. All phased milestones (M0-M8: core language, C/C++ interop, `ebpm`,
 precompiled runtime header, `docgen`, four-platform ports) are complete,
 along with post-M8 CLI ergonomics, Linux packaging (`.deb`/`.rpm`/Flatpak),
-OS-conditional dependencies, and (M9) FreeBASIC-parity preprocessor
-directives (`#elseif`/`#if` expressions/`#macro`/stringize+concatenate/
-`__LINE__`/`__FILE__`/`__DATE__`/`__TIME__`). See
+OS-conditional dependencies, (M9) FreeBASIC-parity preprocessor directives
+(`#elseif`/`#if` expressions/`#macro`/stringize+concatenate/`__LINE__`/
+`__FILE__`/`__DATE__`/`__TIME__`), and MSVC backend support alongside
+g++/clang++ (`windows-msvc` preset). See
 [`docs/architecture/roadmap.md`](docs/architecture/roadmap.md) for the full
 history and design decisions behind each milestone.
 

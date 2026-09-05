@@ -1,3 +1,12 @@
+ebasic (1.2.0) unstable; urgency=medium
+
+  * MSVC backend support for ebc (new windows-msvc CMake preset and CI
+    job) - ebc now detects cl/clang-cl on -cxx/CXX and switches to
+    MSVC-style command-line flags, alongside the existing g++/clang++
+    path.
+
+ -- eBasic contributors <noreply@example.com>  Sat, 05 Sep 2026 13:05:25 +0200
+
 ebasic (1.1.0) unstable; urgency=medium
 
   * M9: FreeBASIC-parity preprocessor directives (#elseif, #if
