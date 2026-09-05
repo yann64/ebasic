@@ -52,8 +52,8 @@ jobs:
   windows-mingw:
     # M8b/M8c: MinGW port - run inside an MSYS2 (mingw64) shell rather than
     # a native cmd/PowerShell prompt, matching how the "windows-mingw"
-    # CMake preset itself is designed (Unix Makefiles, plain g++/gcc). No
-    # MSVC job yet - deferred, see docs/architecture/roadmap.md's M8 notes.
+    # CMake preset itself is designed (Unix Makefiles, plain g++/gcc). See
+    # the windows-msvc job below for the MSVC alternative.
     runs-on: windows-latest
     defaults:
       run:
@@ -76,6 +76,24 @@ jobs:
         run: cmake --build --preset windows-mingw
       - name: Test
         run: ctest --preset windows-mingw
+
+  windows-msvc:
+    # MSVC port - windows-latest already ships Visual Studio (MSVC/Windows
+    # SDK/nmake) preinstalled, unlike windows-mingw's separate MSYS2
+    # dependency; ilammy/msvc-dev-cmd sets up the same INCLUDE/LIB/PATH
+    # environment `vcvarsall.bat`/an "x64 Native Tools Command Prompt"
+    # would, for the ordinary pwsh steps below (no `shell:` override
+    # needed, unlike windows-mingw's `msys2 {0}`).
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Configure
+        run: cmake --preset windows-msvc
+      - name: Build
+        run: cmake --build --preset windows-msvc
+      - name: Test
+        run: ctest --preset windows-msvc
 
   # Haiku is not part of this matrix - no GitHub-hosted Haiku image exists.
   # The real path to Haiku CI is registering the SSH-reachable box as a
