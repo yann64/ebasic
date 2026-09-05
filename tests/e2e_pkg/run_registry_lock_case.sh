@@ -17,6 +17,24 @@ EBPM="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 EBC="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
 CASE_DIR="$(cd "$3" && pwd)"
 
+# ebpm is a native (non-MSYS) executable, unlike git and the rest of this
+# script - it gets none of the automatic POSIX-to-Windows path translation
+# bash applies when *it* execs a native child (confirmed live: a bare
+# "/tmp/..." path handed to ebpm's own child `git clone` came back "does
+# not exist", since plain CreateProcess never translates argv strings).
+# Any $WORKDIR-derived path that ends up inside a file ebpm itself reads
+# (a manifest's git URL, EBASIC_INDEX_URL, HOME) needs to already be
+# Windows-native before it gets there. cygpath only exists on MSYS/Cygwin;
+# elsewhere (Linux/macOS/Haiku) paths are already native and this is a
+# no-op.
+native_path() {
+    if command -v cygpath >/dev/null 2>&1; then
+        cygpath -m "$1"
+    else
+        printf '%s' "$1"
+    fi
+}
+
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
@@ -49,7 +67,7 @@ description = "REG-5 lockfile-reuse test package"
 
 [[versions]]
 version = "1.0.0"
-git = "$LIB_REMOTE"
+git = "$(native_path "$LIB_REMOTE")"
 tag = "v1.0.0"
 EOF
 (
@@ -61,8 +79,9 @@ EOF
 )
 
 export EBC="$EBC"
-export HOME="$WORKDIR/fakehome"
+HOME="$WORKDIR/fakehome"
 mkdir -p "$HOME"
+export HOME="$(native_path "$HOME")"
 
 APP="$WORKDIR/app"
 mkdir -p "$APP/src"
@@ -76,7 +95,7 @@ cp -r "$CASE_DIR/app/src/." "$APP/src/"
 lock_version() { grep '^version = ' "$APP/ebasic.lock" | sed 's/version = "\(.*\)"/\1/'; }
 
 # --- Build 1: fresh resolution, should pick 1.0.0 (the only version) ---
-export EBASIC_INDEX_URL="$INDEX_REMOTE"
+export EBASIC_INDEX_URL="$(native_path "$INDEX_REMOTE")"
 if ! (cd "$APP" && "$EBPM" build) >"$WORKDIR/build1.log" 2>&1; then
     echo "FAIL: build 1 (fresh resolution) did not succeed"
     cat "$WORKDIR/build1.log"
@@ -105,12 +124,12 @@ description = "REG-5 lockfile-reuse test package"
 
 [[versions]]
 version = "1.0.0"
-git = "$LIB_REMOTE"
+git = "$(native_path "$LIB_REMOTE")"
 tag = "v1.0.0"
 
 [[versions]]
 version = "1.1.0"
-git = "$LIB_REMOTE"
+git = "$(native_path "$LIB_REMOTE")"
 tag = "v1.1.0"
 EOF
 (
@@ -150,7 +169,7 @@ fi
 # --- Build 4: restore the real index, edit the manifest's own requirement
 # to ^1.1 (which the 1.0.0 pin no longer satisfies) - must re-resolve to
 # 1.1.0, proving a manifest edit always takes effect. ---
-export EBASIC_INDEX_URL="$INDEX_REMOTE"
+export EBASIC_INDEX_URL="$(native_path "$INDEX_REMOTE")"
 # A portable redirect-based edit, not `sed -i` - BSD sed (macOS's default)
 # requires an explicit (even if empty) backup-suffix argument after `-i`,
 # unlike GNU sed, so a bare `-i` is parsed as consuming the next argument

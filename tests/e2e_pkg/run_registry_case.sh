@@ -19,6 +19,24 @@ EBPM="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 EBC="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
 CASE_DIR="$(cd "$3" && pwd)"
 
+# ebpm is a native (non-MSYS) executable, unlike git and the rest of this
+# script - it gets none of the automatic POSIX-to-Windows path translation
+# bash applies when *it* execs a native child (confirmed live: a bare
+# "/tmp/..." path handed to ebpm's own child `git clone` came back "does
+# not exist", since plain CreateProcess never translates argv strings).
+# Any $WORKDIR-derived path that ends up inside a file ebpm itself reads
+# (a manifest's git URL, EBASIC_INDEX_URL, HOME) needs to already be
+# Windows-native before it gets there. cygpath only exists on MSYS/Cygwin;
+# elsewhere (Linux/macOS/Haiku) paths are already native and this is a
+# no-op.
+native_path() {
+    if command -v cygpath >/dev/null 2>&1; then
+        cygpath -m "$1"
+    else
+        printf '%s' "$1"
+    fi
+}
+
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
@@ -51,7 +69,7 @@ INDEX_REMOTE="$WORKDIR/index.git"
 git init --bare -q "$INDEX_REMOTE"
 INDEX_SEED="$WORKDIR/index_seed"
 git clone -q "$INDEX_REMOTE" "$INDEX_SEED"
-sed "s#@LIB_GIT_URL@#$LIB_REMOTE#" "$CASE_DIR/index_seed/regmathlib.toml.in" >"$INDEX_SEED/regmathlib.toml"
+sed "s#@LIB_GIT_URL@#$(native_path "$LIB_REMOTE")#" "$CASE_DIR/index_seed/regmathlib.toml.in" >"$INDEX_SEED/regmathlib.toml"
 (
     cd "$INDEX_SEED"
     git checkout -q -B master
@@ -61,11 +79,12 @@ sed "s#@LIB_GIT_URL@#$LIB_REMOTE#" "$CASE_DIR/index_seed/regmathlib.toml.in" >"$
 )
 
 export EBC="$EBC"
-export EBASIC_INDEX_URL="$INDEX_REMOTE"
+export EBASIC_INDEX_URL="$(native_path "$INDEX_REMOTE")"
 # An isolated HOME so the index/git dependency caches never touch the real
 # user's home directory or a previous test run's cache.
-export HOME="$WORKDIR/fakehome"
+HOME="$WORKDIR/fakehome"
 mkdir -p "$HOME"
+export HOME="$(native_path "$HOME")"
 
 # Scenario 1: happy path.
 APP="$WORKDIR/app"

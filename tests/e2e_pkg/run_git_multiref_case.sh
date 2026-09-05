@@ -15,6 +15,23 @@ EBPM="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 EBC="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
 CASE_DIR="$(cd "$3" && pwd)"
 
+# ebpm is a native (non-MSYS) executable, unlike git and the rest of this
+# script - it gets none of the automatic POSIX-to-Windows path translation
+# bash applies when *it* execs a native child (confirmed live: a bare
+# "/tmp/..." path handed to ebpm's own child `git clone` came back "does
+# not exist", since plain CreateProcess never translates argv strings).
+# Any $WORKDIR-derived path that ends up inside a file ebpm itself reads
+# (the manifest's git URL, HOME) needs to already be Windows-native before
+# it gets there. cygpath only exists on MSYS/Cygwin; elsewhere (Linux/
+# macOS/Haiku) paths are already native and this is a no-op.
+native_path() {
+    if command -v cygpath >/dev/null 2>&1; then
+        cygpath -m "$1"
+    else
+        printf '%s' "$1"
+    fi
+}
+
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
@@ -43,13 +60,14 @@ git clone -q "$REMOTE" "$SEED"
 
 APP="$WORKDIR/app"
 mkdir -p "$APP/src"
-sed "s#@GIT_URL@#$REMOTE#" "$CASE_DIR/app/ebasic.toml.in" >"$APP/ebasic.toml"
+sed "s#@GIT_URL@#$(native_path "$REMOTE")#" "$CASE_DIR/app/ebasic.toml.in" >"$APP/ebasic.toml"
 cp -r "$CASE_DIR/app/src/." "$APP/src/"
 
 # An isolated HOME so the git dependency cache (~/.ebpm/cache/git/) never
 # touches the real user's home directory or a previous test run's cache.
-export HOME="$WORKDIR/fakehome"
+HOME="$WORKDIR/fakehome"
 mkdir -p "$HOME"
+export HOME="$(native_path "$HOME")"
 export EBC="$EBC"
 
 ACTUAL="$WORKDIR/.actual.stdout"
