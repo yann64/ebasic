@@ -9,15 +9,16 @@ COPYRIGHT="2026 yann64"
 LICENSE="MIT"
 REVISION="1"
 
-# v1.2.0 (MSVC backend support for ebc) - SOURCE_URI/CHECKSUM_SHA256 below
-# point at the real, published tag, verified by actually downloading it
-# (https://github.com/yann64/ebasic/archive/refs/tags/v1.2.0.tar.gz) and
-# computing its real sha256, same as the v1.1.0/v1.0.0 recipes before it.
-# Still not yet submitted upstream to haikuports - haikuporter's own
-# recipe-format conventions were dry-run-verified against real Haiku
+# v1.3.0 (Stdcall calling convention on EXTERN/DECLARE) - SOURCE_URI/
+# CHECKSUM_SHA256 below point at the real, published tag, verified by
+# actually downloading it
+# (https://github.com/yann64/ebasic/archive/refs/tags/v1.3.0.tar.gz) and
+# computing its real sha256, same as the v1.2.0/v1.1.0/v1.0.0 recipes
+# before it. Still not yet submitted upstream to haikuports - haikuporter's
+# own recipe-format conventions were dry-run-verified against real Haiku
 # hardware (M8e), cross-checked against app-arch/brotli's real recipe.
 SOURCE_URI="https://github.com/yann64/ebasic/archive/refs/tags/v$portVersion.tar.gz"
-CHECKSUM_SHA256="1bb31a448ff4c00f99fafefc7626ed22d9311b707dd0ec15a5266fab35543011"
+CHECKSUM_SHA256="c01733ed7e374f8b003d0cf6d24a5f805f542c06e1d94fb364078207c5d49da9"
 SOURCE_FILENAME="ebasic-$portVersion.tar.gz"
 
 ARCHITECTURES="all !x86_gcc2"
