@@ -535,6 +535,19 @@ struct Stmt {
     /// the prototype and every call site.
     std::string externAlias;
     std::string externLib; // a `Lib "name"` clause; empty = none given
+    /// A `[Cdecl]`/`[Stdcall]` clause on a DECLARE (M8f): "" (the default,
+    /// meaning the platform's own default convention - `cdecl` in
+    /// practice) or "stdcall" - the parser (see parseExternDecl) forces
+    /// `externLinkage` to "C" whenever Stdcall is written, the same way it
+    /// already does for Cdecl, so "stdcall" paired with "C++" linkage
+    /// never actually reaches Codegen. Only meaningful for `isExtern` (a
+    /// bodyless import - `__stdcall` on the *definition* side, for a real
+    /// eBasic SUB/FUNCTION whose address is taken as a Windows callback,
+    /// is a separate, unimplemented need). A no-op on every non-Windows
+    /// target, where `__stdcall` isn't defined at all - Codegen's
+    /// `EBASIC_STDCALL` macro (generate()'s preamble) expands to nothing
+    /// there, same shape as `EBASIC_EXPORT`'s own platform split.
+    std::string externCallConv;
 
     /// `Sub`/`Function ... End Sub`/`End Function` with a real body,
     /// written *inside* an `Extern "C" ... End Extern` block (shared-

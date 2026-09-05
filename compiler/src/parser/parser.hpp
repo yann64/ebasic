@@ -81,8 +81,9 @@ private:
     /// `out` rather than returned singly. Only ever called from
     /// parseModule()'s top-level loop.
     void parseExternBlock(std::vector<StmtPtr>& out);
-    /// One `Declare Sub/Function Name (...) [As type] [Cdecl] [Alias "x"]
-    /// [Lib "y"]` line - a bodyless, extern signature (M4). `defaultLinkage`/
+    /// One `Declare Sub/Function Name (...) [As type] [Cdecl|Stdcall]
+    /// [Alias "x"] [Lib "y"]` line - a bodyless, extern signature (M4/M8f).
+    /// `defaultLinkage`/
     /// `defaultLib` come from the enclosing Extern block (if any); a
     /// standalone (non-block) Declare passes "C" (the only linkage a
     /// standalone Declare can produce in real FreeBASIC too) and "".

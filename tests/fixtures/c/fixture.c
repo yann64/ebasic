@@ -11,6 +11,27 @@ int eb_fixture_add(int a, int b) {
     return a + b;
 }
 
+/** M8f: real Win32 APIs (User32/GDI/...) are always `__stdcall`, unlike
+ * every other function in this file - a no-op qualifier on every non-
+ * Windows target (there's only one calling convention there), matching
+ * ebc's own EBASIC_STDCALL macro exactly (codegen.cpp's generate()), so
+ * both sides of the ABI always agree regardless of platform. */
+#if defined(_WIN32)
+#define EB_FIXTURE_STDCALL __stdcall
+#else
+#define EB_FIXTURE_STDCALL
+#endif
+
+/** Same shape as eb_fixture_add above, just __stdcall - exercises a
+ * Stdcall-declared EXTERN import calling a real __stdcall function
+ * correctly (a calling-convention mismatch between caller and callee is a
+ * real, silent stack-corruption bug on x86 Windows, not just a style
+ * choice - this proves the two sides genuinely agree, not just that both
+ * compile). */
+int EB_FIXTURE_STDCALL eb_fixture_stdcall_add(int a, int b) {
+    return a + b;
+}
+
 /** Returns a fixed C string - exercises `const char*` return marshaling. */
 const char* eb_fixture_greeting(void) {
     return "hello from C";

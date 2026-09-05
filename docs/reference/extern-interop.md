@@ -31,21 +31,46 @@ PRINT eb_fixture_add(2, 3)   ' 5
 ## Standalone `Declare` (no block)
 
 ```
-Declare Sub Name [Cdecl] [Lib "libname"] [Alias "realName"] (params...)
-Declare Function Name [Cdecl] [Lib "libname"] [Alias "realName"] (params...) AS ReturnType
+Declare Sub Name [Cdecl|Stdcall] [Lib "libname"] [Alias "realName"] (params...)
+Declare Function Name [Cdecl|Stdcall] [Lib "libname"] [Alias "realName"] (params...) AS ReturnType
 ```
 
 A `Declare` doesn't have to sit inside an `Extern` block - written at the
 top level on its own, it always binds with `"C"` linkage (a standalone
 `Declare` can't produce `"C++"` linkage; that's only reachable via an
-`Extern "C++"` block). **The clause order matters**: `Cdecl`/`Lib`/`Alias`
-all come *before* the parameter list, matching real FreeBASIC's own
-grammar - `Lib "name" (params)`, not `(params) Lib "name"`.
+`Extern "C++"` block). **The clause order matters**: `Cdecl`/`Stdcall`/
+`Lib`/`Alias` all come *before* the parameter list, matching real
+FreeBASIC's own grammar - `Lib "name" (params)`, not `(params) Lib
+"name"`.
 
 ```basic
 Declare Function eb_fixture_add Lib "ebfixturec" (ByVal a AS INTEGER, ByVal b AS INTEGER) AS INTEGER
 PRINT eb_fixture_add(2, 3)   ' 5
 ```
+
+## `Cdecl` and `Stdcall` (calling convention)
+
+`Cdecl` (the default - explicit `Cdecl` is a no-op) and `Stdcall` both
+imply `"C"` linkage, the same as writing the `Declare` inside an `Extern
+"C"` block - real Win32 APIs (`User32`, `GDI32`, `Kernel32`, ...) are
+always `extern "C" __stdcall`, never C++-mangled:
+
+```basic
+Extern "C" Lib "user32"
+    Declare Function MessageBoxA Stdcall (ByVal hWnd AS ANY PTR, ByVal text AS ZSTRING, ByVal caption AS ZSTRING, ByVal utype AS INTEGER) AS INTEGER
+End Extern
+```
+
+A calling convention is a real ABI detail (who cleans the stack, not just
+naming) - `Stdcall` on the eBasic side must match how the real function
+was actually compiled, the same way getting `Lib`/`Alias` wrong would
+produce a linker (not a runtime) error, except a calling-convention
+mismatch can compile *and link* fine while still corrupting the stack at
+runtime, particularly on 32-bit x86. `Stdcall` is meaningless (and a
+no-op, not an error) on any target other than 32/64-bit Windows -
+`__stdcall` isn't even a distinct calling convention on Linux/macOS/Haiku
+or on 64-bit Windows itself (x64's own calling convention is unified), so
+writing it in a `.bas` file meant to also build elsewhere is always safe.
 
 ## `Alias`
 

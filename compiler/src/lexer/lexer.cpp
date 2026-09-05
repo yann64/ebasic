@@ -182,6 +182,7 @@ Token Lexer::lexIdentifierOrKeyword() {
         {"LIB", TokenKind::KwLib},
         {"ALIAS", TokenKind::KwAlias},
         {"CDECL", TokenKind::KwCdecl},
+        {"STDCALL", TokenKind::KwStdcall},
         {"ZSTRING", TokenKind::KwZString},
     };
 

@@ -154,6 +154,7 @@ redeclare one of these names).
 | `SHORT` | [Primitive types](types-and-literals.md#primitive-types) |
 | `SHR` | [Operators](operators.md#shl-shr) |
 | `SINGLE` | [Primitive types](types-and-literals.md#primitive-types) |
+| `STDCALL` | [Standalone `Declare`](extern-interop.md#standalone-declare-no-block) |
 | `STEP` | [`FOR`](control-flow.md#for-to-step-next) |
 | `STRING` | [Primitive types](types-and-literals.md#primitive-types) |
 | `SUB` | [`SUB` / `FUNCTION`](procedures-and-arrays.md#sub-function) |

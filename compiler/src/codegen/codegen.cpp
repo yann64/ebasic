@@ -784,8 +784,15 @@ void Codegen::genProcedure(const Stmt& stmt) {
         std::string externName = stmt.externAlias.empty() ? stmt.name : stmt.externAlias;
         std::string paramList = buildParamList(stmt.params, /*includeDefaults=*/true);
         bool wrapC = stmt.externLinkage == "C";
+        /// M8f: the calling-convention keyword (EBASIC_STDCALL, expanding
+        /// to `__stdcall` on Windows and nothing elsewhere - see
+        /// generate()'s preamble) goes between the return type and the
+        /// name, matching how Windows' own headers declare a WINAPI
+        /// function (`BOOL WINAPI Name(...)`, WINAPI being `__stdcall`
+        /// under the hood).
+        std::string callConv = stmt.externCallConv == "stdcall" ? "EBASIC_STDCALL " : "";
         if (wrapC) protoOut_ << "extern \"C\" {\n";
-        protoOut_ << retType << " " << externName << "(" << paramList << ");\n";
+        protoOut_ << retType << " " << callConv << externName << "(" << paramList << ");\n";
         if (wrapC) protoOut_ << "}\n";
         return;
     }
@@ -1048,6 +1055,20 @@ std::string Codegen::generate(const Module& module, bool libMode, bool sharedLib
     out << "#include <cmath>\n";
     out << "#include <cstdint>\n";
     out << "#include <vector>\n\n";
+    /// M8f: a `[Stdcall]`-declared EXTERN signature's calling convention -
+    /// unconditionally emitted (unlike EBASIC_EXPORT below, this costs
+    /// nothing when unused, so there's no need to track "does this module
+    /// use Stdcall anywhere" the way sharedLib_ gates the other macro).
+    /// `__stdcall` isn't defined as a keyword at all outside Windows (GCC/
+    /// Clang on ELF targets reject it outright), hence the same `_WIN32`
+    /// split EBASIC_EXPORT already uses - a plain no-op there, since
+    /// cdecl/stdcall are the same real ABI on every non-Windows target
+    /// this project supports.
+    out << "#if defined(_WIN32)\n";
+    out << "#define EBASIC_STDCALL __stdcall\n";
+    out << "#else\n";
+    out << "#define EBASIC_STDCALL\n";
+    out << "#endif\n\n";
     /// Shared-library support: only meaningful (and only emitted) when this
     /// is a real `--shared-lib`/`-dll` build - an isExported procedure's
     /// definition uses this macro instead of plain `extern "C"` (see

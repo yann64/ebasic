@@ -5872,6 +5872,80 @@ than guessing from the one-line summary the user pasted.
   `splitPathList` is shared code neither toolchain's own flag-building
   logic touches.
 
+## M8f: `Stdcall` calling convention on `EXTERN`/`DECLARE`
+
+Phase 2 of the WinUI3 feasibility study's recommended path (see the MSVC
+backend section above) - `Cdecl` was the only calling convention `Declare`
+supported; `Stdcall` was named as a future Windows-port item back in the
+original M8 plan and never actually implemented even though M8 shipped.
+Blocks even plain Win32 API calls (`User32`/`GDI`/... are all
+`__stdcall`), not just WinRT - independently useful regardless of whether
+WinUI3 itself is ever pursued.
+
+- New `STDCALL` keyword (lexer.hpp/cpp), parsed in exactly the position
+  `CDECL` already was (`parseExternDecl`, both the standalone-`Declare`
+  and inside-a-block forms share this one function) - `Stdcall` forces
+  `externLinkage` to `"C"` the same way `Cdecl` already silently does,
+  rather than introducing a new, asymmetric special case for only one of
+  the two keywords (Win32 is always `extern "C" __stdcall` in practice
+  anyway). A new `Stmt::externCallConv` field (`""` = default/cdecl, or
+  `"stdcall"`) carries the choice into Codegen, structurally unreachable
+  paired with `"C++"` linkage given the parser's own forced override - no
+  separate Sema validation needed for that combination.
+- Codegen emits a new `EBASIC_STDCALL` macro unconditionally in every
+  generated file's preamble (unlike `EBASIC_EXPORT`, which is gated
+  behind `sharedLib_` - this one costs nothing when unused, so there's no
+  need to track "does this module use Stdcall anywhere"): `__stdcall` on
+  Windows (both MSVC and MinGW's own compatibility headers understand the
+  bare keyword), a no-op everywhere else, since `__stdcall` isn't even
+  defined outside Windows (GCC/Clang would hard-error on the bare
+  identifier, not silently ignore it) and cdecl/stdcall are the same real
+  ABI on 64-bit Windows and every non-Windows target this project
+  supports anyway. Placed between the return type and the function name
+  in the emitted prototype, matching how Windows' own headers declare a
+  `WINAPI` function.
+- Scope deliberately narrow: only the *import* side (`Declare`ing an
+  externally-compiled `__stdcall` function). The *export*/callback side -
+  giving a real, eBasic-defined `SUB`/`FUNCTION` a `__stdcall` calling
+  convention so its `@ProcName` address is usable as a Windows callback
+  (`WNDPROC` and friends all require this) - is a separate, unimplemented
+  need, noted rather than silently half-done.
+- New e2e test (`tests/e2e/extern_stdcall`) exercises both the
+  `Extern "C" ... End Extern` block form and the standalone `Declare`
+  form (the latter via `Alias`, binding a second eBasic name to the same
+  real symbol - `extern_cpp`'s own established pattern for exercising two
+  call shapes against one fixture function). Backed by a *genuinely*
+  `__stdcall`-compiled fixture function (`eb_fixture_stdcall_add` in
+  `tests/fixtures/c/fixture.c`, guarded by the identical `_WIN32` split
+  `EBASIC_STDCALL` itself uses) rather than an ordinary cdecl one declared
+  as Stdcall - a calling-convention mismatch is a real, silent ABI bug
+  (particularly on 32-bit x86 - who cleans the stack), not just a syntax
+  choice, so the test would prove nothing if both sides didn't have to
+  genuinely agree.
+- `docs/reference/extern-interop.md`/`index.md`, `lsp/src/symbols.cpp`'s
+  completion keyword list, and `parser.hpp`'s own doc comment all updated
+  alongside the code, matching this project's established discipline of
+  keeping the reference docs/LSP completion list in lockstep with the
+  grammar rather than treating them as an afterthought.
+- Verified live on `windows-mingw`: the new test passes cleanly (5/5 on
+  retry, ruling out the antivirus-scan-lock flakiness class already
+  documented above), full suite green apart from that same pre-existing
+  flakiness (confirmed by rerunning failures in isolation - a different
+  random subset clears each time, the established signature). Local
+  `windows-msvc` verification was blocked by something new on this
+  machine, not this feature: Windows' **Smart App Control**
+  (`VerifiedAndReputablePolicyState=1` in the registry) started hash-
+  blocking freshly-built, unsigned local binaries mid-session - confirmed
+  genuinely hash-based, not path-based (a byte-identical copy under a
+  different name/location was blocked identically) and confirmed *not* a
+  blanket block (in the same `windows-mingw` rebuild, `ebc.exe`/
+  `ebpm.exe` ran fine immediately while the freshly-relinked `docgen.exe`
+  stayed blocked for several minutes before clearing on its own) - a
+  local machine security-posture change encountered while developing,
+  not a defect in this feature. Deferred to the real `windows-msvc` CI
+  job (a clean, unaffected environment) for the authoritative MSVC-
+  specific confirmation once pushed.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

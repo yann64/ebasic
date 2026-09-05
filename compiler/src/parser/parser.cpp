@@ -577,21 +577,31 @@ StmtPtr Parser::parseExternDecl(const std::string& defaultLinkage, const std::st
     stmt->externLib = defaultLib;
     stmt->externAlias = nameTok.text; // default: the declared name, as-is
 
-    /// Verified real FreeBASIC order: Name [Cdecl] [Lib "name"] [Alias
-    /// "name"] (params) As type - the calling-convention/Lib/Alias clauses
-    /// all come *before* the parameter list, not after (confirmed against
-    /// real examples like `Declare Function strcpy CDecl Alias "strcpy"
-    /// (...) As ZString Ptr`). Meaningful on the standalone form; harmless
-    /// if repeated inside a block (the block's own linkage/lib already
-    /// apply, so re-stating Cdecl/Lib here is a no-op, not an error) -
-    /// Alias, though, is commonly still needed per-line even inside a
-    /// block, since case-sensitivity mismatches are per-function.
+    /// Verified real FreeBASIC order: Name [Cdecl|Stdcall] [Lib "name"]
+    /// [Alias "name"] (params) As type - the calling-convention/Lib/Alias
+    /// clauses all come *before* the parameter list, not after (confirmed
+    /// against real examples like `Declare Function strcpy CDecl Alias
+    /// "strcpy" (...) As ZString Ptr`). Meaningful on the standalone form;
+    /// harmless if repeated inside a block (the block's own linkage/lib
+    /// already apply, so re-stating Cdecl/Stdcall/Lib here is a no-op, not
+    /// an error) - Alias, though, is commonly still needed per-line even
+    /// inside a block, since case-sensitivity mismatches are per-function.
     if (match(TokenKind::KwCdecl)) {
-        /// Cdecl ("C" linkage) is the only calling convention this version
-        /// supports (Stdcall/Windows is deferred to M8's Windows port) - and
-        /// the only one a standalone Declare can produce in real FreeBASIC
-        /// too; "C++" linkage is only reachable via an Extern "C++" block.
+        /// "C" linkage is the only one a standalone Declare can produce in
+        /// real FreeBASIC too; "C++" linkage is only reachable via an
+        /// Extern "C++" block. `externCallConv` is left "" (the default,
+        /// meaning cdecl) - only Stdcall below needs to say anything.
         stmt->externLinkage = "C";
+    } else if (match(TokenKind::KwStdcall)) {
+        /// M8f: Win32's own APIs (User32/GDI/...) are always `extern "C"
+        /// __stdcall` - same "implies C linkage" treatment Cdecl gets
+        /// above, for the same reason (a standalone Declare, or one
+        /// restating Stdcall redundantly inside an already-"C" block, is
+        /// the overwhelmingly common case; silently forcing "C" even
+        /// inside a "C++" block matches Cdecl's own existing precedent
+        /// rather than introducing a new, asymmetric special case).
+        stmt->externLinkage = "C";
+        stmt->externCallConv = "stdcall";
     }
     if (match(TokenKind::KwLib)) {
         stmt->externLib =

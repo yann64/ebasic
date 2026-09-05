@@ -152,6 +152,15 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/function_pointers ${EBASIC_FIXTURE_LIB_DIR}
 )
 
+# M8f: Stdcall calling convention on a DECLARE - a real ABI difference from
+# the plain-Cdecl e2e_extern_c above, not just syntax: eb_fixture_stdcall_add
+# is genuinely compiled __stdcall (fixture.c), proving caller/callee actually
+# agree on calling convention, not just that both sides compile.
+add_test(
+    NAME e2e_extern_stdcall
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/extern_stdcall ${EBASIC_FIXTURE_LIB_DIR}
+)
+
 add_test(
     NAME e2e_default_params
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/default_params

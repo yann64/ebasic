@@ -208,7 +208,7 @@ const std::vector<std::string>& reservedKeywords() {
         "ENUM", "SUB", "FUNCTION", "BYVAL", "BYREF", "RETURN", "CALL", "REDIM", "PRESERVE", "GOSUB",
         "TYPE", "NAMESPACE", "PTR", "ANY", "UNION", "DECLARE", "CONSTRUCTOR", "DESTRUCTOR", "THIS",
         "EXTENDS", "VIRTUAL", "OVERRIDE", "BASE", "PROPERTY", "OPERATOR", "EXTERN", "LIB", "ALIAS",
-        "CDECL", "ZSTRING",
+        "CDECL", "STDCALL", "ZSTRING",
     };
     return keywords;
 }

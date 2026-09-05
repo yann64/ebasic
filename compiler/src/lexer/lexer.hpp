@@ -114,6 +114,7 @@ enum class TokenKind {
     KwLib,
     KwAlias,
     KwCdecl,
+    KwStdcall,
     KwZString,
 };
 
