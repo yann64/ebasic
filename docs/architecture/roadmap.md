@@ -5946,6 +5946,26 @@ WinUI3 itself is ever pursued.
   job (a clean, unaffected environment) for the authoritative MSVC-
   specific confirmation once pushed.
 
+## v1.3.0: Fourth Tagged Release
+
+With Stdcall done and CI-green on all five platforms, the user asked to
+bump/tag `1.3.0` and publish - the same sequence as `v1.2.0` above.
+
+- `project(ebasic VERSION 1.3.0 ...)`, `packaging/rpm/ebasic.spec`
+  (`Version:` + a new `%changelog` entry), `debian/changelog` (a new
+  `ebasic (1.3.0)` entry stacked above `1.2.0`), the Flatpak metainfo's
+  `<release>` list, and `README.md`'s Status line - all following the
+  same pattern as every prior bump. Both the RPM/Debian changelog entries
+  fold in the `EBASIC_LIBRARY_PATH` delimiter fix too, since it landed as
+  a plain commit (not its own tagged release) between `v1.2.0` and this
+  bump.
+- Confirmed live: rebuilding `ebc` reports `1.3.0 (de8820b)`.
+- `packaging/haiku/ebasic-1.2.0.recipe` fast-followed to
+  `ebasic-1.3.0.recipe` immediately after the tag was pushed, same
+  ordering constraint as every prior version (`CHECKSUM_SHA256` needs the
+  real tag archive to exist first) - real sha256 of the actually-
+  downloaded `v1.3.0` tarball via `curl`+`sha256sum`.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

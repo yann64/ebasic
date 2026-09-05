@@ -1,5 +1,5 @@
 Name:           ebasic
-Version:        1.2.0
+Version:        1.3.0
 Release:        1%{?dist}
 Summary:        BASIC-to-C++ transpiler with package manager and doc generator
 Group:          Development/Tools
@@ -61,6 +61,15 @@ ctest --test-dir build --output-on-failure
 %{_mandir}/man1/docgen.1*
 
 %changelog
+* Sat Sep 05 2026 eBasic contributors <noreply@example.com> - 1.3.0-1
+- v1.3.0: Stdcall calling convention on EXTERN/DECLARE - Win32 APIs
+  (User32/GDI/...) are always extern "C" __stdcall; Cdecl was previously
+  the only calling convention Declare supported. Also folds in a fix
+  landed since 1.2.0: EBASIC_LIBRARY_PATH (ebpm's own external-library
+  search-path env var) now uses ';' instead of ':' as its delimiter,
+  fixing a real Windows bug where ':' collided with an absolute path's
+  own drive-letter colon.
+
 * Sat Sep 05 2026 eBasic contributors <noreply@example.com> - 1.2.0-1
 - v1.2.0: MSVC backend support for ebc (new windows-msvc CMake preset and
   CI job) - ebc now detects cl/clang-cl on -cxx/CXX and switches to
