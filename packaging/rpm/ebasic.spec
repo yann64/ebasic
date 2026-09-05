@@ -1,5 +1,5 @@
 Name:           ebasic
-Version:        1.3.0
+Version:        1.4.0
 Release:        1%{?dist}
 Summary:        BASIC-to-C++ transpiler with package manager and doc generator
 Group:          Development/Tools
@@ -61,6 +61,13 @@ ctest --test-dir build --output-on-failure
 %{_mandir}/man1/docgen.1*
 
 %changelog
+* Sat Sep 05 2026 eBasic contributors <noreply@example.com> - 1.4.0-1
+- v1.4.0: WinUI3 shim example (examples/winui3_shim/) - a hand-written
+  C++/WinRT Windows App SDK application driven by a real eBasic program
+  via ShellExecuteA (Stdcall/EXTERN), demonstrating the recommended
+  pattern from the MSVC/WinUI3 feasibility study's Phase 3. No compiler
+  behavior changes in this release.
+
 * Sat Sep 05 2026 eBasic contributors <noreply@example.com> - 1.3.0-1
 - v1.3.0: Stdcall calling convention on EXTERN/DECLARE - Win32 APIs
   (User32/GDI/...) are always extern "C" __stdcall; Cdecl was previously
