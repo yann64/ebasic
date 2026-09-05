@@ -312,15 +312,16 @@ directly (see [`ebc`](ebc.md)) - verified with a real multi-package build.
 
 A package's manifest has no field for a real, external (non-`ebpm`) system
 library's own search directory - e.g. wherever a `Lib "gtk-4"` binding's
-actual `libgtk-4` lives. `EBASIC_LIBRARY_PATH` (a `:`-separated list of
-directories, matching the shape of `PATH`/`LIBRARY_PATH` itself) fills this
-gap: every directory it names is forwarded as `-L` to every `ebc` invocation
-across the whole build. Deliberately not the real `LIBRARY_PATH` - `ebc`/g++
-would pick that up too, but on Haiku that exact name is also consulted by
-the OS's own runtime_loader, and pointing it at a directory that doesn't
-hold every shared object the OS itself needs breaks process startup
-entirely (not just `ebc`'s) - `EBASIC_LIBRARY_PATH` avoids that collision on
-every platform.
+actual `libgtk-4` lives. `EBASIC_LIBRARY_PATH` (a `;`-separated list of
+directories - deliberately not `:`, which collides with a Windows absolute
+path's own drive-letter colon) fills this gap: every directory it names is
+forwarded as `-L` to every `ebc` invocation across the whole build.
+Deliberately not the real `LIBRARY_PATH` - `ebc`/g++ would pick that up
+too, but on Haiku that exact name is also consulted by the OS's own
+runtime_loader, and pointing it at a directory that doesn't hold every
+shared object the OS itself needs breaks process startup entirely (not
+just `ebc`'s) - `EBASIC_LIBRARY_PATH` avoids that collision on every
+platform.
 
 ## `ebpm run`
 

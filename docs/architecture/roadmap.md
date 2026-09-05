@@ -5815,6 +5815,63 @@ With the MSVC backend done and CI-wired, the user asked to bump/tag
   `v1.2.0` tarball (`curl` + `sha256sum`, no `gh`/`gh release` needed for
   this part - a plain tag archive URL works unconditionally).
 
+## CI-caught bug: `EBASIC_LIBRARY_PATH`'s `:` delimiter broke on Windows
+
+The gap noted just above (`v1.2.0` couldn't be watched through CI before
+tagging, no `gh` CLI locally) turned out to matter immediately: the user
+reported the real `windows-msvc` CI run (#147, commit `91c2aed`) failing
+`e2e_pkg_lib_and_app_extern_lib` - `LINK : fatal error LNK1181: cannot
+open input file 'ebfixturec.lib'`, on a fixture archive that plainly
+existed (its sibling single-package tests, `e2e_extern_c` etc., passed in
+the very same run). Fetched the real job log directly (the Browser tool,
+navigating GitHub's own Actions UI, since `gh` isn't available) rather
+than guessing from the one-line summary the user pasted.
+
+- **Root cause, found by tracing the actual data flow, not assumed**:
+  `tests/e2e_pkg/run_case.sh` exports `EBASIC_LIBRARY_PATH` (M5c's own
+  escape hatch for a real external library's search directory) joined
+  with `:`, and `pkg/src/build.cpp`'s `splitPathList` split on `:` to
+  match - a plain POSIX `PATH`-list convention that happens to be exactly
+  wrong the moment the value itself is a Windows absolute path: CI's own
+  path was `D:/a/ebasic/ebasic/build/windows-msvc/tests/fixtures`,
+  splitting into a bogus single-character `"D"` directory and a leading-
+  slash, no-drive-letter remainder. Confirmed genuinely toolchain-
+  agnostic, not an MSVC-specific bug: `splitPathList` never looks at
+  which compiler is in use at all.
+- **Why this wasn't caught by any of this session's own extensive local
+  `windows-msvc` testing before the CI push**: purely environmental luck,
+  not a real difference in behavior - this machine's own build tree also
+  sits on a `C:` drive, so the same mis-split remainder happened to
+  resolve back to the intended directory here (Windows' "root of the
+  current drive" path semantics), while CI's `D:`-drive runner had no
+  such coincidence to hide behind. `windows-mingw`'s own `-L` handling
+  turned out to tolerate the same mangled path everywhere it was tried
+  (real, but likely the same kind of coincidence, not a guarantee) -
+  underscoring that the bug was real and latent on every platform even
+  though only `windows-msvc`'s CI run happened to surface it.
+- **Fix**: `;` instead of `:` as `EBASIC_LIBRARY_PATH`'s delimiter, on
+  every platform - not `#ifdef`-ed per-OS to match each platform's native
+  `PATH` separator, since this is this project's own custom env var with
+  no obligation to match any convention, and `;` never legitimately
+  appears inside a directory name on any of the four target platforms
+  (unlike `:`, which every Windows absolute path contains by
+  construction). Changed in the one place that joins it
+  (`run_case.sh`) and the one place that splits it (`build.cpp`'s
+  `splitPathList`), plus every comment/doc describing the format
+  (`build.hpp`, `docs/guide/ebpm.md`) - `docs/architecture/roadmap.md`'s
+  own historical M5c-era `:`-separated description above left unchanged,
+  describing what was true then.
+- Verified live: `windows-msvc` full suite green - 64/64, `ctest --preset
+  windows-msvc -R e2e_pkg_lib_and_app_extern_lib` specifically rerun 5/5
+  clean (this test was never itself flaky - the earlier "did not build/
+  run" with no captured detail during this session's own pre-tag testing
+  was the antivirus-scan-lock class of flakiness already documented
+  above, a different failure signature from this real, deterministic
+  `LNK1181`). `windows-mingw`'s full suite stays green too (64/64) -
+  confirming the fix, not just the absence of a new regression, since
+  `splitPathList` is shared code neither toolchain's own flag-building
+  logic touches.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

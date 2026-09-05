@@ -40,7 +40,12 @@ rm -f "$WORKDIR/expected.stdout"
 
 export EBC="$EBC"
 if [ -n "$FIXTURE_LIB_DIR" ]; then
-    export EBASIC_LIBRARY_PATH="$FIXTURE_LIB_DIR${EBASIC_LIBRARY_PATH:+:$EBASIC_LIBRARY_PATH}"
+    # `;`-joined, matching build.cpp's own splitPathList - not `:`, which
+    # would collide with a Windows absolute path's drive-letter colon (a
+    # real bug this exact line caused: MSVC's LINK.exe failed to find a
+    # fixture archive that plainly existed, because the resulting search
+    # directory was corrupted at the "D:/..." colon).
+    export EBASIC_LIBRARY_PATH="$FIXTURE_LIB_DIR${EBASIC_LIBRARY_PATH:+;$EBASIC_LIBRARY_PATH}"
 fi
 ACTUAL="$WORKDIR/.actual.stdout"
 RUN_LOG="$WORKDIR/.ebpm_run.log"

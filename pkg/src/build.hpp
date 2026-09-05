@@ -44,7 +44,7 @@ int buildPackage(const Manifest& manifest, const std::string& packageDir,
 /// `#include`s `base`'s interface file directly) - and writes/updates
 /// `<rootDir>/ebasic.lock`. Every package also receives `-L` for each
 /// directory named in the `EBASIC_LIBRARY_PATH` environment variable (a
-/// `:`-separated list, read once) - the one mechanism for a real, external
+/// `;`-separated list, read once) - the one mechanism for a real, external
 /// (non-ebpm) system library's search directory, e.g. a `Lib "gtk-4"`
 /// binding's actual `libgtk-4` location (see docs/guide/ebpm.md). Returns
 /// the first non-zero ebc exit code encountered (0 on success); `err` is set

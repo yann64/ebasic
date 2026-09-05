@@ -34,13 +34,27 @@ void appendLibsSidecar(const std::string& targetDir, const std::string& pkgName,
     }
 }
 
-/// Splits a PATH-style, `:`-separated list of directories (empty segments
-/// skipped) - the format `EBASIC_LIBRARY_PATH` below uses.
+/// Splits a `;`-separated list of directories (empty segments skipped) -
+/// the format `EBASIC_LIBRARY_PATH` below uses. Deliberately `;` on every
+/// platform, not the OS-native `PATH`-list separator (`:` on POSIX) - a
+/// real, live bug found via CI (a `windows-msvc` run failing with `LINK :
+/// fatal error LNK1181: cannot open input file 'ebfixturec.lib'` on a
+/// fixture that plainly existed): splitting a Windows absolute path like
+/// `D:/a/ebasic/ebasic/build/.../fixtures` on `:` chops it at the drive
+/// letter, into a bogus single-character "D" directory and a leading-
+/// slash, no-drive-letter remainder that GCC/MinGW's own `-L` handling
+/// happened to still resolve correctly (Windows' "root of the current
+/// drive" semantics, combined with the CI runner always building on the
+/// same drive the path implied) while MSVC's `/LIBPATH:` did not - not a
+/// coincidence worth relying on either way. `;` never legitimately
+/// appears inside a directory name on any of this project's four target
+/// platforms, so it's a safe universal delimiter for this project's own
+/// custom env var, without needing `#ifdef`-ed per-platform splitting.
 std::vector<std::string> splitPathList(const std::string& value) {
     std::vector<std::string> out;
     size_t start = 0;
     while (start <= value.size()) {
-        size_t pos = value.find(':', start);
+        size_t pos = value.find(';', start);
         if (pos == std::string::npos) pos = value.size();
         if (pos > start) out.push_back(value.substr(start, pos - start));
         start = pos + 1;
@@ -52,7 +66,7 @@ std::vector<std::string> splitPathList(const std::string& value) {
 /// wherever `libgtk-4` lives, or this project's own e2e fixtures' hand-built
 /// `libebfixturec.a` - has no manifest/CLI representation today, only a
 /// dependency *package*'s own target dir does (see the transitive-deps loop
-/// below). `EBASIC_LIBRARY_PATH` (a `:`-separated list, read once here) is
+/// below). `EBASIC_LIBRARY_PATH` (a `;`-separated list, read once here) is
 /// the escape hatch: forwarded as `-L` to every `ebc` invocation, exactly
 /// like a dependency's target dir already is. Deliberately a distinct,
 /// ebasic-specific name, never the real `LIBRARY_PATH` - on Haiku, that
