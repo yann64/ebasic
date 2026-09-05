@@ -5805,11 +5805,15 @@ With the MSVC backend done and CI-wired, the user asked to bump/tag
   gap from the M8 Plan Summary's own environment, not a new one this
   bump introduced). Noted here rather than silently skipped.
 - `packaging/haiku/ebasic-1.1.0.recipe` intentionally *not* renamed/
-  updated in this same commit - haikuporter's `$portVersion`/
-  `CHECKSUM_SHA256` need the tag to actually exist on GitHub first (the
-  archive URL and its real sha256 only exist once `v1.2.0` is pushed),
-  exactly the same ordering constraint noted when `v1.1.0`'s own recipe
-  was created - a deliberate fast-follow, not an oversight.
+  updated in the version-bump commit itself - haikuporter's
+  `$portVersion`/`CHECKSUM_SHA256` need the tag to actually exist on
+  GitHub first (the archive URL and its real sha256 only exist once
+  `v1.2.0` is pushed), exactly the same ordering constraint noted when
+  `v1.1.0`'s own recipe was created. Done as an immediate fast-follow
+  once the tag was live: `packaging/haiku/ebasic-1.2.0.recipe` (renamed),
+  `CHECKSUM_SHA256` updated to the real sha256 of the actually-downloaded
+  `v1.2.0` tarball (`curl` + `sha256sum`, no `gh`/`gh release` needed for
+  this part - a plain tag archive URL works unconditionally).
 
 ## Testing Strategy
 
