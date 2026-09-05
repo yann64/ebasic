@@ -28,7 +28,7 @@ and live on real hardware (Haiku).
 
 ## Status
 
-`1.4.0`. All phased milestones (M0-M8: core language, C/C++ interop, `ebpm`,
+`1.5.0`. All phased milestones (M0-M8: core language, C/C++ interop, `ebpm`,
 precompiled runtime header, `docgen`, four-platform ports) are complete,
 along with post-M8 CLI ergonomics, Linux packaging (`.deb`/`.rpm`/Flatpak),
 OS-conditional dependencies, (M9) FreeBASIC-parity preprocessor directives

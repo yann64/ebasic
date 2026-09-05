@@ -1,5 +1,5 @@
 Name:           ebasic
-Version:        1.4.0
+Version:        1.5.0
 Release:        1%{?dist}
 Summary:        BASIC-to-C++ transpiler with package manager and doc generator
 Group:          Development/Tools
@@ -61,6 +61,13 @@ ctest --test-dir build --output-on-failure
 %{_mandir}/man1/docgen.1*
 
 %changelog
+* Sat Sep 05 2026 eBasic contributors <noreply@example.com> - 1.5.0-1
+- v1.5.0: typed function-pointer parameters in EXTERN/DECLARE (@ProcName
+  can now produce a real, structurally-checked function-pointer type
+  instead of always degrading to ANY PTR), and a real MSVC precompiled-
+  header rule (cl.exe now gets the same PCH speedup g++ already had,
+  verified live against real cl.exe).
+
 * Sat Sep 05 2026 eBasic contributors <noreply@example.com> - 1.4.0-1
 - v1.4.0: WinUI3 shim example (examples/winui3_shim/) - a hand-written
   C++/WinRT Windows App SDK application driven by a real eBasic program

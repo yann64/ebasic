@@ -1,3 +1,16 @@
+ebasic (1.5.0) unstable; urgency=medium
+
+  * Typed function-pointer parameters in EXTERN/DECLARE - @ProcName can
+    now produce a real, structurally-checked function-pointer type
+    (SUB|FUNCTION [Cdecl|Stdcall] ([ByVal] AS Type, ...) [AS ReturnType])
+    instead of always degrading to ANY PTR, enabling clean interop with
+    C APIs taking typed callbacks (qsort, atexit, EnumWindows, GLib
+    signal handlers, SQLite callbacks).
+  * Real MSVC precompiled-header rule - cl.exe now gets the same PCH
+    speedup g++ already had, verified live against real cl.exe.
+
+ -- eBasic contributors <noreply@example.com>  Sat, 05 Sep 2026 20:15:00 +0200
+
 ebasic (1.4.0) unstable; urgency=medium
 
   * WinUI3 shim example (examples/winui3_shim/) - a hand-written
