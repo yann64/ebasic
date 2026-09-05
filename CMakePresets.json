@@ -22,12 +22,23 @@
     },
     {
       "name": "windows-mingw",
-      "description": "MinGW port (M8) - run inside an MSYS2 (mingw64) shell, matching this project's CI (msys2/setup-msys2), where g++/gcc/Unix Makefiles are all provided natively - not a cross-compilation setup. MSVC is deferred (see docs/architecture/roadmap.md's M8 notes).",
+      "description": "MinGW port (M8) - run inside an MSYS2 (mingw64) shell, matching this project's CI (msys2/setup-msys2), where g++/gcc/Unix Makefiles are all provided natively - not a cross-compilation setup. See the windows-msvc preset for the MSVC alternative.",
       "generator": "Unix Makefiles",
       "binaryDir": "${sourceDir}/build/windows-mingw",
       "cacheVariables": {
         "CMAKE_CXX_COMPILER": "g++",
         "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "windows-msvc",
+      "description": "MSVC port - run from an 'x64 Native Tools Command Prompt for VS' (or with vcvarsall.bat x64 sourced first), where cl/lib/link/nmake and the INCLUDE/LIB env vars are all set up already. NMake Makefiles generator, not Unix Makefiles/Ninja - nmake ships with every MSVC install, so this preset needs nothing beyond the 'Desktop development with C++' workload, unlike windows-mingw's separate MSYS2 dependency. ebc's own backend-toolchain selection (compiler/src/driver/main.cpp's isMsvcToolchain) is independent of which compiler built ebc itself here - it switches to MSVC-style flags whenever -cxx/CXX names cl/cl.exe/clang-cl, regardless of this preset.",
+      "generator": "NMake Makefiles",
+      "binaryDir": "${sourceDir}/build/windows-msvc",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "cl",
+        "CMAKE_C_COMPILER": "cl",
         "CMAKE_BUILD_TYPE": "Debug"
       }
     },
@@ -57,6 +68,7 @@
     { "name": "linux-gcc", "configurePreset": "linux-gcc" },
     { "name": "linux-clang", "configurePreset": "linux-clang" },
     { "name": "windows-mingw", "configurePreset": "windows-mingw" },
+    { "name": "windows-msvc", "configurePreset": "windows-msvc" },
     { "name": "macos", "configurePreset": "macos" },
     { "name": "haiku", "configurePreset": "haiku" }
   ],
@@ -64,6 +76,7 @@
     { "name": "linux-gcc", "configurePreset": "linux-gcc", "output": { "outputOnFailure": true } },
     { "name": "linux-clang", "configurePreset": "linux-clang", "output": { "outputOnFailure": true } },
     { "name": "windows-mingw", "configurePreset": "windows-mingw", "output": { "outputOnFailure": true } },
+    { "name": "windows-msvc", "configurePreset": "windows-msvc", "output": { "outputOnFailure": true } },
     { "name": "macos", "configurePreset": "macos", "output": { "outputOnFailure": true } },
     { "name": "haiku", "configurePreset": "haiku", "output": { "outputOnFailure": true } }
   ]

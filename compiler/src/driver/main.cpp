@@ -149,6 +149,9 @@ void printUsage(std::ostream& os) {
     os << "  includer-relative lookup fails.\n";
     os << "  -l <name>: extra library to link, alongside any already named by the\n";
     os << "  module's own Lib \"name\" clauses.\n";
+    os << "  -cxx: g++/clang++-style flags are used by default; a backend named\n";
+    os << "  'cl'/'cl.exe'/'clang-cl' (matched on the basename) switches to\n";
+    os << "  MSVC-style flags automatically.\n";
 }
 
 /// M8e: resolves ebc's own on-disk location from argv[0], so
@@ -319,6 +322,208 @@ std::string currentTargetOS() {
 #endif
 }
 
+/// True when `cxx`'s own basename identifies an MSVC-CLI-compatible
+/// compiler driver (`cl.exe` itself, or `clang-cl` - Clang's MSVC-
+/// compatible front end, which accepts the same `/`-style flags) rather
+/// than the GCC/Clang-style (`-std=`, `-c ... -o`, `-shared`, `-l`/`-L`)
+/// driver every other backend (g++, clang++, real Clang) uses. Matched on
+/// the stem only (case-insensitively), so `-cxx`/`CXX` may name a bare
+/// command (found via PATH) or a full path, with or without ".exe" - this
+/// is the toolchain-abstraction layer the M8 Windows port's own notes
+/// (docs/architecture/roadmap.md) deferred MSVC support on.
+bool isMsvcToolchain(const std::string& cxx) {
+    std::string stem = fs::path(cxx).stem().string();
+    for (char& c : stem) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return stem == "cl" || stem == "clang-cl";
+}
+
+/// Builds the "compile one .gen.cpp to one object file" step shared by all
+/// three build modes (--lib, --shared-lib, plain executable) - they differ
+/// only in what happens *after* this step (archive vs. link-as-DLL vs.
+/// link-as-exe). `runtimeIncludes` is `runtimeIncludeArgs()`'s own output
+/// (alternating "-I"/path tokens) - translated to "/I" for MSVC, since
+/// cl.exe's PCH model is flag-driven rather than GCC's automatic same-
+/// directory .gch lookup, so an MSVC build harmlessly ignores the (GCC-
+/// only) .gch sitting in that first -I/-I entry and falls through to the
+/// real header in the second, exactly like a plain clang++ build already
+/// does today - no separate MSVC PCH implementation needed for this to be
+/// *correct*, just not yet as fast as the GCC path. `positionIndependent`
+/// mirrors the existing GCC/Clang `-fPIC` (meaningless on Windows/MSVC -
+/// PE relocation works differently - so never requested there).
+std::vector<std::string> compileToObjectArgs(const std::string& cxx, bool msvc,
+                                              const std::vector<std::string>& runtimeIncludes,
+                                              const fs::path& cppPath, const fs::path& objPath,
+                                              bool positionIndependent) {
+    std::vector<std::string> args = {cxx};
+    if (msvc) {
+        args.push_back("/nologo");
+        args.push_back("/std:c++17");
+        /// C++/WinRT and most real-world Windows C++ needs the standard
+        /// (synchronous) exception-unwind model turned on explicitly -
+        /// unlike GCC/Clang, MSVC doesn't enable it by default.
+        args.push_back("/EHsc");
+        for (const std::string& a : runtimeIncludes) args.push_back(a == "-I" ? "/I" : a);
+        args.push_back("/c");
+        args.push_back(cppPath.string());
+        args.push_back("/Fo:" + objPath.string());
+    } else {
+        args.push_back("-std=c++17");
+        for (const std::string& a : runtimeIncludes) args.push_back(a);
+        if (positionIndependent) args.push_back("-fPIC");
+        args.push_back("-c");
+        args.push_back(cppPath.string());
+        args.push_back("-o");
+        args.push_back(objPath.string());
+    }
+    return args;
+}
+
+/// Runs a backend-compiler invocation that involves actually compiling a
+/// source file (as opposed to a pure archive/link-only step), routing
+/// through `runProcessCaptureOutput` (discarding stdout on success, only
+/// echoing it via stderr on failure) rather than plain `runProcess` when
+/// `msvc` is set. `cl.exe` unconditionally echoes each source filename it
+/// compiles to stdout with no documented flag to suppress it - unlike
+/// GCC/Clang, which stay silent on a successful compile - which would
+/// otherwise leak into whatever the caller (a test harness, `ebpm run`)
+/// treats as "the compiled program's real stdout" the moment that same
+/// stream later runs the freshly built binary too - a real, confirmed
+/// failure mode (an extra "foo.gen.cpp" line ahead of a package's actual
+/// printed output). `runProcessCaptureOutput` only captures the child's
+/// stdout - its stderr (where GCC/Clang's own diagnostics normally live)
+/// already flows straight through unchanged either way; MSVC diagnostics
+/// go to stdout instead, so re-printing the captured output on failure
+/// keeps them visible too, not just discarded alongside the filename
+/// echo.
+int runCompilerStep(const std::vector<std::string>& args, bool msvc) {
+    if (!msvc) return ebasic::runProcess(ebasic::hostExecArgs(args));
+    std::string output;
+    int rc = ebasic::runProcessCaptureOutput(ebasic::hostExecArgs(args), output);
+    if (rc != 0) std::cerr << output;
+    return rc;
+}
+
+/// Builds the "archive one object file into a static library" step -
+/// `ar rcs` for GCC/Clang-family toolchains, MSVC's own librarian
+/// (`lib.exe`) otherwise. The output filename is unconditionally
+/// "lib<name>.a" regardless of toolchain (see main()'s --lib mode below) -
+/// ebpm's own archivePath() (pkg/src/build.cpp) hardcodes exactly this
+/// pattern on every platform already, and neither tool cares about the
+/// ".a" extension beyond using it as a plain output filename.
+std::vector<std::string> archiveArgs(const fs::path& archivePath, const fs::path& objPath, bool msvc) {
+    if (msvc) {
+        return {"lib", "/nologo", "/OUT:" + archivePath.string(), objPath.string()};
+    }
+    return {"ar", "rcs", archivePath.string(), objPath.string()};
+}
+
+/// Resolves one `-l`/`Lib "name"` entry to the token MSVC's linker should
+/// see - two different naming conventions collide in the same `libNames`
+/// list, and MSVC (unlike GNU `-l`, which auto-tries both "lib<name>.a"
+/// and "<name>.lib" on Windows already) needs the exact filename: ebc's
+/// own `--lib`-built archives are unconditionally named "lib<name>.a"
+/// regardless of toolchain (see `archiveArgs` above - so a multi-package
+/// ebpm build never needs to change based on platform), while a CMake- or
+/// hand-built library (a test fixture, or eventually a real system import
+/// lib like `User32.lib`) keeps its own toolchain-native name with no
+/// "lib" prefix. Checked against the actual `-L`/`libDirs` search
+/// directories rather than guessed, since ebc has no other way to know
+/// which convention a given name follows; a name found in neither form
+/// there falls through to the bare "<name>.lib" token so MSVC's own
+/// default LIB search path (SDK/CRT directories) still resolves a real
+/// system library exactly like it would today.
+std::string resolveMsvcLibToken(const std::string& name, const std::vector<std::string>& libDirs) {
+    std::error_code ec;
+    for (const std::string& dir : libDirs) {
+        if (fs::exists(fs::path(dir) / ("lib" + name + ".a"), ec)) return "lib" + name + ".a";
+        if (fs::exists(fs::path(dir) / (name + ".lib"), ec)) return name + ".lib";
+    }
+    return name + ".lib";
+}
+
+/// Builds the "link one object file into a real shared library" step -
+/// this is where the three GCC/Clang-family shapes (ELF `-shared`,
+/// Mach-O `-dynamiclib`, MinGW's PE+import-library convention) and MSVC's
+/// own shape (the compile driver's `/LD`, plus a `/link`-prefixed section
+/// forwarded verbatim to `link.exe` for `/IMPLIB`, `/LIBPATH`, and plain
+/// "<name>.lib" library tokens - `/IMPLIB` has no `cl.exe`-level spelling,
+/// so it must go through `/link`) all live. `libNames` is the merged,
+/// already-ordered `codegen.externLibs()` + `opts.extraLibNames` list -
+/// order doesn't matter to MSVC's linker, but keeping it identical to the
+/// GCC/Clang path's own traditional-linker-safe ordering costs nothing.
+std::vector<std::string> sharedLinkArgs(const std::string& cxx, bool msvc, const std::string& targetOS,
+                                         const fs::path& objPath, const fs::path& sharedLibPath,
+                                         const fs::path& importLibPath,
+                                         const std::vector<std::string>& libDirs,
+                                         const std::vector<std::string>& libNames) {
+    if (msvc) {
+        std::vector<std::string> args = {cxx, "/nologo", objPath.string(), "/LD",
+                                          "/Fe:" + sharedLibPath.string(), "/link",
+                                          "/IMPLIB:" + importLibPath.string()};
+        for (const std::string& dir : libDirs) args.push_back("/LIBPATH:" + dir);
+        for (const std::string& lib : libNames) args.push_back(resolveMsvcLibToken(lib, libDirs));
+        return args;
+    }
+    bool isMacos = targetOS == "macos";
+    bool isWindows = targetOS == "windows";
+    std::vector<std::string> args = {cxx};
+    args.push_back(isMacos ? "-dynamiclib" : "-shared");
+    if (!isWindows) args.push_back("-fPIC");
+    args.push_back(objPath.string());
+    args.push_back("-o");
+    args.push_back(sharedLibPath.string());
+    if (isWindows) args.push_back("-Wl,--out-implib," + importLibPath.string());
+    for (const std::string& dir : libDirs) {
+        args.push_back("-L");
+        args.push_back(dir);
+    }
+    for (const std::string& lib : libNames) args.push_back("-l" + lib);
+    return args;
+}
+
+/// Builds the plain-executable mode's single combined compile+link step -
+/// MSVC's `cl.exe` still does this in one invocation the same way g++/
+/// clang++ do, just with `/`-style flags and, when there's anything to
+/// link beyond the runtime, a `/link`-prefixed section forwarded to
+/// `link.exe` for `/LIBPATH`/"<name>.lib" tokens (mirroring
+/// `sharedLinkArgs` above).
+std::vector<std::string> exeCompileLinkArgs(const std::string& cxx, bool msvc,
+                                             const std::vector<std::string>& runtimeIncludes,
+                                             const fs::path& cppPath, const std::string& outputPath,
+                                             const std::vector<std::string>& libDirs,
+                                             const std::vector<std::string>& libNames) {
+    std::vector<std::string> args = {cxx};
+    if (msvc) {
+        args.push_back("/nologo");
+        args.push_back("/std:c++17");
+        args.push_back("/EHsc");
+        for (const std::string& a : runtimeIncludes) args.push_back(a == "-I" ? "/I" : a);
+        args.push_back(cppPath.string());
+        args.push_back("/Fe:" + outputPath);
+        if (!libDirs.empty() || !libNames.empty()) {
+            args.push_back("/link");
+            for (const std::string& dir : libDirs) args.push_back("/LIBPATH:" + dir);
+            for (const std::string& lib : libNames) args.push_back(resolveMsvcLibToken(lib, libDirs));
+        }
+        return args;
+    }
+    args.push_back("-std=c++17");
+    for (const std::string& a : runtimeIncludes) args.push_back(a);
+    args.push_back(cppPath.string());
+    args.push_back("-o");
+    args.push_back(outputPath);
+    /// Library names from `Lib "name"` clauses (M4) - -l flags must come
+    /// after the object/source files on the command line for a
+    /// traditional (non-`--start-group`) linker to resolve symbols from
+    /// them correctly.
+    for (const std::string& dir : libDirs) {
+        args.push_back("-L");
+        args.push_back(dir);
+    }
+    for (const std::string& lib : libNames) args.push_back("-l" + lib);
+    return args;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -402,8 +607,30 @@ int main(int argc, char** argv) {
     std::string cxx = opts.cxx;
     if (cxx.empty()) {
         const char* envCxx = std::getenv("CXX");
-        cxx = envCxx ? envCxx : "g++";
+        if (envCxx) {
+            cxx = envCxx;
+        } else {
+            /// No explicit backend named - default to whichever family
+            /// built *this* ebc binary, not unconditionally "g++": an
+            /// MSVC-built ebc (_MSC_VER) defaults to "cl" rather than
+            /// silently falling back to whatever g++ happens to be on
+            /// PATH, which would then try to link this build's own
+            /// MSVC-format static libs (e.g. a fixture archive built by
+            /// the same CMake preset) with GNU ld - a real, confirmed
+            /// failure mode ("corrupt .drectve", "ld returned N exit
+            /// status") distinct from anything about the .bas source
+            /// itself. Every other build of ebc (g++, clang++, and any
+            /// future clang-cl build too, since __clang__ without
+            /// _MSC_VER still means a GCC/Clang-flag-shaped driver) keeps
+            /// today's plain "g++" default, unchanged.
+#ifdef _MSC_VER
+            cxx = "cl";
+#else
+            cxx = "g++";
+#endif
+        }
     }
+    bool msvc = isMsvcToolchain(cxx);
 
     int rc = 0;
     if (opts.libMode) {
@@ -427,16 +654,11 @@ int main(int argc, char** argv) {
         /// for why a downstream consumer needs it forwarded transitively.
         fs::path libsPath = outDir / (libName + ".libs");
 
-        std::vector<std::string> compileArgs = {cxx, "-std=c++17"};
-        for (const std::string& a : runtimeIncludeArgs(argv[0])) compileArgs.push_back(a);
-        compileArgs.push_back("-c");
-        compileArgs.push_back(cppPath.string());
-        compileArgs.push_back("-o");
-        compileArgs.push_back(objPath.string());
-        rc = ebasic::runProcess(ebasic::hostExecArgs(compileArgs));
+        std::vector<std::string> compileArgs = compileToObjectArgs(
+            cxx, msvc, runtimeIncludeArgs(argv[0]), cppPath, objPath, /*positionIndependent=*/false);
+        rc = runCompilerStep(compileArgs, msvc);
         if (rc == 0) {
-            rc = ebasic::runProcess(
-                ebasic::hostExecArgs({"ar", "rcs", archivePath.string(), objPath.string()}));
+            rc = ebasic::runProcess(ebasic::hostExecArgs(archiveArgs(archivePath, objPath, msvc)));
         }
         if (rc == 0) {
             std::ofstream ifaceOut(ifacePath);
@@ -475,39 +697,15 @@ int main(int argc, char** argv) {
         /// shared object itself is linked against).
         fs::path importLibPath = outDir / ("lib" + libName + ".dll.a");
 
-        std::vector<std::string> compileArgs = {cxx, "-std=c++17"};
-        for (const std::string& a : runtimeIncludeArgs(argv[0])) compileArgs.push_back(a);
-        if (!isWindows) compileArgs.push_back("-fPIC");
-        compileArgs.push_back("-c");
-        compileArgs.push_back(cppPath.string());
-        compileArgs.push_back("-o");
-        compileArgs.push_back(objPath.string());
-        rc = ebasic::runProcess(ebasic::hostExecArgs(compileArgs));
+        std::vector<std::string> compileArgs = compileToObjectArgs(
+            cxx, msvc, runtimeIncludeArgs(argv[0]), cppPath, objPath, /*positionIndependent=*/!isWindows);
+        rc = runCompilerStep(compileArgs, msvc);
 
         if (rc == 0) {
-            std::vector<std::string> linkArgs = {cxx};
-            if (isMacos) {
-                linkArgs.push_back("-dynamiclib");
-            } else {
-                linkArgs.push_back("-shared");
-            }
-            if (!isWindows) linkArgs.push_back("-fPIC");
-            linkArgs.push_back(objPath.string());
-            linkArgs.push_back("-o");
-            linkArgs.push_back(sharedLibPath.string());
-            if (isWindows) {
-                linkArgs.push_back("-Wl,--out-implib," + importLibPath.string());
-            }
-            for (const std::string& dir : opts.libDirs) {
-                linkArgs.push_back("-L");
-                linkArgs.push_back(dir);
-            }
-            for (const std::string& lib : codegen.externLibs()) {
-                linkArgs.push_back("-l" + lib);
-            }
-            for (const std::string& lib : opts.extraLibNames) {
-                linkArgs.push_back("-l" + lib);
-            }
+            std::vector<std::string> libNames = codegen.externLibs();
+            for (const std::string& lib : opts.extraLibNames) libNames.push_back(lib);
+            std::vector<std::string> linkArgs = sharedLinkArgs(
+                cxx, msvc, targetOS, objPath, sharedLibPath, importLibPath, opts.libDirs, libNames);
             rc = ebasic::runProcess(ebasic::hostExecArgs(linkArgs));
         }
         if (rc == 0) {
@@ -519,29 +717,15 @@ int main(int argc, char** argv) {
         std::error_code ec;
         fs::remove(objPath, ec);
     } else {
-        std::vector<std::string> compileArgs = {cxx, "-std=c++17"};
-        for (const std::string& a : runtimeIncludeArgs(argv[0])) compileArgs.push_back(a);
-        compileArgs.push_back(cppPath.string());
-        compileArgs.push_back("-o");
-        compileArgs.push_back(opts.outputPath);
-        for (const std::string& dir : opts.libDirs) {
-            compileArgs.push_back("-L");
-            compileArgs.push_back(dir);
-        }
-        /// Library names from `Lib "name"` clauses (M4) - -l flags must come
-        /// after the object/source files on the command line for a
-        /// traditional (non-`--start-group`) linker to resolve symbols from
-        /// them correctly.
-        for (const std::string& lib : codegen.externLibs()) {
-            compileArgs.push_back("-l" + lib);
-        }
-        /// M5c: explicit -l names (a transitive dependency's library, whose
-        /// own Lib clause never appears in *this* module at all - see
+        /// Library names from `Lib "name"` clauses (M4), plus M5c's own
+        /// explicit -l names (a transitive dependency's library, whose own
+        /// Lib clause never appears in *this* module at all - see
         /// Options::extraLibNames's doc comment).
-        for (const std::string& lib : opts.extraLibNames) {
-            compileArgs.push_back("-l" + lib);
-        }
-        rc = ebasic::runProcess(ebasic::hostExecArgs(compileArgs));
+        std::vector<std::string> libNames = codegen.externLibs();
+        for (const std::string& lib : opts.extraLibNames) libNames.push_back(lib);
+        std::vector<std::string> compileArgs = exeCompileLinkArgs(
+            cxx, msvc, runtimeIncludeArgs(argv[0]), cppPath, opts.outputPath, opts.libDirs, libNames);
+        rc = runCompilerStep(compileArgs, msvc);
     }
 
     if (!opts.keepCpp) {

@@ -5683,6 +5683,100 @@ deferred. The only remaining unstarted item is the Win32 adapter
 (`eb-win32` doesn't exist yet - impractical to build/verify in this
 environment, no Windows machine available).
 
+## MSVC backend for `ebc` - the M8 windows-msvc follow-on, done
+
+The M8 Windows port (see M8 Plan Summary above) deliberately targeted
+MinGW first and deferred MSVC as "a genuinely different toolchain-
+abstraction layer... a separate follow-on." Unlike M8 itself, this had a
+real Windows machine to build and verify on directly (MSVC 14.51.36231/VS
+"18" Community, Windows SDK 10.0.26100.0, already installed) - no
+CI-round-trip-only verification needed.
+
+**Scope**: prompted by a feasibility study into WinUI3 support (C++/WinRT
+needs the real MSVC ABI; MinGW g++ doesn't produce MSVC-ABI-compatible
+binaries) - this slice is Phase 1 of that study's recommended path: just
+the backend-toolchain piece, independently useful on its own (MSVC-only
+libraries, Visual-Studio-debuggable binaries) regardless of whether WinUI3
+itself is ever pursued (Phase 2/3 of that study - `Stdcall` calling-
+convention support and a documented C++/WinRT-shim interop pattern -
+remain unstarted; WinRT/WinUI3 consumption needs templates/COM/coroutine
+support nothing in `ebc` has today, entirely separate from this).
+
+- `compiler/src/driver/main.cpp` gained `isMsvcToolchain()` (matches
+  `cl`/`clang-cl` on `-cxx`/`CXX`'s stem) and a parallel MSVC-flag builder
+  for every command-line shape the GCC/Clang path already had:
+  `compileToObjectArgs`, `archiveArgs` (`lib.exe` instead of `ar`),
+  `sharedLinkArgs` (`cl /LD` + a `/link`-forwarded section for `/IMPLIB`/
+  `/LIBPATH`, since `/IMPLIB` has no `cl.exe`-level spelling), and
+  `exeCompileLinkArgs`. `runtimeIncludeArgs()`/the M6 PCH mechanism needed
+  *no* change at all - confirmed, not assumed: an MSVC build simply never
+  finds the GCC-only `.gch` sitting in the PCH `-I`/`/I` entry and falls
+  through to the real header, exactly like a plain `clang++` build already
+  does today (correct, just without the speedup - a real MSVC PCH rule
+  remains a fast-follow, not a blocker).
+- Two real bugs found only by actually building and running the whole
+  suite through this new path, not by reasoning about it:
+  1. **The default backend didn't self-select.** `ebc` defaulting to
+     literal `"g++"` regardless of how `ebc` itself was built meant an
+     MSVC-built `ebc`, run with no `-cxx`, would still shell out to
+     whatever `g++` happened to be on `PATH` - which then tried to link
+     this same build's own MSVC-format static libs (fixture archives, in
+     `_MSC_VER`ebpm-orchestrated multi-package builds) with GNU `ld`,
+     failing with "corrupt .drectve at end of def file" /
+     "collect2.exe: error: ld returned N exit status" (surfaced first in
+     `ebpm`-orchestrated multi-package builds and single-file `Extern`
+     fixture tests, both of which link against a locally-built archive).
+     Fixed by
+     defaulting to `"cl"` when `ebc` itself was built with `_MSC_VER`
+     (every other build - g++, clang++ - keeps today's plain `"g++"`
+     default unchanged).
+  2. **`-l`/`Lib "name"` is overloaded, and MSVC has no auto-prefixing.**
+     GNU `-lfoo` transparently finds `libfoo.a` (`ar`-family
+     conventions) *and* `foo.lib` (Windows import-lib convention) - MSVC's
+     linker does neither automatically, so a single `<name>.lib` token
+     broke ebc's own `--lib` archives (always unconditionally named
+     `lib<name>.a` regardless of platform, by original M5 design, so
+     ebpm's `archivePath()` never needs to change per-toolchain) the
+     moment they needed linking rather than just archiving. Fixed with
+     `resolveMsvcLibToken()`, which checks the actual `-L` search
+     directories for either spelling and falls through to the bare
+     `<name>.lib` guess (so a genuine system import lib like
+     `User32.lib`, resolved from MSVC's own default LIB path rather than
+     an `-L` dir, still works unchanged) rather than guessing blind.
+  3. **`cl.exe` echoes every source filename to stdout with no
+     documented way to suppress it** (confirmed live - GCC/Clang stay
+     silent on a successful compile, `cl.exe` doesn't) - invisible until
+     an ebpm-orchestrated `run` let that echo leak into the exact stdout
+     stream the freshly-built program's own output was about to share,
+     producing an extra `simple_bin.gen.cpp` line ahead of a package's
+     real printed output. Fixed by routing only the compile-involving
+     steps through the existing `runProcessCaptureOutput` (already built
+     for M8a/M5d, previously used only by `ebpm`'s git plumbing) instead
+     of plain `runProcess` when `msvc` is set - discarding the captured
+     stdout on success, re-emitting it on failure so diagnostics (which
+     `cl.exe` also puts on stdout, unlike GCC/Clang's stderr) stay
+     visible.
+- New `windows-msvc` CMake preset (`NMake Makefiles`, ships with every
+  MSVC install already - no separate Ninja/MSYS2 dependency the way
+  `windows-mingw` needs). Verified live: `ebc`/`ebpm`/`docgen`/
+  `ebasic_lsp` all build cleanly with zero source changes needed outside
+  `main.cpp`'s own toolchain-selection logic - confirming the codegen
+  output, runtime headers, and `process.cpp`'s `CreateProcessA` launcher
+  were already genuinely toolchain-neutral C++17, not just assumed to be.
+- Full suite run repeatedly under `windows-msvc`; the *deterministic*
+  failures (the three bugs above) are all fixed and stay fixed across
+  reruns. What's left is real, but environmental and pre-existing, not
+  new: this machine's antivirus real-time protection intermittently locks
+  a just-written `.exe`/`.dll` for scanning, surfacing as "Permission
+  denied", a blank/silent failure, or "LoadLibrary failed" - confirmed to
+  hit a *different random subset* of tests on each full run, under
+  `windows-mingw` too (same symptom, unrelated to this work - it already
+  happened earlier in this same session running plain g++ builds), and
+  to clear up on an immediate rerun of the same test with no code change.
+  `windows-mingw` itself stays at its own pre-existing pass rate,
+  unaffected - confirmed by rebuilding and rerunning its full suite too,
+  since every new code path here is strictly behind `if (msvc)`.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

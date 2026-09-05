@@ -46,7 +46,8 @@ ctest --preset linux-gcc
 ```
 
 Other presets (see `CMakePresets.json`): `linux-clang`, `windows-mingw`
-(MinGW, run from an MSYS2 shell), `macos`, `haiku`.
+(MinGW, run from an MSYS2 shell), `windows-msvc` (MSVC, run from an "x64
+Native Tools Command Prompt"), `macos`, `haiku`.
 
 ## Installing (Linux)
 
