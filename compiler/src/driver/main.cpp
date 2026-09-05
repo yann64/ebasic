@@ -8,9 +8,11 @@
 
 #include "ebasic/version.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -59,6 +61,13 @@ struct Options {
     /// invocation on its own.
     bool showVersion = false;
     bool showHelp = false; ///< see showVersion
+    /// Echoes each backend-compiler invocation's exact argv to stderr
+    /// before running it. Not tied to any one feature - generically useful
+    /// for diagnosing what ebc actually told the backend compiler to do -
+    /// but the immediate reason it exists is to make MSVC PCH usage
+    /// (`/Yu`/`/Fp`) deterministically verifiable in a test (grep this
+    /// output) rather than inferred from wall-clock timing.
+    bool verbose = false;
 };
 
 bool parseArgs(int argc, char** argv, Options& opts, std::string& err) {
@@ -105,6 +114,8 @@ bool parseArgs(int argc, char** argv, Options& opts, std::string& err) {
             opts.showVersion = true;
         } else if (a == "-h" || a == "--help") {
             opts.showHelp = true;
+        } else if (a == "--verbose") {
+            opts.verbose = true;
         } else if (!a.empty() && a[0] == '-') {
             err = "unknown option: " + a;
             return false;
@@ -129,7 +140,7 @@ bool parseArgs(int argc, char** argv, Options& opts, std::string& err) {
 
 void printUsage(std::ostream& os) {
     os << "usage: ebc <input.bas> [-o <output>] [-cxx <compiler>] [-L <dir>]... [-I <dir>]...\n";
-    os << "           [-l <name>]... [--keep-cpp] [--lib | --shared-lib]\n";
+    os << "           [-l <name>]... [--keep-cpp] [--lib | --shared-lib] [--verbose]\n";
     os << "       ebc [-v | --version] [-h | --help]\n";
     os << "  --lib: build a library instead of an executable - <output> is a bare\n";
     os << "  name; produces lib<output>.a (a static archive), <output>.iface.bas\n";
@@ -152,6 +163,8 @@ void printUsage(std::ostream& os) {
     os << "  -cxx: g++/clang++-style flags are used by default; a backend named\n";
     os << "  'cl'/'cl.exe'/'clang-cl' (matched on the basename) switches to\n";
     os << "  MSVC-style flags automatically.\n";
+    os << "  --verbose: echo each backend-compiler invocation's exact argv to\n";
+    os << "  stderr before running it.\n";
 }
 
 /// M8e: resolves ebc's own on-disk location from argv[0], so
@@ -228,20 +241,59 @@ fs::path stageRuntimeDirForFlatpak(const fs::path& dir, const std::string& kind)
     return cacheDir;
 }
 
-/// M6/M8e: the runtime's PCH shadow directory and header include dir, added
-/// as extra -I entries (PCH dir first) so a plain
-/// `#include "ebasic/runtime/runtime.hpp"` automatically prefers a
+/// The literal header text codegen's generate() puts as the first #include
+/// of every generated .cpp - shared here so the MSVC /Yc (build side, see
+/// runtime/CMakeLists.txt) and /Yu (consume side, below) arguments use the
+/// byte-identical string rather than each independently reconstructing it.
+constexpr const char* kRuntimeHeaderInclude = "ebasic/runtime/runtime.hpp";
+
+/// M6/M8e/M9 (real MSVC PCH): the runtime's PCH shadow directory and header
+/// include dir. For GCC, added as extra -I entries (PCH dir first) so a
+/// plain `#include "ebasic/runtime/runtime.hpp"` automatically prefers a
 /// precompiled .gch sitting there - no other change to the compile
 /// invocation is needed (verified empirically: GCC's own automatic PCH
 /// lookup, and its own graceful fallback when the .gch doesn't match, both
-/// require no special flags at all). Tries the installed layout relative to
-/// ebc's own executable path first (EBASIC_RUNTIME_INSTALL_RELDIR, see
-/// compiler/CMakeLists.txt and runtime/CMakeLists.txt's install() rules),
-/// falling back to the build-tree paths baked in at compile time - which is
-/// what every existing dev/test workflow (running ebc straight from the
-/// build tree) still gets, unchanged.
-std::vector<std::string> runtimeIncludeArgs(const std::string& argv0) {
+/// require no special flags at all). MSVC has no such automatic lookup or
+/// graceful fallback - cl.exe needs an explicit `/Yu"..."` + `/Fp<path>`
+/// pair on every consuming compile, and a stale/mismatched .pch is a hard
+/// error, not a silent reparse - so `usePch` (default true) lets the caller
+/// retry once without them on that specific failure (see
+/// runCompilerStepWithPchFallback), and the .pch's existence is always
+/// checked explicitly first (never trusted the way a non-empty
+/// EBASIC_RUNTIME_PCH_DIR is trusted for GCC's own build-tree fallback
+/// below) - passing /Yu/Fp for a .pch that doesn't actually exist would be
+/// an MSVC hard-error, not a harmless no-op the way an absent .gch is for
+/// GCC. Tries the installed layout relative to ebc's own executable path
+/// first (EBASIC_RUNTIME_INSTALL_RELDIR, see compiler/CMakeLists.txt and
+/// runtime/CMakeLists.txt's install() rules), falling back to the
+/// build-tree paths baked in at compile time - which is what every
+/// existing dev/test workflow (running ebc straight from the build tree)
+/// still gets, unchanged.
+std::vector<std::string> runtimeIncludeArgs(const std::string& argv0, bool msvc, bool usePch = true) {
     std::vector<std::string> args;
+    std::string pchFileName = msvc ? "runtime.pch" : "runtime.hpp.gch";
+
+    auto appendPchFlags = [&](const fs::path& pchDir) {
+        if (msvc) {
+            /// No quotes around the header name (unlike some MSVC-flag
+            /// examples elsewhere) - MSVC only needs `/Yu"..."` quoting to
+            /// disambiguate a space in the filename, and quoting it here
+            /// anyway once caused a real bug: CMake's NMake-Makefiles
+            /// generator didn't carry a hand-escaped `\"` through to the
+            /// literal argv byte-for-byte the way this file's own
+            /// quoteArgvArgument (process.cpp) does, so cl.exe ended up
+            /// receiving literal backslash-quote characters instead of a
+            /// real `"` - a C2857 "#include ... could not be found"
+            /// mismatch against runtime_pch.cpp's own unquoted #include
+            /// text. Simpler to just never need quoting at all, on both
+            /// the /Yc (runtime/CMakeLists.txt) and /Yu (here) sides.
+            args.push_back(std::string("/Yu") + kRuntimeHeaderInclude);
+            args.push_back("/Fp" + (pchDir / "ebasic" / "runtime" / pchFileName).string());
+        } else {
+            args.push_back("-I");
+            args.push_back(pchDir.string());
+        }
+    };
 
     fs::path exeDir = resolveOwnExecutablePath(argv0).parent_path();
     fs::path installedBase = exeDir / EBASIC_RUNTIME_INSTALL_RELDIR;
@@ -250,7 +302,7 @@ std::vector<std::string> runtimeIncludeArgs(const std::string& argv0) {
     if (fs::exists(installedInclude / "ebasic" / "runtime" / "runtime.hpp", ec)) {
         fs::path effectiveInclude = installedInclude;
         fs::path installedPch = installedBase / "pch";
-        bool hasPch = fs::exists(installedPch / "ebasic" / "runtime" / "runtime.hpp.gch", ec);
+        bool hasPch = usePch && fs::exists(installedPch / "ebasic" / "runtime" / pchFileName, ec);
         fs::path effectivePch = installedPch;
 
         if (fs::exists("/.flatpak-info", ec)) {
@@ -258,22 +310,48 @@ std::vector<std::string> runtimeIncludeArgs(const std::string& argv0) {
             if (hasPch) effectivePch = stageRuntimeDirForFlatpak(installedPch, "pch");
         }
 
-        if (hasPch) {
-            args.push_back("-I");
-            args.push_back(effectivePch.string());
-        }
+        if (hasPch) appendPchFlags(effectivePch);
         args.push_back("-I");
         args.push_back(effectiveInclude.string());
         return args;
     }
 
-    if (std::string pchDir = EBASIC_RUNTIME_PCH_DIR; !pchDir.empty()) {
-        args.push_back("-I");
-        args.push_back(pchDir);
+    std::string pchDir = EBASIC_RUNTIME_PCH_DIR;
+    if (!pchDir.empty()) {
+        /// GCC keeps its own pre-existing behavior here (trust the
+        /// non-empty compile-time constant, no runtime file-existence
+        /// check) - see this function's own doc comment for why MSVC can't
+        /// do the same.
+        bool hasPch = usePch && (msvc ? fs::exists(fs::path(pchDir) / "ebasic" / "runtime" / pchFileName, ec)
+                                       : true);
+        if (hasPch) appendPchFlags(pchDir);
     }
     args.push_back("-I");
     args.push_back(EBASIC_RUNTIME_INCLUDE_DIR);
     return args;
+}
+
+/// MSVC-only, and only meaningful when `runtimeIncludes` (from
+/// runtimeIncludeArgs) actually used the PCH: the path to
+/// runtime_pch.obj, the inert-but-mandatory companion object the /Yc PCH-
+/// creation compile always produces alongside the .pch itself (see
+/// runtime/CMakeLists.txt's MSVC block). Unlike GCC's .gch, cl.exe
+/// requires this specific object be present in the *link* whenever any
+/// input .obj was compiled with `/Yu` against the same .pch - a real
+/// MSVC linker requirement (LNK2011 "precompiled object missing from the
+/// link" otherwise), confirmed empirically against real cl.exe, not
+/// something the initial design anticipated. Derived from the already-
+/// computed `/Fp<path>` token rather than re-deriving the installed-vs-
+/// build-tree lookup a second time - same directory, sibling filename.
+/// Returns an empty path when `runtimeIncludes` has no `/Fp` token at all
+/// (PCH wasn't used for this invocation).
+fs::path msvcRuntimePchObjectPath(const std::vector<std::string>& runtimeIncludes) {
+    for (const std::string& a : runtimeIncludes) {
+        if (a.rfind("/Fp", 0) == 0) {
+            return fs::path(a.substr(3)).parent_path() / "runtime_pch.obj";
+        }
+    }
+    return {};
 }
 
 /// M5 (--lib mode, and --shared-lib/-dll): a library's object file must
@@ -378,6 +456,15 @@ std::vector<std::string> compileToObjectArgs(const std::string& cxx, bool msvc,
     return args;
 }
 
+/// Echoes `args` to stderr, one token per line prefixed "+ ", when
+/// `verbose` - see Options::verbose's own doc comment for why this exists.
+void echoIfVerbose(const std::vector<std::string>& args, bool verbose) {
+    if (!verbose) return;
+    std::cerr << "+";
+    for (const std::string& a : args) std::cerr << " " << a;
+    std::cerr << "\n";
+}
+
 /// Runs a backend-compiler invocation that involves actually compiling a
 /// source file (as opposed to a pure archive/link-only step), routing
 /// through `runProcessCaptureOutput` (discarding stdout on success, only
@@ -395,12 +482,57 @@ std::vector<std::string> compileToObjectArgs(const std::string& cxx, bool msvc,
 /// go to stdout instead, so re-printing the captured output on failure
 /// keeps them visible too, not just discarded alongside the filename
 /// echo.
-int runCompilerStep(const std::vector<std::string>& args, bool msvc) {
+int runCompilerStep(const std::vector<std::string>& args, bool msvc, bool verbose = false) {
+    echoIfVerbose(args, verbose);
     if (!msvc) return ebasic::runProcess(ebasic::hostExecArgs(args));
     std::string output;
     int rc = ebasic::runProcessCaptureOutput(ebasic::hostExecArgs(args), output);
     if (rc != 0) std::cerr << output;
     return rc;
+}
+
+/// MSVC PCH-mismatch resilience: unlike GCC's own silent, graceful
+/// fallback when a stale/mismatched .gch simply isn't used (see
+/// runtimeIncludeArgs's own doc comment), a stale/mismatched MSVC .pch is
+/// a *hard* compile error - C1852 ("... is not a valid precompiled header
+/// file") is the one actually confirmed live, against a real cl.exe, by
+/// deliberately corrupting a built .pch (tests/cli/msvc_pch_fallback.sh);
+/// C1010 ("unexpected end of file while looking for precompiled header
+/// directive"), C1083 ("cannot open precompiled header file"), and C2859
+/// ("... does not match the precompiled header") are Microsoft's other
+/// documented codes for the same family of failure (a missing file, a
+/// version/flag mismatch, ...) - kept as a defensive superset even though
+/// only C1852 has been reproduced here. This reproduces the same "always
+/// correct, just slower if unavailable"
+/// guarantee explicitly, since MSVC won't do it on its own. Skips the
+/// extra captured-output round trip entirely when `firstArgs` never
+/// actually included a `/Yu` flag in the first place (the ordinary case
+/// on a machine with no working MSVC PCH build) - only a real PCH-flavored
+/// failure pays for the retry. `rebuildArgsWithoutPch` reruns the same
+/// *Args() builder with `usePch=false` - PCH flags aren't guaranteed
+/// contiguous/last in `firstArgs`, so this rebuilds from scratch rather
+/// than trying to strip them back out.
+int runCompilerStepWithPchFallback(const std::vector<std::string>& firstArgs, bool msvc,
+                                    const std::function<std::vector<std::string>()>& rebuildArgsWithoutPch,
+                                    bool verbose = false) {
+    bool usedPch = msvc && std::any_of(firstArgs.begin(), firstArgs.end(), [](const std::string& a) {
+                       return a.rfind("/Yu", 0) == 0;
+                   });
+    if (!usedPch) return runCompilerStep(firstArgs, msvc, verbose);
+
+    echoIfVerbose(firstArgs, verbose);
+    std::string output;
+    int rc = ebasic::runProcessCaptureOutput(ebasic::hostExecArgs(firstArgs), output);
+    if (rc == 0) return 0;
+    bool pchMismatch = output.find("C1852") != std::string::npos ||
+                        output.find("C1010") != std::string::npos ||
+                        output.find("C1083") != std::string::npos ||
+                        output.find("C2859") != std::string::npos;
+    if (!pchMismatch) {
+        std::cerr << output;
+        return rc;
+    }
+    return runCompilerStep(rebuildArgsWithoutPch(), msvc, verbose);
 }
 
 /// Builds the "archive one object file into a static library" step -
@@ -455,11 +587,18 @@ std::vector<std::string> sharedLinkArgs(const std::string& cxx, bool msvc, const
                                          const fs::path& objPath, const fs::path& sharedLibPath,
                                          const fs::path& importLibPath,
                                          const std::vector<std::string>& libDirs,
-                                         const std::vector<std::string>& libNames) {
+                                         const std::vector<std::string>& libNames,
+                                         const fs::path& msvcPchObject = {}) {
     if (msvc) {
-        std::vector<std::string> args = {cxx, "/nologo", objPath.string(), "/LD",
-                                          "/Fe:" + sharedLibPath.string(), "/link",
-                                          "/IMPLIB:" + importLibPath.string()};
+        std::vector<std::string> args = {cxx, "/nologo", objPath.string()};
+        /// See msvcRuntimePchObjectPath's own doc comment - only appended
+        /// when the earlier compile-to-object step actually used the PCH,
+        /// so this is a real, existing file whenever present.
+        if (!msvcPchObject.empty()) args.push_back(msvcPchObject.string());
+        args.push_back("/LD");
+        args.push_back("/Fe:" + sharedLibPath.string());
+        args.push_back("/link");
+        args.push_back("/IMPLIB:" + importLibPath.string());
         for (const std::string& dir : libDirs) args.push_back("/LIBPATH:" + dir);
         for (const std::string& lib : libNames) args.push_back(resolveMsvcLibToken(lib, libDirs));
         return args;
@@ -499,6 +638,11 @@ std::vector<std::string> exeCompileLinkArgs(const std::string& cxx, bool msvc,
         args.push_back("/EHsc");
         for (const std::string& a : runtimeIncludes) args.push_back(a == "-I" ? "/I" : a);
         args.push_back(cppPath.string());
+        /// See msvcRuntimePchObjectPath's own doc comment - MSVC requires
+        /// this specific object in the link whenever runtimeIncludes above
+        /// actually used the PCH (a real `/Yu` token present).
+        fs::path pchObject = msvcRuntimePchObjectPath(runtimeIncludes);
+        if (!pchObject.empty()) args.push_back(pchObject.string());
         args.push_back("/Fe:" + outputPath);
         if (!libDirs.empty() || !libNames.empty()) {
             args.push_back("/link");
@@ -654,9 +798,22 @@ int main(int argc, char** argv) {
         /// for why a downstream consumer needs it forwarded transitively.
         fs::path libsPath = outDir / (libName + ".libs");
 
+        /// MSVC PCH is deliberately never used for --lib mode: this
+        /// archive's one object file is consumed by a *separate*, later
+        /// `ebc` invocation (whatever links against it), whose own PCH
+        /// state (available at all, same runtime.hpp version/flags) can't
+        /// be verified from here - and MSVC requires the PCH-creation
+        /// object be present in *whatever link eventually consumes* a
+        /// `/Yu`-compiled object (see msvcRuntimePchObjectPath's own doc
+        /// comment), a transitive requirement this invocation has no way
+        /// to guarantee the eventual consumer satisfies. Compiling without
+        /// PCH here is always correct, just without the speedup - exactly
+        /// the same fallback every other "PCH unavailable" case already
+        /// gets.
         std::vector<std::string> compileArgs = compileToObjectArgs(
-            cxx, msvc, runtimeIncludeArgs(argv[0]), cppPath, objPath, /*positionIndependent=*/false);
-        rc = runCompilerStep(compileArgs, msvc);
+            cxx, msvc, runtimeIncludeArgs(argv[0], msvc, /*usePch=*/false), cppPath, objPath,
+            /*positionIndependent=*/false);
+        rc = runCompilerStep(compileArgs, msvc, opts.verbose);
         if (rc == 0) {
             rc = ebasic::runProcess(ebasic::hostExecArgs(archiveArgs(archivePath, objPath, msvc)));
         }
@@ -697,15 +854,28 @@ int main(int argc, char** argv) {
         /// shared object itself is linked against).
         fs::path importLibPath = outDir / ("lib" + libName + ".dll.a");
 
-        std::vector<std::string> compileArgs = compileToObjectArgs(
-            cxx, msvc, runtimeIncludeArgs(argv[0]), cppPath, objPath, /*positionIndependent=*/!isWindows);
-        rc = runCompilerStep(compileArgs, msvc);
+        std::vector<std::string> runtimeIncludes = runtimeIncludeArgs(argv[0], msvc);
+        std::vector<std::string> compileArgs =
+            compileToObjectArgs(cxx, msvc, runtimeIncludes, cppPath, objPath, /*positionIndependent=*/!isWindows);
+        rc = runCompilerStepWithPchFallback(
+            compileArgs, msvc,
+            [&]() {
+                return compileToObjectArgs(cxx, msvc, runtimeIncludeArgs(argv[0], msvc, /*usePch=*/false), cppPath,
+                                            objPath, /*positionIndependent=*/!isWindows);
+            },
+            opts.verbose);
 
         if (rc == 0) {
             std::vector<std::string> libNames = codegen.externLibs();
             for (const std::string& lib : opts.extraLibNames) libNames.push_back(lib);
-            std::vector<std::string> linkArgs = sharedLinkArgs(
-                cxx, msvc, targetOS, objPath, sharedLibPath, importLibPath, opts.libDirs, libNames);
+            /// See msvcRuntimePchObjectPath's own doc comment - harmless to
+            /// include even on the rare path where the compile above
+            /// actually fell back to no-PCH (the object contributes no
+            /// real symbols either way), so this doesn't need to track
+            /// whether that fallback happened.
+            std::vector<std::string> linkArgs =
+                sharedLinkArgs(cxx, msvc, targetOS, objPath, sharedLibPath, importLibPath, opts.libDirs, libNames,
+                               msvcRuntimePchObjectPath(runtimeIncludes));
             rc = ebasic::runProcess(ebasic::hostExecArgs(linkArgs));
         }
         if (rc == 0) {
@@ -724,8 +894,14 @@ int main(int argc, char** argv) {
         std::vector<std::string> libNames = codegen.externLibs();
         for (const std::string& lib : opts.extraLibNames) libNames.push_back(lib);
         std::vector<std::string> compileArgs = exeCompileLinkArgs(
-            cxx, msvc, runtimeIncludeArgs(argv[0]), cppPath, opts.outputPath, opts.libDirs, libNames);
-        rc = runCompilerStep(compileArgs, msvc);
+            cxx, msvc, runtimeIncludeArgs(argv[0], msvc), cppPath, opts.outputPath, opts.libDirs, libNames);
+        rc = runCompilerStepWithPchFallback(
+            compileArgs, msvc,
+            [&]() {
+                return exeCompileLinkArgs(cxx, msvc, runtimeIncludeArgs(argv[0], msvc, /*usePch=*/false), cppPath,
+                                           opts.outputPath, opts.libDirs, libNames);
+            },
+            opts.verbose);
     }
 
     if (!opts.keepCpp) {

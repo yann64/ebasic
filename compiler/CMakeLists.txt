@@ -59,5 +59,8 @@ target_compile_definitions(ebc PRIVATE
 if(TARGET ebasic_runtime_pch)
     add_dependencies(ebc ebasic_runtime_pch)
 endif()
+if(TARGET ebasic_runtime_pch_msvc)
+    add_dependencies(ebc ebasic_runtime_pch_msvc)
+endif()
 
 install(TARGETS ebc RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

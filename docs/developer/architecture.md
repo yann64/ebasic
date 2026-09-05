@@ -129,9 +129,47 @@ include directory (see `runtimeIncludeArgs()` in
 `.gch` sitting in an earlier `-I` entry over reparsing the real header, with
 no special flags needed at the call site, and falls back silently (correct,
 just slower) if the `.gch` doesn't match the invoking compiler's version.
-This is GCC-only by design: Clang needs an explicit `-include-pch` flag and
-simply never notices the `.gch`, so `-cxx clang++` still works, just without
-the speedup. `scripts/bench_pch.sh` measures the actual win.
+This is GCC-specific behavior: Clang needs an explicit `-include-pch` flag
+and simply never notices the `.gch`, so `-cxx clang++` still works, just
+without the speedup. `scripts/bench_pch.sh` measures the actual win.
+
+**MSVC has a real, parallel PCH rule too** (not just a graceful no-op the
+way Clang gets): `runtime/CMakeLists.txt` also precompiles a dedicated PCH
+source file (`runtime/pch/runtime_pch.cpp`, whose only content is
+`#include "ebasic/runtime/runtime.hpp"` - `cl.exe` can't precompile a bare
+header the way `g++ -x c++-header` can) via `cl /Ycebasic/runtime/runtime.hpp
+/Fp<path>\runtime.pch`, into the same `runtime_pch/ebasic/runtime/`
+directory the GCC `.gch` uses (different filename, no collision - only one
+toolchain's file is ever relevant to a given `ebc` invocation).
+`runtimeIncludeArgs()` passes the matching `/Yu<header>`/`/Fp<path>` flags
+whenever `-cxx`/`CXX` names `cl`/`clang-cl` and a real `.pch` exists for
+this build. Unlike GCC, MSVC has **no automatic lookup and no graceful
+fallback**: `/Yu`/`/Fp` are mandatory explicit flags, and a stale/
+mismatched `.pch` is a *hard* compile error (`C1852` "is not a valid
+precompiled header file" confirmed live against real `cl.exe`; `C1010`/
+`C1083`/`C2859` are Microsoft's other documented codes for the same
+failure family) rather than a silent reparse. `main.cpp`'s
+`runCompilerStepWithPchFallback` reproduces GCC's own "always correct,
+just slower if unavailable" guarantee explicitly: it retries the compile
+once without the PCH flags whenever the first attempt's captured output
+matches one of those codes.
+
+MSVC also has one genuine, MSVC-specific requirement GCC's `.gch` never
+needed: the PCH-creation compile always produces a companion object file
+(`runtime_pch.obj`) that **must be present in the final link** whenever
+any input object was compiled with `/Yu` against the same `.pch` - a real
+MSVC linker requirement (`LNK2011` "precompiled object missing from the
+link" otherwise), discovered empirically against real `cl.exe`, not
+something anticipated up front. `main.cpp`'s `msvcRuntimePchObjectPath()`
+derives that object's path and adds it to the plain-executable and
+`--shared-lib` link steps (both self-contained within one `ebc`
+invocation). **`--lib` mode deliberately never uses the MSVC PCH at
+all**: its static-archive output is consumed by a *separate*, later `ebc`
+invocation whose own PCH availability can't be verified from here, and
+propagating that companion-object requirement transitively across
+package boundaries was judged out of scope for this fast-follow -
+compiling without PCH there is always correct, just without the speedup,
+the same fallback every other "PCH unavailable" case already gets.
 
 ## Relocatable installs (M8e)
 

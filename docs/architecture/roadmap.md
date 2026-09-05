@@ -6146,6 +6146,105 @@ coroutine gaps the WinUI3 study found genuinely out of reach.
   (`cb(1, 2)`) needs new `Call`-callee resolution for a function-pointer-
   typed lvalue, a genuinely separate addition.
 
+## A real MSVC precompiled-header rule
+
+The other half of the same research+design pass documented above (see
+that section's own framing): MSVC got zero benefit from the M6 PCH
+mechanism (GCC-`.gch`-only by design), flagged as "a fast-follow, not a
+blocker" when the original MSVC backend landed. Fully verified live
+against **real `cl.exe`** on this machine (Visual Studio 18 Community,
+already used throughout the earlier MSVC-backend/WinUI3 work) - not just
+built and trusted, and not deferred to CI as the design pass itself
+originally assumed would be necessary ("no MSVC toolchain available" was
+true of the research sandbox, not of this actual machine).
+
+- `runtime/pch/runtime_pch.cpp` (new, committed): a dedicated PCH source
+  file whose only content is `#include "ebasic/runtime/runtime.hpp"` -
+  `cl.exe` can't precompile a bare header the way `g++ -x c++-header`
+  can, it needs a real `.cpp`. `runtime/CMakeLists.txt` gained a second,
+  independent `find_program(cl)` block (parallel in shape to the existing
+  GCC one - doesn't break when both/neither toolchain is present)
+  compiling it via `/Ycebasic/runtime/runtime.hpp`, producing
+  `runtime.pch` (+ a companion `.obj`, see below) into the same
+  `runtime_pch/ebasic/runtime/` directory the GCC `.gch` already uses.
+- `main.cpp`'s `runtimeIncludeArgs()` gained an `msvc` parameter and now
+  passes matching `/Yu<header>`/`/Fp<path>` flags whenever a real `.pch`
+  exists - pre-formed tokens that pass through `compileToObjectArgs`/
+  `exeCompileLinkArgs`'s existing token-forwarding loop completely
+  unchanged, no other change needed in either function.
+- **Two real, empirically-discovered bugs, neither anticipated by the
+  design pass** - found only by actually building and running against
+  real `cl.exe`, not by reasoning about it:
+  1. **A quoting bug**: the initial `/Yc"ebasic/runtime/runtime.hpp"`
+     (quoted, matching a common MSVC-flag convention) produced a literal
+     `C2857` ("#include ... could not be found") - CMake's NMake-
+     Makefiles generator didn't carry a hand-escaped `\"` through to the
+     real argv byte-for-byte the way `process.cpp`'s own
+     `quoteArgvArgument` does for `ebc`'s *own* child-process
+     invocations. Fixed by simply never quoting the header name at all
+     (`/Ycebasic/runtime/runtime.hpp`) - MSVC only needs quotes to
+     disambiguate a space in the filename, and this path has none.
+  2. **A real MSVC linker requirement GCC's `.gch` never had**: even
+     with matching, valid `/Yu`/`/Fp` flags, the very first real link
+     failed with `LNK2011` ("precompiled object missing from the link").
+     Unlike GCC, MSVC requires the PCH-creation compile's companion
+     object (`runtime_pch.obj`) to be present in *any* final link that
+     includes an object compiled with `/Yu` against the same `.pch` -
+     confirmed by manually adding it to the link and watching the same
+     program then link and run correctly. Fixed via a new
+     `msvcRuntimePchObjectPath()` helper (derives the object's path from
+     the already-computed `/Fp` token) threaded into the plain-executable
+     and `--shared-lib` link steps (both self-contained within one `ebc`
+     invocation) - **deliberately not** `--lib` mode, whose static-archive
+     output is consumed by a *separate*, later `ebc` invocation whose own
+     PCH state can't be verified from here; compiling without PCH there
+     is always correct, just without the speedup, same as every other
+     "PCH unavailable" case.
+- MSVC resilience (no automatic fallback the way GCC gets): a stale/
+  mismatched `.pch` is a hard compile error, not a silent reparse -
+  `runCompilerStepWithPchFallback` retries once without the PCH flags on
+  a matching diagnostic code. Sniffed for `C1010`/`C1083`/`C2859`
+  (Microsoft's documented codes for this failure family) up front from
+  reasoning about the mechanism alone - live testing against a
+  deliberately corrupted real `.pch` (`tests/cli/msvc_pch_fallback.sh`)
+  turned up a *third* real discrepancy: the actual code was `C1852` ("is
+  not a valid precompiled header file"), not any of the three originally
+  guessed. Added to the sniff list; kept the original three as a
+  defensive superset even though only `C1852` has been reproduced here.
+- New `-v`/`--verbose` driver flag (`--verbose` - plain `-v` was already
+  taken by `--version`): echoes each backend-compiler invocation's exact
+  argv to stderr, the mechanism `tests/cli/msvc_pch.sh` uses to assert
+  `/Yu`/`/Fp` actually appear in a real invocation, deterministically
+  rather than via timing.
+- New tests, both genuinely run against real `cl.exe` (not just written
+  and trusted): `tests/cli/msvc_pch.sh` (compiles with `-cxx cl
+  --verbose`, greps the real invocation for `/Yu`/`/Fp`, confirms correct
+  output) and `tests/cli/msvc_pch_fallback.sh` (backs up the real, already
+  -built `.pch`, overwrites it with garbage bytes, confirms `ebc` still
+  compiles and runs a program correctly via the fallback, restores the
+  original file afterward - a shared build-tree artifact other tests
+  depend on). Both MSVC-only, no-op (PASS) everywhere else, matching
+  `cli/shared_lib.sh`'s own established `IS_WINDOWS`-conditional pattern.
+- Verified live, repeatedly, against real `cl.exe` (Visual Studio 18
+  Community, `vcvarsall.bat x64`): a full `cmake --preset windows-msvc`
+  configure+build succeeds with the PCH built; `--verbose` output on a
+  real compile shows the exact expected `/Yu`/`/Fp` tokens; the
+  deliberately-corrupted-`.pch` scenario recovers and produces correct
+  output; and the **full existing test suite passes 69/69 (100%) under
+  `windows-msvc` with the PCH active throughout**, including the
+  `--lib`/`--shared-lib`-mode `ebpm`-orchestrated multi-package tests -
+  confirming the `--lib`-mode PCH-avoidance decision doesn't silently
+  break anything downstream, and that the `--shared-lib`-mode PCH-object
+  threading is correct too. A small, unrelated single-test flake cleared
+  on an isolated rerun - the same antivirus/Smart-App-Control scan-lock
+  signature already documented elsewhere in this file, confirmed once
+  again not to be code-related.
+- `docs/developer/architecture.md`'s M6 PCH section revised: the old
+  "This is GCC-only by design" framing no longer describes MSVC's
+  position accurately (Clang stays a true no-op; MSVC now has its own
+  real, parallel mechanism) - rewritten with the `/Yc`/`/Yu`/`/Fp` flow,
+  the resilience story, and the `--lib`-mode scope decision.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

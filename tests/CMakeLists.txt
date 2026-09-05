@@ -389,6 +389,19 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/cli/shared_lib.sh $<TARGET_FILE:ebc>
 )
 
+# Real MSVC PCH rule: deterministic proof (via --verbose) that /Yu/Fp
+# actually appear in a real cl.exe invocation, and that a corrupted .pch
+# still compiles correctly via the retry-without-PCH fallback. MSVC-only,
+# no-op (PASS) everywhere else.
+add_test(
+    NAME cli_msvc_pch
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/cli/msvc_pch.sh $<TARGET_FILE:ebc>
+)
+add_test(
+    NAME cli_msvc_pch_fallback
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/cli/msvc_pch_fallback.sh $<TARGET_FILE:ebc>
+)
+
 # LSP-1: a protocol-level smoke test - speaks real Content-Length-framed
 # JSON-RPC over ebasic_lsp's stdio (initialize/didOpen/didChange/didClose/
 # shutdown/exit, plus the unimplemented-method and unclean-disconnect exit-
