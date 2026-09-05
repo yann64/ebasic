@@ -176,6 +176,15 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/extern_stdcall ${EBASIC_FIXTURE_LIB_DIR}
 )
 
+# Stdcall on an eBasic-defined callback (a plain top-level SUB/FUNCTION,
+# not just a DECLARE import) - same "genuinely compiled __stdcall, proving
+# caller/callee actually agree" rationale as e2e_extern_stdcall above,
+# just in the reverse direction (eBasic's own definition, not an import).
+add_test(
+    NAME e2e_stdcall_callback
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/stdcall_callback ${EBASIC_FIXTURE_LIB_DIR}
+)
+
 add_test(
     NAME e2e_default_params
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/default_params

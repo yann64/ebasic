@@ -685,6 +685,7 @@ void Sema::collectProcedures(std::vector<StmtPtr>& stmts, const std::string& pre
         info.returnType = stmt->declaredType;
         info.params = stmt->params;
         info.isExtern = stmt->isExtern;
+        info.callConv = stmt->callConv;
         info.declLoc = stmt->loc;
         procedures_[key] = std::move(info);
     }
@@ -920,6 +921,31 @@ void Sema::checkCallArgs(const ProcedureInfo& proc, std::vector<ExprPtr>& args, 
     }
     /// Any extra args beyond the parameter count still get type-checked so
     /// their own errors (undeclared names, etc.) aren't silently skipped.
+    for (size_t i = n; i < args.size(); ++i) {
+        checkExpr(*args[i]);
+    }
+}
+
+void Sema::checkIndirectCallArgs(const Type& fnType, std::vector<ExprPtr>& args, SourceLoc loc) {
+    static const std::vector<Type> kNoParams;
+    const std::vector<Type>& paramTypes = fnType.funcParamTypes ? *fnType.funcParamTypes : kNoParams;
+    if (args.size() != paramTypes.size()) {
+        diags_.error(loc, "expected " + std::to_string(paramTypes.size()) + " argument(s), got " +
+                               std::to_string(args.size()));
+    }
+    size_t n = std::min(args.size(), paramTypes.size());
+    for (size_t i = 0; i < n; ++i) {
+        Expr& arg = *args[i];
+        Type argType = checkExpr(arg);
+        if (!isAssignCompatible(paramTypes[i], argType)) {
+            diags_.error(arg.loc, "argument " + std::to_string(i + 1) +
+                                       " type does not match the function pointer's parameter type");
+        }
+        annotatePointerBridge(paramTypes[i], arg);
+    }
+    /// Any extra args beyond the parameter count still get type-checked so
+    /// their own errors aren't silently skipped - same reasoning as
+    /// checkCallArgs's own tail loop.
     for (size_t i = n; i < args.size(); ++i) {
         checkExpr(*args[i]);
     }
@@ -1345,6 +1371,19 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
             }
             const ProcedureInfo* proc = findProcedure(canonicalName(stmt.name));
             if (!proc) {
+                /// Calling through a stored function pointer as a statement
+                /// (`CALL cb(1, 2)`) - see checkExpr's ExprKind::Call case
+                /// for the same check on the expression side. Unlike that
+                /// side, both SUB- and FUNCTION-shaped pointers are allowed
+                /// here (discarding a return value as a statement is fine,
+                /// matching how a plain FUNCTION proc call is already
+                /// allowed as a CALL with no isFunction check below).
+                SymbolInfo info;
+                if (lookupSymbol(canonicalName(stmt.name), info) &&
+                    info.type.kind == TypeKind::FunctionPointer) {
+                    checkIndirectCallArgs(info.type, stmt.args, stmt.loc);
+                    return;
+                }
                 diags_.error(stmt.loc, "'" + stmt.name + "' is not a declared SUB or FUNCTION");
                 for (auto& arg : stmt.args) checkExpr(*arg);
                 return;
@@ -1617,6 +1656,25 @@ Type Sema::checkExpr(Expr& expr) {
                 expr.type = info.type;
                 return expr.type;
             }
+            /// Calling through a stored function pointer (`cb(1, 2)`, where
+            /// `cb` is a DIM'd variable, a parameter, or a global typed as a
+            /// real function-pointer type - see TypeKind::FunctionPointer).
+            /// Checked before `findProcedure` since a name can never be both
+            /// a variable and a procedure (the existing declare-time
+            /// collision rule) - no ambiguity either way. Codegen needs no
+            /// change for this: it already renders any unqualified Call as
+            /// `mangleName(name)(args...)`, which is already exactly correct
+            /// C++ for calling through a same-named variable of a real
+            /// function-pointer type.
+            if (isVar && info.type.kind == TypeKind::FunctionPointer) {
+                if (!info.type.funcReturnType) {
+                    diags_.error(expr.loc, "'" + expr.stringValue + "' is a SUB-shaped function "
+                                                "pointer and cannot be used in an expression");
+                }
+                checkIndirectCallArgs(info.type, expr.args, expr.loc);
+                expr.type = info.type.funcReturnType ? *info.type.funcReturnType : Type(TypeKind::Unknown);
+                return expr.type;
+            }
             const ProcedureInfo* proc = findProcedure(key);
             if (proc) {
                 if (!proc->isFunction) {
@@ -1726,10 +1784,10 @@ Type Sema::checkExpr(Expr& expr) {
                     if (proc->isFunction) result.funcReturnType = std::make_shared<Type>(proc->returnType);
                     result.funcParamTypes = std::make_shared<std::vector<Type>>();
                     for (const Param& p : proc->params) result.funcParamTypes->push_back(p.type);
-                    // A plain eBasic SUB/FUNCTION has no Cdecl/Stdcall of its
-                    // own yet (funcCallConv left "" == cdecl) - see M8f's own
-                    // note that eBasic-side Stdcall bodies are a separate,
-                    // unimplemented need.
+                    // Reflects the addressed proc's own real calling
+                    // convention (its own Stdcall clause, if any) rather
+                    // than always defaulting to cdecl.
+                    result.funcCallConv = proc->callConv;
                     expr.type = result;
                     return expr.type;
                 }

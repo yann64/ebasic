@@ -549,19 +549,28 @@ struct Stmt {
     /// the prototype and every call site.
     std::string externAlias;
     std::string externLib; // a `Lib "name"` clause; empty = none given
-    /// A `[Cdecl]`/`[Stdcall]` clause on a DECLARE (M8f): "" (the default,
-    /// meaning the platform's own default convention - `cdecl` in
-    /// practice) or "stdcall" - the parser (see parseExternDecl) forces
-    /// `externLinkage` to "C" whenever Stdcall is written, the same way it
-    /// already does for Cdecl, so "stdcall" paired with "C++" linkage
-    /// never actually reaches Codegen. Only meaningful for `isExtern` (a
-    /// bodyless import - `__stdcall` on the *definition* side, for a real
-    /// eBasic SUB/FUNCTION whose address is taken as a Windows callback,
-    /// is a separate, unimplemented need). A no-op on every non-Windows
-    /// target, where `__stdcall` isn't defined at all - Codegen's
-    /// `EBASIC_STDCALL` macro (generate()'s preamble) expands to nothing
-    /// there, same shape as `EBASIC_EXPORT`'s own platform split.
-    std::string externCallConv;
+    /// A `[Cdecl]`/`[Stdcall]` clause (M8f, and - since this field is no
+    /// longer extern-only - the same clause on a plain top-level
+    /// SUB/FUNCTION's own header, see parseSub/parseFunction): "" (the
+    /// default, meaning the platform's own default convention - `cdecl`
+    /// in practice) or "stdcall". On a DECLARE (`isExtern`), the parser
+    /// (see parseExternDecl) forces `externLinkage` to "C" whenever
+    /// Stdcall is written, the same way it already does for Cdecl, so
+    /// "stdcall" paired with "C++" linkage never actually reaches
+    /// Codegen. On a plain, non-extern top-level SUB/FUNCTION, marks the
+    /// eBasic-compiled *definition* itself `__stdcall` - needed so
+    /// `@ProcName`'s own resolved FunctionPointer type can reflect a real
+    /// calling convention (see Sema's AddressOf case) instead of always
+    /// defaulting to cdecl, e.g. to hand an eBasic-defined callback to a
+    /// real Win32 API expecting `Stdcall` (`EnumWindows`, `SetTimer`) on
+    /// 32-bit x86. Never set on a TYPE method (parseSub/parseFunction
+    /// reject Stdcall there with an immediate diagnostic) or an Operator
+    /// overload (parsed via a separate function entirely that never
+    /// touches this field). A no-op on every non-Windows target, where
+    /// `__stdcall` isn't defined at all - Codegen's `EBASIC_STDCALL`
+    /// macro (generate()'s preamble) expands to nothing there, same
+    /// shape as `EBASIC_EXPORT`'s own platform split.
+    std::string callConv;
 
     /// `Sub`/`Function ... End Sub`/`End Function` with a real body,
     /// written *inside* an `Extern "C" ... End Extern` block (shared-

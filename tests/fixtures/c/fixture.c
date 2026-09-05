@@ -105,6 +105,18 @@ int eb_fixture_invoke_comparator(eb_fixture_comparator cmp, int a, int b) {
     return cmp(a, b);
 }
 
+/** Same shape as eb_fixture_comparator above, just __stdcall-typed -
+ * exercises an eBasic-defined Stdcall callback (a plain top-level
+ * FUNCTION marked Stdcall, address-taken via @ProcName) genuinely
+ * agreeing on calling convention with a real __stdcall C function
+ * pointer type, the same "not just that both compile" proof
+ * eb_fixture_stdcall_add already established for a plain EXTERN import. */
+typedef int(EB_FIXTURE_STDCALL* eb_fixture_stdcall_comparator)(int a, int b);
+
+int eb_fixture_invoke_stdcall_comparator(eb_fixture_stdcall_comparator cmp, int a, int b) {
+    return cmp(a, b);
+}
+
 /** Returns a freshly malloc'd copy of a fixed string, as a plain void* (the
  * same shape a real void*-returning C API - g_malloc/g_strdup, glib's
  * gtk_text_buffer_get_text, etc. - hands back) - the caller must free it via

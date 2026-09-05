@@ -4,8 +4,11 @@
 ' the untyped ANY-PTR-based eb_fixture_invoke_callback already covered by
 ' the function_pointers case. Also covers storing a typed function pointer
 ' in a DIM'd variable and a TYPE field (not just an inline @ProcName
-' argument), and bridging a FunctionPointer-typed value through a bare
-' ANY PTR variable and back.
+' argument), bridging a FunctionPointer-typed value through a bare
+' ANY PTR variable and back, and calling through a stored function
+' pointer directly from eBasic code (both as an expression and as a
+' statement, and through a function-pointer parameter inside a
+' higher-order FUNCTION - no external C code involved in any of these).
 Extern "C" Lib "ebfixturec"
     Declare Function eb_fixture_invoke_comparator Cdecl (ByVal cmp AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER, ByVal a AS INTEGER, ByVal b AS INTEGER) AS INTEGER
 End Extern
@@ -42,3 +45,16 @@ PRINT eb_fixture_invoke_comparator(c.cmp, 5, 5)
 DIM raw AS ANY PTR
 raw = cb
 PRINT eb_fixture_invoke_comparator(raw, 2, 9)
+
+' Calling through a stored function pointer directly from eBasic code -
+' no external C code involved.
+PRINT cb(8, 1)      ' expression position
+CALL cb(4, 4)        ' statement position (return value discarded)
+
+FUNCTION ApplyTwice(BYVAL f AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER, BYVAL x AS INTEGER) AS INTEGER
+    ' Calling through a function-pointer *parameter* - proves parameters
+    ' flow through the same lookup as locals, no special-casing needed.
+    RETURN f(f(x, 1), x)
+END FUNCTION
+
+PRINT ApplyTwice(@Compare, 5)

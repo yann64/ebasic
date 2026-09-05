@@ -253,16 +253,52 @@ unchanged, and lets a typed callback flow through code that only knows
 about `ANY PTR` (e.g. storing it in a generic `void*`-shaped field for
 later use).
 
-Two things this does **not** provide:
+### Calling through a stored function pointer
 
-- **Calling through** a stored function-pointer value from eBasic code
-  (e.g. `cb(1, 2)` where `cb` is a `DIM`'d function pointer) - eBasic can
-  pass a typed function pointer to external code and receive one back, but
-  not yet invoke one directly itself.
-- An eBasic-defined `SUB`/`FUNCTION` (the thing `@ProcName` addresses)
-  cannot itself be marked `Stdcall` yet - only meaningful (as a real ABI
-  difference, not just syntax) on 32-bit x86 Windows, where a C library
-  expecting a `Stdcall` callback wouldn't yet accept one.
+A typed function pointer isn't only for handing off to external code -
+`cb(...)` calls straight through it, whether `cb` is a `DIM`'d variable,
+a `TYPE` field, or (the most useful case - a real higher-order function)
+a parameter:
+
+```basic
+FUNCTION ApplyTwice(BYVAL f AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER, BYVAL x AS INTEGER) AS INTEGER
+    RETURN f(f(x, 1), x)
+END FUNCTION
+
+PRINT ApplyTwice(@Compare, 5)   ' -1
+
+DIM cb AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER
+cb = @Compare
+PRINT cb(3, 7)                  ' expression position: -1
+CALL cb(3, 7)                   ' statement position, return value discarded
+```
+
+A `SUB (...)`-shaped (no return value) pointer may be called as a
+statement (`CALL cb(...)`) but not used in an expression - the same rule
+an ordinary `SUB` call already follows. Not (yet) supported: calling
+through a `TYPE` *field* via a qualified receiver (`obj.cb(1, 2)`) - only
+a plain variable, parameter, or global.
+
+### `Stdcall` on an eBasic-defined callback
+
+A plain top-level `SUB`/`FUNCTION` may itself be marked `Stdcall`, right
+after its name (same position as `Extern`/`Declare`'s own
+`Cdecl`/`Stdcall` clause):
+
+```basic
+FUNCTION Compare Stdcall (BYVAL a AS INTEGER, BYVAL b AS INTEGER) AS INTEGER
+    ...
+END FUNCTION
+```
+
+`@Compare`'s resulting function-pointer type now carries `Stdcall` too,
+so it can be handed to a real Win32 API expecting a `Stdcall` callback
+(`EnumWindows`, `SetTimer`) - relevant, as a genuine ABI difference, only
+on 32-bit x86 Windows; a harmless no-op everywhere else, same as
+`Extern`/`Declare`'s own `Stdcall`. Not supported on a `TYPE` method's
+out-of-line definition (`SUB TypeName.MethodName Stdcall (...)` is
+rejected) - a method already carries an implicit `This`/vtable slot a
+plain C function pointer has no room for.
 
 ## Exporting eBasic code (`Extern "C"` with a real body)
 

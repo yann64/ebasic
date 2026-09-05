@@ -6271,6 +6271,105 @@ above.
   through the existing `PROJECT_VERSION` mechanism used unchanged by
   every prior bump).
 
+## Calling through a stored function pointer, and Stdcall on eBasic-defined callbacks
+
+Two follow-ons to the typed function-pointer EXTERN/DECLARE work above,
+both explicitly flagged as deliberate scope cuts at the time (not
+oversights) - see that section's own "not delivered" callouts. Researched
+directly against the current source before planning (an Explore pass
+covering `checkExpr`'s `Call`/`AddressOf` cases, `checkStmt`'s
+`CallStmt`, `parseSub`/`parseFunction`, and `genProcedure`'s two
+branches), then implemented and verified without a separate Plan-agent
+round trip - the design fell out cleanly enough from the research itself.
+
+**Calling through a stored function pointer** (`cb(1, 2)`, where `cb` is
+a `DIM`'d variable, a parameter, or a global typed as a real function
+pointer): a genuinely elegant discovery from the research turned this
+into a **Sema-only** change - Codegen needed nothing at all. An
+unqualified `Call`'s callee already renders as `mangleName(name)(args...)`
+regardless of whether `name` turns out to be a procedure or a variable,
+and `mangleName` is the identical transform for both (a name can never be
+both, per Sema's own pre-existing collision rule) - so `eb_cb(1, 2)` was
+already exactly correct C++ the moment `cb`'s C++ type became a real
+function-pointer alias (Feature B). Confirmed by inspecting the generated
+`.gen.cpp` before writing a single Codegen line, not assumed.
+
+- `checkExpr`'s `ExprKind::Call` case (unqualified branch) and
+  `checkStmt`'s `StmtKind::CallStmt` case both gained a check, right
+  where a name resolves to a variable rather than a procedure: if that
+  variable's type is `FunctionPointer`, type-check the call against
+  `funcParamTypes`/`funcReturnType` instead of reporting "not an array or
+  function" / "not a declared SUB or FUNCTION". A SUB-shaped pointer may
+  be called as a statement but not used in an expression - same rule an
+  ordinary `SUB` call already follows.
+- New `Sema::checkIndirectCallArgs`, a simplified sibling of the existing
+  `checkCallArgs`: operates on `Type::funcParamTypes` (a plain
+  `vector<Type>`, ByVal-only, no names/byRef/defaults) instead of
+  `ProcedureInfo::params` - no BYREF handling needed at all.
+- Verified live: a `DIM`'d function pointer called both as an expression
+  and a statement; a higher-order `FUNCTION` taking a function-pointer
+  *parameter* and calling it directly inside its own body (proves
+  parameters flow through the same `lookupSymbol` lookup as locals, no
+  special-casing needed); both negative cases (SUB-shaped pointer in an
+  expression; the pre-existing "not declared" error for a genuinely
+  non-callable variable, confirmed still intact).
+- Deliberately not delivered, flagged in the docs rather than silently
+  half-supported: calling through a `TYPE` *field* via a qualified
+  receiver (`obj.cb(1, 2)`) - the qualified-call Sema path only ever
+  checks `findMethodInChain`, never a field: real, separate work this
+  pass's research didn't cover.
+
+**`Stdcall` on a plain (non-EXTERN) `SUB`/`FUNCTION`**: `@ProcName`'s
+resolved `FunctionPointer` type always had `funcCallConv == ""` before
+this, since only an `EXTERN`/`DECLARE` import could ever be marked
+`Stdcall` - blocking an eBasic-defined callback from matching a real
+Win32 API expecting one (`EnumWindows`, `SetTimer`) on 32-bit x86, the
+one platform where the convention is a real ABI difference, not just
+syntax.
+
+- `Stmt::externCallConv` renamed to `Stmt::callConv` (`compiler/src/ast/ast.hpp`)
+  and its doc comment broadened - the old name/comment explicitly said
+  "only meaningful for `isExtern`," which would have become actively
+  misleading the moment a plain proc definition could set it too, in a
+  codebase that documents every field's exact applicability this
+  precisely. Small, fully contained blast radius (4 existing use sites).
+- New `Parser::parseOptionalCallConv(Stmt&)`, called from both
+  `parseSub`/`parseFunction` right after `stmt->ownerType`/`stmt->name`
+  are resolved (the exact point that reliably distinguishes a top-level
+  free proc from a TYPE method's out-of-line definition) - accepts
+  `Cdecl` (a documented no-op, matching `parseExternDecl`'s own
+  precedent) and `Stdcall` (sets `callConv`, or - on a method - an
+  immediate parser-level diagnostic, not a silent no-op, matching this
+  codebase's general "fail loud" instinct).
+- `ProcedureInfo` gained a `callConv` field, populated in
+  `collectProcedures` from the same `Stmt` `parseSub`/`parseFunction`
+  already produced. `checkExpr`'s `AddressOf` case (`@ProcName`) now sets
+  `result.funcCallConv = proc->callConv` instead of always leaving it "".
+- `Codegen::genProcedure`'s ordinary (non-extern) branch gained the same
+  `EBASIC_STDCALL` computation/emission its `isExtern` branch already
+  had - safe with no extra gating, since the parser already guarantees
+  `stmt.callConv` is empty for any TYPE method or Operator overload.
+- New fixture (`tests/fixtures/c/fixture.c`):
+  `eb_fixture_invoke_stdcall_comparator`, genuinely `__stdcall`-typed -
+  same "proves caller/callee actually agree on calling convention, not
+  just that both sides compile" rationale `eb_fixture_stdcall_add`
+  already established for a plain EXTERN import, now exercised in the
+  reverse direction (an eBasic-defined, not imported, callback).
+- Verified live, twice: full suite green under `windows-mingw` **and**
+  under real `windows-msvc` (`cl.exe`, Visual Studio 18 Community,
+  already used throughout the MSVC PCH work) - both confirm a
+  `Stdcall`-marked eBasic `FUNCTION`, address-taken via `@ProcName`,
+  genuinely agrees on ABI with a real `__stdcall` C function pointer
+  type, not just that the generated code compiles. Negative case
+  (`Stdcall` on a TYPE method's out-of-line definition) confirmed
+  rejected with the new diagnostic.
+
+Both features' docs updates land in the same place: the "Typed
+function-pointer parameters, DIMs, and TYPE fields" section of
+`docs/reference/extern-interop.md` gained two new subsections (worked
+examples for each), replacing the two "not yet provided" bullets that
+section carried since the original typed-function-pointer work.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

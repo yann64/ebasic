@@ -641,7 +641,7 @@ StmtPtr Parser::parseExternDecl(const std::string& defaultLinkage, const std::st
     if (match(TokenKind::KwCdecl)) {
         /// "C" linkage is the only one a standalone Declare can produce in
         /// real FreeBASIC too; "C++" linkage is only reachable via an
-        /// Extern "C++" block. `externCallConv` is left "" (the default,
+        /// Extern "C++" block. `callConv` is left "" (the default,
         /// meaning cdecl) - only Stdcall below needs to say anything.
         stmt->externLinkage = "C";
     } else if (match(TokenKind::KwStdcall)) {
@@ -653,7 +653,7 @@ StmtPtr Parser::parseExternDecl(const std::string& defaultLinkage, const std::st
         /// inside a "C++" block matches Cdecl's own existing precedent
         /// rather than introducing a new, asymmetric special case).
         stmt->externLinkage = "C";
-        stmt->externCallConv = "stdcall";
+        stmt->callConv = "stdcall";
     }
     if (match(TokenKind::KwLib)) {
         stmt->externLib =
@@ -1146,6 +1146,28 @@ std::vector<Param> Parser::parseParamList() {
     return params;
 }
 
+/// An optional `Cdecl`/`Stdcall` clause on a plain top-level SUB/FUNCTION's
+/// own header (not a DECLARE - that's parseExternDecl's own, separate
+/// handling) - same vocabulary and position (right after the name,
+/// before the parameter list) as parseExternDecl's established grammar.
+/// `Cdecl` is a documented no-op, matching that precedent exactly.
+/// `Stdcall` is rejected outright (immediate diagnostic, not a silent
+/// no-op) on a TYPE method's out-of-line definition - `stmt.ownerType` is
+/// already reliably resolved by the time this is called (right after the
+/// caller's own `if (match(Dot)) {...} else {...}` block), so this is the
+/// exact right point to check it.
+void Parser::parseOptionalCallConv(Stmt& stmt) {
+    if (match(TokenKind::KwCdecl)) {
+        // no-op, matches parseExternDecl's own Cdecl handling: "" means cdecl.
+    } else if (match(TokenKind::KwStdcall)) {
+        if (!stmt.ownerType.empty()) {
+            diags_.error(stmt.loc, "'" + stmt.name + "' is a TYPE method - STDCALL is only "
+                                    "supported on a top-level SUB/FUNCTION");
+        }
+        stmt.callConv = "stdcall";
+    }
+}
+
 StmtPtr Parser::parseSub() {
     /// An optional leading VIRTUAL on an out-of-line method definition
     /// mirrors real FreeBASIC syntax (`Virtual Sub Foo.Bar(...)`), but real
@@ -1168,6 +1190,7 @@ StmtPtr Parser::parseSub() {
     } else {
         stmt->name = nameTok.text;
     }
+    parseOptionalCallConv(*stmt);
     stmt->params = parseParamList();
     match(TokenKind::KwOverride); // ditto: parsed-and-discarded here
     expectStmtEnd();
@@ -1195,6 +1218,7 @@ StmtPtr Parser::parseFunction() {
     } else {
         stmt->name = nameTok.text;
     }
+    parseOptionalCallConv(*stmt);
     stmt->params = parseParamList();
     expect(TokenKind::KwAs, "expected AS <return type> after FUNCTION parameter list");
     stmt->declaredType = parseTypeKeyword();

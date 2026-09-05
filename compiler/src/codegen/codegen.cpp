@@ -845,7 +845,7 @@ void Codegen::genProcedure(const Stmt& stmt) {
         /// name, matching how Windows' own headers declare a WINAPI
         /// function (`BOOL WINAPI Name(...)`, WINAPI being `__stdcall`
         /// under the hood).
-        std::string callConv = stmt.externCallConv == "stdcall" ? "EBASIC_STDCALL " : "";
+        std::string callConv = stmt.callConv == "stdcall" ? "EBASIC_STDCALL " : "";
         if (wrapC) protoOut_ << "extern \"C\" {\n";
         protoOut_ << retType << " " << callConv << externName << "(" << paramList << ");\n";
         if (wrapC) protoOut_ << "}\n";
@@ -883,9 +883,17 @@ void Codegen::genProcedure(const Stmt& stmt) {
         stmt.isOperator ? protoParamList
                          : buildParamList(stmt.params, /*includeDefaults=*/false);
 
-    protoOut_ << exportPrefix << retType << " " << name << "(" << protoParamList << ");\n";
+    /// A plain top-level SUB/FUNCTION's own Stdcall clause (parseSub/
+    /// parseFunction's parseOptionalCallConv) - same EBASIC_STDCALL
+    /// macro/positioning as the isExtern branch above. Always "" (a
+    /// harmless no-op) for a TYPE method or Operator overload - the
+    /// parser never lets `stmt.callConv` be non-empty in either case, so
+    /// no extra gating is needed here.
+    std::string callConv = stmt.callConv == "stdcall" ? "EBASIC_STDCALL " : "";
 
-    procOut_ << exportPrefix << retType << " " << name << "(" << defParamList << ") {\n";
+    protoOut_ << exportPrefix << retType << " " << callConv << name << "(" << protoParamList << ");\n";
+
+    procOut_ << exportPrefix << retType << " " << callConv << name << "(" << defParamList << ") {\n";
     if (isFunction) {
         procOut_ << ind(1) << retType << " eb__ret{};\n";
     }

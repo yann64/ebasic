@@ -63,6 +63,7 @@ private:
     StmtPtr parseExit();
     StmtPtr parseSub();
     StmtPtr parseFunction();
+    void parseOptionalCallConv(Stmt& stmt);
     StmtPtr parseCallStmt();
     StmtPtr parseReturn();
     StmtPtr parseRecordDecl();

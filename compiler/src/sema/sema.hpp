@@ -43,6 +43,13 @@ struct ProcedureInfo {
     /// declared Virtual, or Override (an override necessarily participates
     /// in the vtable too). Codegen emits literal `virtual`/`override`.
     bool isVirtual = false;
+    /// "" (cdecl, the default) or "stdcall" - mirrors Stmt::callConv (a
+    /// free/namespace procedure's own Cdecl/Stdcall clause, meaningless
+    /// for methods/operators since neither can carry one). Consumed by
+    /// `@ProcName` (AddressOf) so the FunctionPointer type it produces
+    /// reflects the addressed proc's real calling convention instead of
+    /// always defaulting to cdecl.
+    std::string callConv;
     /// Where this SUB/FUNCTION (or method) was declared - see
     /// SymbolInfo::declLoc's comment; same tooling-only purpose.
     SourceLoc declLoc;
@@ -187,6 +194,14 @@ private:
     /// CallStmt (procedure call as a statement): validates argument count and
     /// per-argument type/BYREF-lvalue compatibility against `proc`.
     void checkCallArgs(const ProcedureInfo& proc, std::vector<ExprPtr>& args, SourceLoc loc);
+    /// Same, for calling through a stored function pointer (`cb(1, 2)`)
+    /// instead of a named procedure - `fnType.funcParamTypes` (a plain
+    /// vector<Type>, ByVal-only, no names/defaults - see
+    /// TypeKind::FunctionPointer's own doc comment) stands in for
+    /// ProcedureInfo::params. Arity is checked exactly (no default-value
+    /// tolerance, since a function-pointer parameter spec has none); no
+    /// BYREF handling, since every parameter is implicitly ByVal.
+    void checkIndirectCallArgs(const Type& fnType, std::vector<ExprPtr>& args, SourceLoc loc);
 
     /// Structurally: is `expr` addressable (a variable, a field, or an array
     /// element - not a function-call result or a computed value)? Used for

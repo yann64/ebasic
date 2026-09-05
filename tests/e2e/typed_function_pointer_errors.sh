@@ -72,4 +72,30 @@ check_rejected "STRING as a function-pointer return type is rejected at the EXTE
 'Declare Sub eb_fixture_bad Cdecl (ByVal cb AS FUNCTION () AS STRING)' \
     "cannot be STRING in an EXTERN/DECLARE signature"
 
+check_rejected "calling a SUB-shaped function pointer in an expression is rejected" \
+'SUB DoNothing(BYVAL a AS INTEGER)
+END SUB
+
+DIM cb AS SUB (BYVAL AS INTEGER)
+cb = @DoNothing
+PRINT cb(5)' \
+    "is a SUB-shaped function pointer and cannot be used in an expression"
+
+check_rejected "calling a non-function-pointer variable as a statement is still rejected the old way" \
+'DIM x AS INTEGER
+x = 5
+CALL x(1, 2)' \
+    "is not a declared SUB or FUNCTION"
+
+check_rejected "Stdcall is rejected on a TYPE method's out-of-line definition" \
+'TYPE Point
+    x AS INTEGER
+    Declare Sub SetX(BYVAL v AS INTEGER)
+END TYPE
+
+SUB Point.SetX Stdcall (BYVAL v AS INTEGER)
+    This.x = v
+END SUB' \
+    "is a TYPE method - STDCALL is only supported on a top-level SUB/FUNCTION"
+
 exit "$FAILED"
