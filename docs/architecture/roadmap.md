@@ -6245,6 +6245,32 @@ true of the research sandbox, not of this actual machine).
   real, parallel mechanism) - rewritten with the `/Yc`/`/Yu`/`/Fp` flow,
   the resilience story, and the `--lib`-mode scope decision.
 
+## v1.5.0: Sixth Tagged Release
+
+With typed function-pointer EXTERN/DECLARE parameters and the real MSVC
+PCH rule both done and CI-green on all five platforms, the user asked to
+bump/tag `1.5.0` and publish - the same sequence as `v1.2.0`-`v1.4.0`
+above.
+
+- `project(ebasic VERSION 1.5.0 ...)`, `packaging/rpm/ebasic.spec`
+  (`Version:` + a new `%changelog` entry), `debian/changelog` (a new
+  `ebasic (1.5.0)` entry stacked above `1.4.0`), the Flatpak metainfo's
+  `<release>` list, and `README.md`'s Status line - all following the
+  same pattern as every prior bump.
+- `packaging/haiku/ebasic-1.4.0.recipe` fast-followed to
+  `ebasic-1.5.0.recipe` immediately after the tag was pushed, same
+  ordering constraint as every prior version (`CHECKSUM_SHA256` needs the
+  real tag archive to exist first) - real sha256 of the actually-
+  downloaded `v1.5.0` tarball via `curl`+`sha256sum`.
+- Local `windows-mingw` rebuild of `ebc` with the new version confirmed
+  the source change compiles cleanly; live `--version` output couldn't be
+  captured this round (Windows Smart App Control blocked the freshly
+  linked `.exe` again - the same recurring machine-local quirk already
+  documented under the MSVC-backend and v1.4.0 sections above, unrelated
+  to this change since it's a single version-string literal flowing
+  through the existing `PROJECT_VERSION` mechanism used unchanged by
+  every prior bump).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
