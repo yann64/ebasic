@@ -5966,6 +5966,78 @@ bump/tag `1.3.0` and publish - the same sequence as `v1.2.0` above.
   real tag archive to exist first) - real sha256 of the actually-
   downloaded `v1.3.0` tarball via `curl`+`sha256sum`.
 
+## WinUI3 shim: Phase 3 of the MSVC/WinUI3 feasibility study, done
+
+Phases 1 (MSVC backend) and 2 (`Stdcall`) above closed the toolchain and
+calling-convention gaps the feasibility study identified. The study's
+Phase 3 was explicit that WinUI3 logic itself cannot be authored in `.bas`
+without a genuinely multi-milestone redesign (templates, COM/interface
+modeling, coroutines, XAML/MSIX build integration - none of which exist in
+`ebc` today) - so the deliverable here is the documented pattern: a
+hand-written C++/WinRT shim, driven by real eBasic code, verified live
+with a running process and a screenshot rather than just claimed. The user
+picked this option explicitly over a plain-Win32-window fallback or a
+written-but-unbuilt pattern, via an `AskUserQuestion` prompt.
+
+- `examples/winui3_shim/host/` - a complete, hand-wired C++/WinRT WinUI3
+  application (`eb_winui3_host.vcxproj`), built with bare command-line
+  `msbuild`, deliberately *not* relying on the Visual Studio C++/WinRT
+  extension (not installed on this machine, and not something every
+  eBasic contributor's machine can assume either). That extension
+  normally wires the XAML markup compiler
+  (`MarkupCompilePass1`/`MarkupCompilePass2`) into a project's build graph
+  automatically; without it, those targets are simply never reached; they
+  only exist on the C#-world `CoreCompileDependsOn` chain (gated behind
+  `BuildingInsideVisualStudio=='true'`), and `CoreCompile` doesn't even
+  exist for a native vcxproj at all (confirmed via an MSBuild diagnostic
+  log naming the missing target directly). Rewired by hand instead, via a
+  `BeforeTargets="ClCompile"` custom target - the same trial-and-error
+  process (documented inline in the `.vcxproj` itself) also worked through
+  the correct `PlatformToolset` for this VS install (`v145`, found by
+  listing the actually-installed toolset directories rather than guessing
+  `v143`), the SDK version actually installed
+  (`10.0.26100.0`), the extra generated files that needed to be listed as
+  explicit `ClCompile` items because nothing auto-adds them outside the VS
+  extension (`XamlMetaDataProvider.cpp`, `XamlTypeInfo.g.cpp`,
+  `XamlTypeInfo.Impl.g.cpp`, `MainWindow.xaml.g.hpp`), and a
+  `DISABLE_XAML_GENERATED_MAIN` guard to stop the generated
+  `App.xaml.g.hpp` from fighting the project's own hand-written
+  `wWinMain` over which one defines it (`LNK2005`).
+- First attempt was an in-process DLL, loaded by an eBasic-compiled `.exe`
+  via plain `EXTERN "C"` - genuinely more "integrated," and it built and
+  loaded cleanly, but crashed on window creation with
+  `STATUS_STOWED_EXCEPTION` (`0xc000027b`) from inside the *system*-
+  installed `Microsoft.UI.Xaml.dll`. Root-caused (not just worked around)
+  to the Windows App Runtime's bootstrap/deployment model: even with
+  `WindowsAppSDKSelfContained=true` bundling the runtime files locally,
+  `MddBootstrapInitialize` still resolves the actual framework package
+  from the system-wide MSIX registration under `...\WindowsApps\
+  Microsoft.WindowsAppRuntime...\` rather than anything sitting next to
+  the DLL - confirmed by copying every local runtime DLL/`.pri` file
+  next to the test host and observing no change. A real architectural
+  incompatibility between self-contained WinUI3 code and being loaded as
+  a plugin into a foreign, non-Windows-App-SDK-aware host process, not a
+  bug in the shim. See `examples/winui3_shim/README.md` for the full
+  writeup.
+- Pivoted to a **separate-process** architecture instead of chasing the
+  DLL wall further: `eb_winui3_host.exe` stays the complete, independent,
+  self-contained application (the proven-working configuration,
+  unmodified in kind), and `examples/winui3_shim/hello_winui3.bas`
+  launches it with `ShellExecuteA` (`Stdcall`/`EXTERN "C"`,
+  `shell32.dll`) rather than `CreateProcessA`, since `ShellExecuteA`'s
+  flat scalar/`ZSTRING` parameters need no `STARTUPINFOA`/
+  `PROCESS_INFORMATION` struct layout on the eBasic side - the simpler
+  tool for "launch this program with these arguments." Title and message
+  strings cross the process boundary as plain argv, read back via
+  `CommandLineToArgvW` in `main.cpp`.
+- Verified live, end-to-end: `hello_winui3.bas` compiled with `ebc`, run
+  from the repository root, printed `launched` and exited `0`;
+  `Get-Process eb_winui3_host` immediately afterward confirmed a real,
+  responding window with `MainWindowTitle = "Hello from eBasic"`; a
+  full-screen screenshot confirms the WinUI3 window on-screen with its
+  eBasic-supplied message text and a working "Click me" button (each
+  click increments a counter printed by the shim's own `NotifyClick`).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
