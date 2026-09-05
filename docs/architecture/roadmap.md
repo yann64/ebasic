@@ -6391,6 +6391,66 @@ the user asked to bump/tag `1.6.0` and publish - the same sequence as
   `ebc 1.6.0 (9df9a7f)` - no Smart App Control lock this round, unlike
   several prior bumps.
 
+## Calling through a TYPE field of function-pointer type
+
+The one gap explicitly flagged out of scope in the previous feature
+(calling through a stored function pointer): a qualified call through a
+`TYPE` *field* (`obj.cb(1, 2)`), which previously failed with "TYPE has
+no method 'cb'" since the qualified `Call`/`CallStmt` Sema paths only
+ever checked `findMethodInChain`, never a field. Researched directly
+against the current source before planning, same discipline as every
+recent feature.
+
+**A second lucky coincidence, confirmed by the research: Codegen needed
+zero changes again.** A qualified method call's callee text
+(`resolveCalleeName` → `memberReceiverPrefix(lhs) + mangleName(name)`)
+and a plain field read's text (`genExprBase`'s `Member` case) are
+byte-for-byte the same shape - `memberReceiverPrefix` doesn't know or
+care whether the member turns out to be a method or a field. Confirmed
+live: `obj.cb(1, 2)` renders as `eb_obj.eb_cb(1, 2)`, and `This.cb(1, 2)`
+(from inside a method) as `this->eb_cb(1, 2)` - both already exactly
+correct C++ the moment `cb`'s field type is the synthesized function-
+pointer alias (Feature B), with no Codegen changes at all.
+
+- `checkExpr`'s qualified `ExprKind::Call` case and `checkStmt`'s
+  `StmtKind::CallStmt` qualified branch both gained a fallback, right
+  where the existing "TYPE has no method" error is raised
+  (`findMethodInChain` returned null): try `findFieldInChain` (the same
+  helper the plain `Member` read case already uses) and, if the field's
+  type is `FunctionPointer`, type-check via the already-existing
+  `checkIndirectCallArgs` (added for the unqualified feature - it
+  operates on a `Type`, not a `ProcedureInfo`, so it was already exactly
+  the right shape for a field's type too, no changes needed there
+  either).
+- A genuine asymmetry surfaced by the research and deliberately scoped
+  out, not silently mishandled: a `PROPERTY` looks exactly like a field
+  at the access site (`findPropertyInChain`), but a property *read*
+  renders as a getter call (`.eb_name_get()`) - a function-pointer-typed
+  *property* called as `obj.cb(1, 2)` would need `.eb_name_get()(1, 2)`
+  (call the getter, then call its result), a genuinely different codegen
+  shape not implemented here. Detected explicitly via `findPropertyInChain`
+  and rejected with a clear, actionable diagnostic rather than falling
+  through to a misleading "has no method" or (worse) silently
+  miscompiling.
+- A field that exists but isn't a function pointer (e.g. calling an
+  `INTEGER` field) also gets its own clear diagnostic ("is a field, not a
+  method or a function pointer, and cannot be called") instead of the
+  generic "has no method" - more accurate given the field genuinely
+  exists, just isn't callable.
+- `Sema::isLvalue`'s `Call` case comment ("qualified calls are always
+  procedure calls") was stale the moment a qualified call could also mean
+  a function-pointer field - updated the comment only; the logic (a
+  call's result is never an lvalue) needed no change either way.
+- Verified live: `obj.cb(1, 2)` as both an expression and a `CALL`
+  statement; `This.cb(1, 2)` from inside a method (confirms the fallback
+  is receiver-kind-agnostic, not special-cased to a plain `obj`
+  receiver); both negative cases (a non-function-pointer field; a
+  function-pointer-typed `PROPERTY`) rejected with the new diagnostics,
+  not silently miscompiled or vaguely reported. Full suite green under
+  both `windows-mingw` and real `windows-msvc`, including every existing
+  method-call test (`e2e_classes`, `e2e_inheritance`, `e2e_properties`)
+  unaffected.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

@@ -257,8 +257,8 @@ later use).
 
 A typed function pointer isn't only for handing off to external code -
 `cb(...)` calls straight through it, whether `cb` is a `DIM`'d variable,
-a `TYPE` field, or (the most useful case - a real higher-order function)
-a parameter:
+a parameter (the most useful case - a real higher-order function), or a
+`TYPE` field via a qualified receiver:
 
 ```basic
 FUNCTION ApplyTwice(BYVAL f AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER, BYVAL x AS INTEGER) AS INTEGER
@@ -271,13 +271,22 @@ DIM cb AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER
 cb = @Compare
 PRINT cb(3, 7)                  ' expression position: -1
 CALL cb(3, 7)                   ' statement position, return value discarded
+
+TYPE Callbacks
+    cmp AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER
+END TYPE
+
+DIM c AS Callbacks
+c.cmp = @Compare
+PRINT c.cmp(3, 7)                ' a TYPE field, via a qualified receiver: -1
 ```
 
 A `SUB (...)`-shaped (no return value) pointer may be called as a
 statement (`CALL cb(...)`) but not used in an expression - the same rule
-an ordinary `SUB` call already follows. Not (yet) supported: calling
-through a `TYPE` *field* via a qualified receiver (`obj.cb(1, 2)`) - only
-a plain variable, parameter, or global.
+an ordinary `SUB` call already follows. Not supported: calling through a
+`PROPERTY` of function-pointer type (`f.SomeProp(1, 2)`, where `SomeProp`
+is declared via `Declare Property`, not a plain field) - only a plain
+`TYPE` field.
 
 ### `Stdcall` on an eBasic-defined callback
 

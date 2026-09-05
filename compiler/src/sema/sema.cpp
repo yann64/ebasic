@@ -870,7 +870,7 @@ bool Sema::isLvalue(const Expr& expr) const {
             return true; // *p is always addressable when p is a pointer
         case ExprKind::Call: {
             /// An array-element read is an lvalue; a function-call result is not.
-            if (expr.lhs) return false; // qualified calls are always procedure calls
+            if (expr.lhs) return false; // a qualified call's result (method or function-pointer field) is never assignable
             SymbolInfo info;
             return lookupSymbol(canonicalName(expr.stringValue), info) && info.isArray;
         }
@@ -1361,6 +1361,32 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                 }
                 const ProcedureInfo* method = findMethodInChain(typeKey, canonicalName(stmt.name));
                 if (!method) {
+                    /// Calling through a TYPE field of function-pointer
+                    /// type as a statement (`CALL obj.cb(1, 2)`) - see
+                    /// checkExpr's qualified Call case for the identical
+                    /// field/PROPERTY fallback and why Codegen needs no
+                    /// change. No SUB-shaped-in-expression rejection here
+                    /// (a CALL discards any return value), matching the
+                    /// unqualified CallStmt case's own pattern.
+                    if (const FieldDecl* field = findFieldInChain(typeKey, canonicalName(stmt.name))) {
+                        if (field->type.kind == TypeKind::FunctionPointer) {
+                            checkIndirectCallArgs(field->type, stmt.args, stmt.loc);
+                            return;
+                        }
+                        diags_.error(stmt.loc, "'" + stmt.name + "' is a field, not a method or a "
+                                                    "function pointer, and cannot be called");
+                        for (auto& arg : stmt.args) checkExpr(*arg);
+                        return;
+                    }
+                    if (const PropertyInfo* prop = findPropertyInChain(typeKey, canonicalName(stmt.name));
+                        prop && prop->type.kind == TypeKind::FunctionPointer) {
+                        diags_.error(stmt.loc, "'" + stmt.name + "' is a PROPERTY of function-"
+                                                    "pointer type - calling through a "
+                                                    "PROPERTY-typed function pointer is not "
+                                                    "supported (only a plain field)");
+                        for (auto& arg : stmt.args) checkExpr(*arg);
+                        return;
+                    }
                     diags_.error(stmt.loc, "TYPE '" + receiverType.typeName + "' has no method '" +
                                                 stmt.name + "'");
                     for (auto& arg : stmt.args) checkExpr(*arg);
@@ -1588,6 +1614,56 @@ Type Sema::checkExpr(Expr& expr) {
                 }
                 const ProcedureInfo* method = findMethodInChain(typeKey, canonicalName(expr.stringValue));
                 if (!method) {
+                    /// Calling through a TYPE *field* of function-pointer
+                    /// type (`obj.cb(1, 2)`) - the qualified-call
+                    /// counterpart of the unqualified `cb(1, 2)` case
+                    /// above. Checked here, not before findMethodInChain,
+                    /// since a field and a method can never share a name
+                    /// (Sema rejects that at declaration time the same way
+                    /// a variable and a procedure can't). Codegen needs no
+                    /// change: a qualified method call's callee text
+                    /// (`memberReceiverPrefix(lhs) + mangleName(name)`) and
+                    /// a plain field read's text are already byte-for-byte
+                    /// identical, so `obj.cb(1, 2)` already renders as
+                    /// `eb_obj.eb_cb(1, 2)` - exactly correct once `cb`'s
+                    /// storage is the real function-pointer alias type.
+                    if (const FieldDecl* field = findFieldInChain(typeKey, canonicalName(expr.stringValue))) {
+                        if (field->type.kind == TypeKind::FunctionPointer) {
+                            if (!field->type.funcReturnType) {
+                                diags_.error(expr.loc, "'" + expr.stringValue +
+                                                            "' is a SUB-shaped function pointer "
+                                                            "and cannot be used in an expression");
+                            }
+                            checkIndirectCallArgs(field->type, expr.args, expr.loc);
+                            expr.type =
+                                field->type.funcReturnType ? *field->type.funcReturnType : Type(TypeKind::Unknown);
+                            return expr.type;
+                        }
+                        diags_.error(expr.loc, "'" + expr.stringValue + "' is a field, not a "
+                                                    "method or a function pointer, and cannot be "
+                                                    "called");
+                        for (auto& arg : expr.args) checkExpr(*arg);
+                        expr.type = TypeKind::Unknown;
+                        return expr.type;
+                    }
+                    /// A PROPERTY looks exactly like a field at the access
+                    /// site, but a property read renders as a getter call
+                    /// (`.eb_name_get()`) - calling through a function-
+                    /// pointer-typed PROPERTY would need `.eb_name_get()(1, 2)`,
+                    /// a genuinely different codegen shape not implemented
+                    /// here. Rejected explicitly (a clear, actionable
+                    /// diagnostic) rather than silently falling through to
+                    /// "has no method" or miscompiling.
+                    if (const PropertyInfo* prop = findPropertyInChain(typeKey, canonicalName(expr.stringValue));
+                        prop && prop->type.kind == TypeKind::FunctionPointer) {
+                        diags_.error(expr.loc, "'" + expr.stringValue + "' is a PROPERTY of "
+                                                    "function-pointer type - calling through a "
+                                                    "PROPERTY-typed function pointer is not "
+                                                    "supported (only a plain field)");
+                        for (auto& arg : expr.args) checkExpr(*arg);
+                        expr.type = TypeKind::Unknown;
+                        return expr.type;
+                    }
                     diags_.error(expr.loc, "TYPE '" + receiverType.typeName + "' has no method '" +
                                                 expr.stringValue + "'");
                     for (auto& arg : expr.args) checkExpr(*arg);

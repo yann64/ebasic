@@ -6,9 +6,11 @@
 ' in a DIM'd variable and a TYPE field (not just an inline @ProcName
 ' argument), bridging a FunctionPointer-typed value through a bare
 ' ANY PTR variable and back, and calling through a stored function
-' pointer directly from eBasic code (both as an expression and as a
-' statement, and through a function-pointer parameter inside a
-' higher-order FUNCTION - no external C code involved in any of these).
+' pointer directly from eBasic code - a DIM'd variable, a function-pointer
+' parameter inside a higher-order FUNCTION, and a TYPE *field* (both via a
+' plain receiver and via This. from inside a method) - both as an
+' expression and as a statement, no external C code involved in any of
+' these.
 Extern "C" Lib "ebfixturec"
     Declare Function eb_fixture_invoke_comparator Cdecl (ByVal cmp AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER, ByVal a AS INTEGER, ByVal b AS INTEGER) AS INTEGER
 End Extern
@@ -25,7 +27,16 @@ END FUNCTION
 
 TYPE Callbacks
     cmp AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER
+
+    Declare Sub InvokeViaThis()
 END TYPE
+
+SUB Callbacks.InvokeViaThis()
+    ' Calling through a function-pointer field via This. from inside a
+    ' method - proves the fallback is receiver-kind-agnostic, not just
+    ' for a plain obj receiver.
+    PRINT This.cmp(6, 6)
+END SUB
 
 ' Inline @ProcName argument.
 PRINT eb_fixture_invoke_comparator(@Compare, 3, 7)
@@ -39,6 +50,12 @@ PRINT eb_fixture_invoke_comparator(cb, 7, 3)
 DIM c AS Callbacks
 c.cmp = @Compare
 PRINT eb_fixture_invoke_comparator(c.cmp, 5, 5)
+
+' Calling through a TYPE field directly from eBasic code - both via a
+' plain receiver and via This. from inside a method.
+PRINT c.cmp(0, 1)   ' expression position
+CALL c.cmp(1, 0)     ' statement position (return value discarded)
+CALL c.InvokeViaThis()
 
 ' Bridged through a bare ANY PTR variable and back (FunctionPointer <->
 ' ANY PTR, both directions).

@@ -87,6 +87,40 @@ x = 5
 CALL x(1, 2)' \
     "is not a declared SUB or FUNCTION"
 
+check_rejected "calling a non-function-pointer TYPE field is rejected with a clear diagnostic" \
+'TYPE Foo
+    x AS INTEGER
+END TYPE
+
+DIM f AS Foo
+PRINT f.x(1, 2)' \
+    "is a field, not a method or a function pointer, and cannot be called"
+
+check_rejected "calling a function-pointer-typed PROPERTY is rejected (only a plain field is supported)" \
+'FUNCTION Compare(BYVAL a AS INTEGER, BYVAL b AS INTEGER) AS INTEGER
+    RETURN 0
+END FUNCTION
+
+TYPE Foo
+    cbField AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER
+
+    Declare Property Cb() AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER
+    Declare Property Cb(BYVAL v AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER)
+END TYPE
+
+Property Foo.Cb() AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER
+    Cb = This.cbField
+End Property
+
+Property Foo.Cb(BYVAL v AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER)
+    This.cbField = v
+End Property
+
+DIM f AS Foo
+f.Cb = @Compare
+PRINT f.Cb(1, 2)' \
+    "is a PROPERTY of function-pointer type - calling through a PROPERTY-typed function pointer is not supported"
+
 check_rejected "Stdcall is rejected on a TYPE method's out-of-line definition" \
 'TYPE Point
     x AS INTEGER
