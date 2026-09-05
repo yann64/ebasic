@@ -6038,6 +6038,30 @@ written-but-unbuilt pattern, via an `AskUserQuestion` prompt.
   eBasic-supplied message text and a working "Click me" button (each
   click increments a counter printed by the shim's own `NotifyClick`).
 
+## v1.4.0: Fifth Tagged Release
+
+With the WinUI3 shim example done, the user asked to bump/tag `1.4.0` and
+publish - the same sequence as `v1.2.0`/`v1.3.0` above.
+
+- `project(ebasic VERSION 1.4.0 ...)`, `packaging/rpm/ebasic.spec`
+  (`Version:` + a new `%changelog` entry), `debian/changelog` (a new
+  `ebasic (1.4.0)` entry stacked above `1.3.0`), the Flatpak metainfo's
+  `<release>` list, and `README.md`'s Status line - all following the
+  same pattern as every prior bump. No compiler behavior changed in this
+  release; the payload is `examples/winui3_shim/` itself.
+- `packaging/haiku/ebasic-1.3.0.recipe` fast-followed to
+  `ebasic-1.4.0.recipe` immediately after the tag was pushed, same
+  ordering constraint as every prior version (`CHECKSUM_SHA256` needs the
+  real tag archive to exist first) - real sha256 of the actually-
+  downloaded `v1.4.0` tarball via `curl`+`sha256sum`.
+- Local `windows-mingw` rebuild of `ebc` with the new version confirmed
+  the source change compiles cleanly; live `--version` output couldn't
+  be captured this round (Windows Smart App Control blocked the freshly
+  linked `.exe` again - the same machine-local quirk already documented
+  under the MSVC-backend section above, unrelated to this change since
+  it's a single version-string literal flowing through the existing
+  `PROJECT_VERSION` mechanism used unchanged by every prior bump).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
