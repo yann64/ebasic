@@ -6524,6 +6524,28 @@ simultaneously both kinds.
   on both, including `e2e_properties` and every prior field/unqualified-
   call test unaffected.
 
+## v1.8.0: Ninth Tagged Release
+
+With calling through a PROPERTY of function-pointer type done and
+CI-green on all five platforms, the user asked to bump/tag `1.8.0` and
+publish - the same sequence as `v1.2.0`-`v1.7.0` above. This completes
+the "calling through a stored function pointer" family of features
+(DIM'd variable, parameter, TYPE field, and now PROPERTY) started with
+`v1.6.0`.
+
+- `project(ebasic VERSION 1.8.0 ...)`, `packaging/rpm/ebasic.spec`
+  (`Version:` + a new `%changelog` entry), `debian/changelog` (a new
+  `ebasic (1.8.0)` entry stacked above `1.7.0`), the Flatpak metainfo's
+  `<release>` list, and `README.md`'s Status line - all following the
+  same pattern as every prior bump.
+- `packaging/haiku/ebasic-1.7.0.recipe` fast-followed to
+  `ebasic-1.8.0.recipe` immediately after the tag was pushed, same
+  ordering constraint as every prior version (`CHECKSUM_SHA256` needs the
+  real tag archive to exist first) - real sha256 of the actually-
+  downloaded `v1.8.0` tarball via `curl`+`sha256sum`.
+- Local `windows-mingw` rebuild confirmed live: `ebc --version` reports
+  `ebc 1.8.0 (4b20ec4)`.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
