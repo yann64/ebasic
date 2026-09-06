@@ -9,17 +9,24 @@ COPYRIGHT="2026 yann64"
 LICENSE="MIT"
 REVISION="1"
 
-# v1.9.0 (a robust MSVC PCH rule for --lib mode + clang-cl as a verified
-# backend option) - SOURCE_URI/CHECKSUM_SHA256 below point at the real,
-# published tag, verified by actually downloading it
-# (https://github.com/yann64/ebasic/archive/refs/tags/v1.9.0.tar.gz) and
-# computing its real sha256, same as the v1.8.0/v1.7.0/v1.6.0/v1.5.0/
-# v1.4.0/v1.3.0/v1.2.0/v1.1.0/v1.0.0 recipes before it. Still not yet
-# submitted upstream to haikuports - haikuporter's own recipe-format
-# conventions were dry-run-verified against real Haiku hardware (M8e),
-# cross-checked against app-arch/brotli's real recipe.
+# v1.10.0 (three portable compiler milestones - generics, multiple-
+# interface implementation, coroutines - targeting C++20) -
+# SOURCE_URI/CHECKSUM_SHA256 below point at the real, published tag,
+# verified by actually downloading it
+# (https://github.com/yann64/ebasic/archive/refs/tags/v1.10.0.tar.gz) and
+# computing its real sha256, same as every prior recipe. Unlike those
+# prior versions, this one has NOT yet been re-verified live on real
+# Haiku hardware specifically for the new C++20 requirement (M12's own
+# coroutine support needs <coroutine>, real support confirmed only on
+# this project's own Linux/macOS/Windows CI matrix and this development
+# machine's g++/cl.exe so far) - flagged here rather than silently
+# assumed, unlike the four-platform Haiku verification every earlier
+# tagged release actually had. Still not yet submitted upstream to
+# haikuports - haikuporter's own recipe-format conventions were
+# dry-run-verified against real Haiku hardware (M8e) on an earlier
+# version, cross-checked against app-arch/brotli's real recipe.
 SOURCE_URI="https://github.com/yann64/ebasic/archive/refs/tags/v$portVersion.tar.gz"
-CHECKSUM_SHA256="3d62f702eb9364280a4ab1b00d4bdc5872053e7ff2ddf7e48330b3b886ac9d65"
+CHECKSUM_SHA256="b02aba04fd3a0a9d745ca0f512d3a4207c79e806e2a8fe94f6c7b2ad22c60d0b"
 SOURCE_FILENAME="ebasic-$portVersion.tar.gz"
 
 ARCHITECTURES="all !x86_gcc2"
