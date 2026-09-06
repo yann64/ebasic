@@ -1,5 +1,5 @@
 Name:           ebasic
-Version:        1.9.0
+Version:        1.10.0
 Release:        1%{?dist}
 Summary:        BASIC-to-C++ transpiler with package manager and doc generator
 Group:          Development/Tools
@@ -61,6 +61,21 @@ ctest --test-dir build --output-on-failure
 %{_mandir}/man1/docgen.1*
 
 %changelog
+* Sun Sep 06 2026 eBasic contributors <noreply@example.com> - 1.10.0-1
+- v1.10.0: three portable compiler milestones, none Windows-specific
+  (confirmed by design and by identical CI results across Linux/macOS/
+  Windows). Generics: FUNCTION Max(OF T) (a AS T, b AS T) AS T, the type
+  parameter inferred from a call-site argument, monomorphized and
+  deduplicated per concrete type actually used. Multiple-interface
+  implementation: TYPE Widget EXTENDS BaseWidget, IClickable, IResizable
+  - one ordinary base plus any number of pure-virtual interfaces, with
+  real dynamic dispatch through a BYREF interface-typed parameter.
+  Coroutines: Async SUB/FUNCTION with TASK(OF T)/GENERATOR(OF T),
+  YIELD/AWAIT, compiling to real C++20 co_return/co_yield/co_await -
+  the C++ standard itself bumped to C++20 as a prerequisite. Each
+  milestone found and fixed real bugs live via testing, not just
+  review, including two Sema type-safety gaps and a latent stale-PCH
+  bug in the build system that predated this release.
 * Sun Sep 06 2026 eBasic contributors <noreply@example.com> - 1.9.0-1
 - v1.9.0: two MSVC-toolchain follow-ons, both verified live against real
   cl.exe/clang-cl. A robust MSVC precompiled-header rule for --lib mode:

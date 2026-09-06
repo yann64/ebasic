@@ -28,14 +28,19 @@ and live on real hardware (Haiku).
 
 ## Status
 
-`1.9.0`. All phased milestones (M0-M8: core language, C/C++ interop, `ebpm`,
+`1.10.0`. All phased milestones (M0-M8: core language, C/C++ interop, `ebpm`,
 precompiled runtime header, `docgen`, four-platform ports) are complete,
 along with post-M8 CLI ergonomics, Linux packaging (`.deb`/`.rpm`/Flatpak),
 OS-conditional dependencies, (M9) FreeBASIC-parity preprocessor directives
 (`#elseif`/`#if` expressions/`#macro`/stringize+concatenate/`__LINE__`/
 `__FILE__`/`__DATE__`/`__TIME__`), MSVC backend support alongside
-g++/clang++ (`windows-msvc` preset), and `Stdcall` calling-convention
-support on `EXTERN`/`DECLARE` for Win32 APIs. See
+g++/clang++ (`windows-msvc` preset), `Stdcall` calling-convention support
+on `EXTERN`/`DECLARE` for Win32 APIs, and three portable compiler
+milestones targeting C++20: (M10) generics (`FUNCTION Max(OF T) (a AS T,
+b AS T) AS T`), (M11) multiple-interface implementation (`TYPE Widget
+EXTENDS BaseWidget, IClickable, IResizable`), and (M12) coroutines
+(`Async`/`AWAIT`/`YIELD`, `Task(OF T)`/`Generator(OF T)`, compiling to
+real C++20 `co_return`/`co_yield`/`co_await`). See
 [`docs/architecture/roadmap.md`](docs/architecture/roadmap.md) for the full
 history and design decisions behind each milestone.
 

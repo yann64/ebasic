@@ -1,3 +1,23 @@
+ebasic (1.10.0) unstable; urgency=medium
+
+  * Generics: FUNCTION Max(OF T) (a AS T, b AS T) AS T - the type
+    parameter inferred from a call-site argument, monomorphized and
+    deduplicated per concrete type actually used.
+  * Multiple-interface implementation: TYPE Widget EXTENDS BaseWidget,
+    IClickable, IResizable - one ordinary base plus any number of
+    pure-virtual interfaces, with real dynamic dispatch through a
+    BYREF interface-typed parameter.
+  * Coroutines: Async SUB/FUNCTION with TASK(OF T)/GENERATOR(OF T),
+    YIELD/AWAIT, compiling to real C++20 co_return/co_yield/co_await.
+    The C++ standard itself bumped to C++20 as a prerequisite.
+  * All three are portable, general-purpose language features, none
+    Windows-specific - confirmed by design and by identical CI results
+    across Linux/macOS/Windows. Each found and fixed real bugs live via
+    testing, including two Sema type-safety gaps and a latent stale-PCH
+    bug in the build system that predated this release.
+
+ -- eBasic contributors <noreply@example.com>  Sun, 06 Sep 2026 19:00:00 +0200
+
 ebasic (1.9.0) unstable; urgency=medium
 
   * A robust MSVC precompiled-header rule for --lib mode - every plain-
