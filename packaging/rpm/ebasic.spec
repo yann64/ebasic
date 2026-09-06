@@ -1,5 +1,5 @@
 Name:           ebasic
-Version:        1.7.0
+Version:        1.8.0
 Release:        1%{?dist}
 Summary:        BASIC-to-C++ transpiler with package manager and doc generator
 Group:          Development/Tools
@@ -61,6 +61,13 @@ ctest --test-dir build --output-on-failure
 %{_mandir}/man1/docgen.1*
 
 %changelog
+* Sun Sep 06 2026 eBasic contributors <noreply@example.com> - 1.8.0-1
+- v1.8.0: calling through a PROPERTY of function-pointer type
+  (obj.SomeProp(1, 2), via a plain receiver or This.) - calls the
+  getter, then calls its result. Completes the "calling through a
+  stored function pointer" family of features (DIM'd variable,
+  parameter, TYPE field, and now PROPERTY).
+
 * Sun Sep 06 2026 eBasic contributors <noreply@example.com> - 1.7.0-1
 - v1.7.0: calling through a TYPE field of function-pointer type
   (obj.cb(1, 2), via a plain receiver or This.), completing the "calling

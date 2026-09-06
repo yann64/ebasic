@@ -1,3 +1,13 @@
+ebasic (1.8.0) unstable; urgency=medium
+
+  * Calling through a PROPERTY of function-pointer type
+    (obj.SomeProp(1, 2), via a plain receiver or This.) - calls the
+    getter, then calls its result. Completes the "calling through a
+    stored function pointer" family of features (DIM'd variable,
+    parameter, TYPE field, and now PROPERTY).
+
+ -- eBasic contributors <noreply@example.com>  Sun, 06 Sep 2026 09:30:00 +0200
+
 ebasic (1.7.0) unstable; urgency=medium
 
   * Calling through a TYPE field of function-pointer type
