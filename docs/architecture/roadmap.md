@@ -6546,6 +6546,71 @@ the "calling through a stored function pointer" family of features
 - Local `windows-mingw` rebuild confirmed live: `ebc --version` reports
   `ebc 1.8.0 (4b20ec4)`.
 
+## A robust MSVC PCH for --lib mode
+
+The last remaining carve-out from the original MSVC PCH work: `--lib`
+mode deliberately never used PCH, since its archived object is consumed
+by a *separate*, later `ebc` invocation whose own PCH state couldn't be
+verified from here, and MSVC requires the PCH-creation companion object
+(`runtime_pch.obj`) present in *whatever link eventually consumes* a
+`/Yu`-compiled object.
+
+**The realization that made this solvable**: MSVC's linker just needs
+*some* copy of the matching PCH-creation object present anywhere in the
+final link - not specifically one produced by the invocation that
+compiled the `/Yu`-using object. The existing exe/`--shared-lib` link
+steps only included that object when *their own* top-level `.cpp`
+happened to use `/Yu`, deriving it from that specific compile's own
+`runtimeIncludes`. Making that inclusion **defensive** instead - always
+include the PCH object whenever one exists right now, regardless of
+whether this invocation's own compile needed it - closes the gap: a
+linked-in static archive from an earlier `--lib` build might be the thing
+that actually needs it, and the object is inert, so including it "just in
+case" costs nothing everywhere else.
+
+- New `msvcRuntimePchObjectIfAvailable()` (`compiler/src/driver/main.cpp`),
+  alongside the existing `msvcRuntimePchObjectPath()`: looks up whether a
+  real PCH exists right now, independent of any particular compile's own
+  `usePch` state. `exeCompileLinkArgs` gained an explicit
+  `pchObjectToLink` parameter (computed once by the caller, shared
+  between the primary compile attempt and the PCH-fallback retry -
+  the object-to-link decision doesn't change between those two, only the
+  compile flags do); the `--shared-lib` call site switched from deriving
+  the object from its own compile's `runtimeIncludes` to the same
+  independent lookup.
+- `--lib` mode itself: removed the `usePch=false` override and routed its
+  compile step through the existing `runCompilerStepWithPchFallback`
+  (matching every other mode) - it now gets the same PCH speedup, with
+  the same C1852-family resilience.
+- **Verified live against real `cl.exe`, not just reasoned about** (the
+  plan's own stated bar, matching how the original `LNK2011` requirement
+  was itself discovered): built a small `--lib` package with PCH,
+  confirmed `/Yu` in its compile; built a consuming executable linking
+  against that archive, confirmed it compiles, links (no `LNK2011`), and
+  runs with correct output; then deliberately corrupted the real `.pch`
+  and rebuilt the *same* consuming executable against the *same*
+  already-built archive - confirmed via `--verbose` that the retry
+  correctly drops `/Yu`/`/Fp` for this invocation's own compile while
+  *still* including `runtime_pch.obj` in the link (computed
+  independently), and the link and run both still succeed.
+- New `tests/cli/msvc_pch_lib_mode.sh` (MSVC-only, no-op elsewhere):
+  encodes exactly that two-part live verification as a real test -
+  `/Yu` in a `--lib` compile, a PCH-built consuming exe linking
+  correctly, and the corrupted-`.pch`-still-links-correctly case.
+- Scope stated plainly, in both the code comments and
+  `docs/developer/architecture.md`: this is robust *within one
+  consistent build environment* (PCH available throughout a single
+  `ebpm build` run, the real-world case) - not across environments with
+  differing PCH availability, an inherent limitation of MSVC's PCH model
+  for any prebuilt artifact, not unique to this mechanism.
+- Full suite green under both `windows-mingw` and real `windows-msvc`
+  (a large batch of `e2e_pkg_*`/`ebpm`-dependent failures during
+  verification were the same recurring antivirus/Smart-App-Control
+  scan-lock signature already documented elsewhere in this file - this
+  time affecting `ebpm.exe` itself for an unusually long stretch, cleared
+  on retry, confirmed unrelated since `pkg/` source was never touched by
+  this change).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

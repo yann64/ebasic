@@ -354,6 +354,30 @@ fs::path msvcRuntimePchObjectPath(const std::vector<std::string>& runtimeInclude
     return {};
 }
 
+/// Independent of whether THIS invocation's own compile step actually
+/// used `/Yu` (which may have fallen back to no-PCH on a mismatch, or -
+/// for a consuming exe/`--shared-lib` build - simply have nothing to do
+/// with whether a *linked* static archive needed it): a linked-in
+/// archive built by an earlier, separate `ebc --lib` invocation may
+/// contain an object compiled with `/Yu` against this same PCH, which
+/// still needs the companion object present in *this* link too - MSVC's
+/// linker just needs *some* copy of the matching PCH-creation object
+/// anywhere in the final link, not specifically one produced by this
+/// invocation. Always including it whenever a real PCH exists right now,
+/// regardless of this invocation's own PCH usage, is what makes that
+/// transitively safe - the object is inert (see msvcRuntimePchObjectPath's
+/// own doc comment), so this costs nothing on the many links where
+/// nothing actually needed it. Robust within one consistent build
+/// environment (PCH availability doesn't change between the `--lib`
+/// build and whatever later links against it, e.g. one `ebpm build` run)
+/// - not across environments with differing PCH availability, which is
+/// an inherent limitation of MSVC's PCH model for any prebuilt artifact,
+/// not something specific to this mechanism.
+fs::path msvcRuntimePchObjectIfAvailable(const std::string& argv0, bool msvc) {
+    if (!msvc) return {};
+    return msvcRuntimePchObjectPath(runtimeIncludeArgs(argv0, msvc, /*usePch=*/true));
+}
+
 /// M5 (--lib mode, and --shared-lib/-dll): a library's object file must
 /// never define `main` itself (it would collide with the consuming
 /// package's own `main` at final link time), so its module may only contain
@@ -630,7 +654,8 @@ std::vector<std::string> exeCompileLinkArgs(const std::string& cxx, bool msvc,
                                              const std::vector<std::string>& runtimeIncludes,
                                              const fs::path& cppPath, const std::string& outputPath,
                                              const std::vector<std::string>& libDirs,
-                                             const std::vector<std::string>& libNames) {
+                                             const std::vector<std::string>& libNames,
+                                             const fs::path& pchObjectToLink = {}) {
     std::vector<std::string> args = {cxx};
     if (msvc) {
         args.push_back("/nologo");
@@ -638,11 +663,12 @@ std::vector<std::string> exeCompileLinkArgs(const std::string& cxx, bool msvc,
         args.push_back("/EHsc");
         for (const std::string& a : runtimeIncludes) args.push_back(a == "-I" ? "/I" : a);
         args.push_back(cppPath.string());
-        /// See msvcRuntimePchObjectPath's own doc comment - MSVC requires
-        /// this specific object in the link whenever runtimeIncludes above
-        /// actually used the PCH (a real `/Yu` token present).
-        fs::path pchObject = msvcRuntimePchObjectPath(runtimeIncludes);
-        if (!pchObject.empty()) args.push_back(pchObject.string());
+        /// See msvcRuntimePchObjectIfAvailable's own doc comment - the
+        /// caller computes this independently of `runtimeIncludes` above
+        /// (which may reflect a PCH-less retry for *this* file, or simply
+        /// not use PCH at all) since a linked static archive might still
+        /// need it.
+        if (!pchObjectToLink.empty()) args.push_back(pchObjectToLink.string());
         args.push_back("/Fe:" + outputPath);
         if (!libDirs.empty() || !libNames.empty()) {
             args.push_back("/link");
@@ -798,22 +824,27 @@ int main(int argc, char** argv) {
         /// for why a downstream consumer needs it forwarded transitively.
         fs::path libsPath = outDir / (libName + ".libs");
 
-        /// MSVC PCH is deliberately never used for --lib mode: this
+        /// MSVC PCH is used here too, same as every other mode - this
         /// archive's one object file is consumed by a *separate*, later
-        /// `ebc` invocation (whatever links against it), whose own PCH
-        /// state (available at all, same runtime.hpp version/flags) can't
-        /// be verified from here - and MSVC requires the PCH-creation
-        /// object be present in *whatever link eventually consumes* a
-        /// `/Yu`-compiled object (see msvcRuntimePchObjectPath's own doc
-        /// comment), a transitive requirement this invocation has no way
-        /// to guarantee the eventual consumer satisfies. Compiling without
-        /// PCH here is always correct, just without the speedup - exactly
-        /// the same fallback every other "PCH unavailable" case already
-        /// gets.
-        std::vector<std::string> compileArgs = compileToObjectArgs(
-            cxx, msvc, runtimeIncludeArgs(argv[0], msvc, /*usePch=*/false), cppPath, objPath,
-            /*positionIndependent=*/false);
-        rc = runCompilerStep(compileArgs, msvc, opts.verbose);
+        /// `ebc` invocation, but that invocation's own exe/`--shared-lib`
+        /// link step now defensively includes the PCH-creation object
+        /// whenever one exists (see msvcRuntimePchObjectIfAvailable's own
+        /// doc comment), regardless of whether *that* invocation's own
+        /// compile needed PCH - so the transitive `/Yu` requirement this
+        /// object may carry is satisfied there, not here. `lib.exe`
+        /// itself never links (no `LNK2011` risk in *this* invocation),
+        /// so no PCH-object handling is needed for the archiving step
+        /// below.
+        std::vector<std::string> runtimeIncludes = runtimeIncludeArgs(argv[0], msvc);
+        std::vector<std::string> compileArgs =
+            compileToObjectArgs(cxx, msvc, runtimeIncludes, cppPath, objPath, /*positionIndependent=*/false);
+        rc = runCompilerStepWithPchFallback(
+            compileArgs, msvc,
+            [&]() {
+                return compileToObjectArgs(cxx, msvc, runtimeIncludeArgs(argv[0], msvc, /*usePch=*/false), cppPath,
+                                            objPath, /*positionIndependent=*/false);
+            },
+            opts.verbose);
         if (rc == 0) {
             rc = ebasic::runProcess(ebasic::hostExecArgs(archiveArgs(archivePath, objPath, msvc)));
         }
@@ -868,14 +899,13 @@ int main(int argc, char** argv) {
         if (rc == 0) {
             std::vector<std::string> libNames = codegen.externLibs();
             for (const std::string& lib : opts.extraLibNames) libNames.push_back(lib);
-            /// See msvcRuntimePchObjectPath's own doc comment - harmless to
-            /// include even on the rare path where the compile above
-            /// actually fell back to no-PCH (the object contributes no
-            /// real symbols either way), so this doesn't need to track
-            /// whether that fallback happened.
+            /// See msvcRuntimePchObjectIfAvailable's own doc comment -
+            /// computed independently of whether the compile above itself
+            /// used PCH, since a linked static archive (opts.libDirs/
+            /// libNames) might need it regardless.
             std::vector<std::string> linkArgs =
                 sharedLinkArgs(cxx, msvc, targetOS, objPath, sharedLibPath, importLibPath, opts.libDirs, libNames,
-                               msvcRuntimePchObjectPath(runtimeIncludes));
+                               msvcRuntimePchObjectIfAvailable(argv[0], msvc));
             rc = ebasic::runProcess(ebasic::hostExecArgs(linkArgs));
         }
         if (rc == 0) {
@@ -893,13 +923,21 @@ int main(int argc, char** argv) {
         /// Options::extraLibNames's doc comment).
         std::vector<std::string> libNames = codegen.externLibs();
         for (const std::string& lib : opts.extraLibNames) libNames.push_back(lib);
-        std::vector<std::string> compileArgs = exeCompileLinkArgs(
-            cxx, msvc, runtimeIncludeArgs(argv[0], msvc), cppPath, opts.outputPath, opts.libDirs, libNames);
+        /// Computed once, independent of whichever runtimeIncludes variant
+        /// (with or without PCH) actually ends up compiling this file -
+        /// see msvcRuntimePchObjectIfAvailable's own doc comment: a linked
+        /// static archive (opts.libDirs/libNames, e.g. from an earlier
+        /// `ebc --lib` build) may need this object even when this
+        /// invocation's own compile doesn't.
+        fs::path pchObjectToLink = msvcRuntimePchObjectIfAvailable(argv[0], msvc);
+        std::vector<std::string> compileArgs =
+            exeCompileLinkArgs(cxx, msvc, runtimeIncludeArgs(argv[0], msvc), cppPath, opts.outputPath, opts.libDirs,
+                                libNames, pchObjectToLink);
         rc = runCompilerStepWithPchFallback(
             compileArgs, msvc,
             [&]() {
                 return exeCompileLinkArgs(cxx, msvc, runtimeIncludeArgs(argv[0], msvc, /*usePch=*/false), cppPath,
-                                           opts.outputPath, opts.libDirs, libNames);
+                                           opts.outputPath, opts.libDirs, libNames, pchObjectToLink);
             },
             opts.verbose);
     }

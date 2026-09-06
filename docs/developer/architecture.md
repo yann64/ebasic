@@ -161,15 +161,34 @@ any input object was compiled with `/Yu` against the same `.pch` - a real
 MSVC linker requirement (`LNK2011` "precompiled object missing from the
 link" otherwise), discovered empirically against real `cl.exe`, not
 something anticipated up front. `main.cpp`'s `msvcRuntimePchObjectPath()`
-derives that object's path and adds it to the plain-executable and
-`--shared-lib` link steps (both self-contained within one `ebc`
-invocation). **`--lib` mode deliberately never uses the MSVC PCH at
-all**: its static-archive output is consumed by a *separate*, later `ebc`
-invocation whose own PCH availability can't be verified from here, and
-propagating that companion-object requirement transitively across
-package boundaries was judged out of scope for this fast-follow -
-compiling without PCH there is always correct, just without the speedup,
-the same fallback every other "PCH unavailable" case already gets.
+derives that object's path from an already-built `runtimeIncludes` list's
+`/Fp` token.
+
+**`--lib` mode uses the PCH too**, closing what was originally a
+deliberate carve-out: that mode's static-archive output is consumed by a
+*separate*, later `ebc` invocation (whatever links against it), and MSVC
+just needs *some* copy of the matching PCH-creation object present
+anywhere in *that* final link - not specifically one produced by the
+invocation that compiled the archived object. `main.cpp`'s
+`msvcRuntimePchObjectIfAvailable()` makes every plain-executable and
+`--shared-lib` link **defensively** include the PCH object whenever one
+exists right now, independent of whether *that specific* invocation's own
+compile happened to use `/Yu` (it may have fallen back to no-PCH on a
+mismatch, or simply have nothing to do with whether a linked-in static
+archive needs it) - the object is inert, so including it "just in case"
+costs nothing on the many links where nothing actually needed it.
+Confirmed live: a `--lib` archive built with PCH links and runs correctly
+from a consuming executable, including when that consuming executable's
+own compile falls back to no-PCH (a corrupted `.pch`) while the archive's
+own PCH-compiled object still needs the companion object present.
+
+This makes PCH-in-`--lib`-mode robust *within one consistent build
+environment* (the real-world case: one `ebpm build` run, one `ebc`
+install, PCH available throughout) - it does not, and cannot cheaply,
+solve the cross-environment case (a `--lib` archive built with PCH
+available, later linked where PCH isn't available at all) - an inherent
+limitation of MSVC's PCH model for any prebuilt artifact, not unique to
+this mechanism.
 
 ## Relocatable installs (M8e)
 
