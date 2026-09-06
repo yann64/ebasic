@@ -1,5 +1,5 @@
 Name:           ebasic
-Version:        1.8.0
+Version:        1.9.0
 Release:        1%{?dist}
 Summary:        BASIC-to-C++ transpiler with package manager and doc generator
 Group:          Development/Tools
@@ -61,6 +61,17 @@ ctest --test-dir build --output-on-failure
 %{_mandir}/man1/docgen.1*
 
 %changelog
+* Sun Sep 06 2026 eBasic contributors <noreply@example.com> - 1.9.0-1
+- v1.9.0: two MSVC-toolchain follow-ons, both verified live against real
+  cl.exe/clang-cl. A robust MSVC precompiled-header rule for --lib mode:
+  every plain-executable/--shared-lib link now defensively includes the
+  PCH-creation object whenever one exists, so a static archive built
+  with PCH links correctly from a later, separate invocation. clang-cl
+  (Clang's MSVC-compatible driver) is now a genuinely verified backend
+  option, sharing cl.exe's flags but never its PCH (the two toolchains'
+  PCH formats aren't interchangeable) - a real, code-reading-discovered
+  bug fixed before it could ever manifest.
+
 * Sun Sep 06 2026 eBasic contributors <noreply@example.com> - 1.8.0-1
 - v1.8.0: calling through a PROPERTY of function-pointer type
   (obj.SomeProp(1, 2), via a plain receiver or This.) - calls the

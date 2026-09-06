@@ -1,3 +1,20 @@
+ebasic (1.9.0) unstable; urgency=medium
+
+  * A robust MSVC precompiled-header rule for --lib mode - every plain-
+    executable/--shared-lib link now defensively includes the PCH-
+    creation object whenever one exists, so a static archive built with
+    PCH links correctly from a later, separate invocation. Verified
+    live against real cl.exe, including a deliberately corrupted .pch
+    scenario.
+  * clang-cl (Clang's MSVC-compatible driver) is now a genuinely
+    verified backend option - shares cl.exe's flags but never its PCH
+    (the two toolchains' PCH formats aren't interchangeable, a real
+    bug found by reading the code and fixed before it could manifest).
+    Verified live against a real installed clang-cl, including the
+    entire test suite passing with CXX=clang-cl forced.
+
+ -- eBasic contributors <noreply@example.com>  Sun, 06 Sep 2026 10:00:00 +0200
+
 ebasic (1.8.0) unstable; urgency=medium
 
   * Calling through a PROPERTY of function-pointer type
