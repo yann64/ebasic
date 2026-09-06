@@ -6,26 +6,6 @@ build/
 compile_commands.json
 .cache/
 
-# examples/winui3_shim/host/ - a real MSBuild/vcxproj project (built via
-# msbuild, not ebc/CMake), so its own build outputs need their own rules;
-# *.exe/*.obj above already covers some of these, but not the MSBuild-
-# specific intermediate/output directories or artifact types.
-examples/winui3_shim/host/obj/
-examples/winui3_shim/host/x64/
-examples/winui3_shim/host/eb_winui3_host/
-examples/winui3_shim/host/.vs/
-examples/winui3_shim/host/*.pri
-examples/winui3_shim/host/*.winmd
-examples/winui3_shim/host/*.pdb
-examples/winui3_shim/host/*.lib
-examples/winui3_shim/host/*.exp
-examples/winui3_shim/host/*.ilk
-# The XAML markup compiler auto-generates these directly into the project
-# root (not obj/) on every build - see eb_winui3_host.vcxproj's own
-# EBasicRunXamlMarkupCompile target.
-examples/winui3_shim/host/XamlMetaDataProvider.cpp
-examples/winui3_shim/host/XamlMetaDataProvider.idl
-
 # dpkg-buildpackage / debhelper artifacts (debian/ itself is tracked)
 /obj-*/
 /debian/.debhelper/

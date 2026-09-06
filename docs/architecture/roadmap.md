@@ -7133,6 +7133,90 @@ exercised by any eBasic-level test - this language has no
 `ON ERROR`/exception-handling story of its own yet for a thrown
 exception to interact with meaningfully.
 
+## eb-winui: WinUI3 bindings extracted to a separate package
+
+With M10 (generics), M11 (interfaces), and M12 (coroutines) all shipped,
+the user asked to revisit WinUI bindings - the deferred half of the
+original "eb-win32 (g++/clang++) + WinUI bindings (msvc/clang-cl)" request.
+
+Re-reading `examples/winui3_shim/README.md` first surfaced the real,
+already-tested finding that mattered most: the `STATUS_STOWED_EXCEPTION`
+crash from the original in-process DLL attempt is a Windows App SDK
+deployment/bootstrap-model constraint, not a missing-language-feature gap
+- M10/M11/M12 don't touch it at all, and re-attempting genuine in-process
+consumption was deliberately not revisited.
+
+Instead, the shim's own already-working `NotifyClick`-to-stdout
+observability turned out to be the seed of something more useful: a
+long-lived WinUI3 host process, launched with its stdin/stdout redirected
+through real pipes (`CreateProcess`/`CreatePipe`, not the shim's original
+one-shot `ShellExecuteA`), reading simple text commands and writing
+acknowledgements back. This needed no new compiler features at all -
+`EXTERN`/`Stdcall`/`ANY PTR`/`TYPE`-as-aggregate already express
+everything needed, the same proven pattern `eb-win32` already uses for
+`WNDCLASSEXA`.
+
+- Shipped as a new, separate repository,
+  [eb-winui](https://github.com/yann64/eb-winui), mirroring `eb-win32`'s
+  own structure: `host/` (the WinUI3 host, extended with a background
+  stdin-reader thread and `DispatcherQueue::TryEnqueue`-marshaled command
+  dispatch - `SETTEXT`/`SETTITLE`/`QUIT`, each acknowledged with
+  `OK <command>` only once actually applied on the UI thread) plus
+  `src/raw/win32_process.bas` (`CreateProcessA`/`CreatePipe`/
+  `ReadFile`/`WriteFile`/`SetHandleInformation`/`CloseHandle`/
+  `PeekNamedPipe`) and `src/winui.bas` (the idiomatic `WinUIHost` type).
+- **Real bug found and fixed while extending `host/`**: `pch.h` never
+  included `winrt/Microsoft.UI.Dispatching.h`, so the new
+  `DispatcherQueue().TryEnqueue(...)` call failed with MSVC error C3779
+  ("a function that returns 'auto' cannot be used before it is defined")
+  - the consuming header only had a partial/forward declaration in scope.
+  Fixed by adding the missing include.
+- **Real bug found and fixed on the eBasic side**: eBasic's own File
+  Library pre-declares `ReadFile`/`WriteFile` (whole-file read/write, see
+  `file-library.md`) - the same exact names the raw Win32 API bindings
+  needed, an unavoidable collision. Fixed by declaring the raw bindings as
+  `Win32ReadFile`/`Win32WriteFile` via `Alias "ReadFile"`/`Alias
+  "WriteFile"` (every other declaration in that file keeps the real,
+  unprefixed Win32 name).
+- **A real, load-bearing constraint discovered by testing, not
+  documented anywhere beforehand**: `--lib` mode's cross-package export
+  can't marshal `STRING` (only `ZSTRING`/`ANY PTR`/plain-data types) -
+  confirmed by `ebc`'s own warning ("not exported... needs a marshaling
+  shim not yet implemented") once `hello_winui`, a separate package
+  depending on `eb-winui`, tried to call a `STRING`-signatured function.
+  Every exported entry point (`NewWinUIHost`, `WinUIHostSetText`,
+  `WinUIHostSetTitle`, `WinUIHostReadEvent`) was switched to `ZSTRING`
+  parameters/return - which surfaced a second, genuine hazard: `BString`'s
+  `operator const char*()` returns a pointer into its own internal
+  buffer (`data_.c_str()`), so returning a `ZSTRING` computed from a
+  function-local `STRING` would dangle the moment that local went out of
+  scope at `return`. Fixed with a single persistent, module-level `STRING`
+  buffer (`winuiScratch`) that every `ZSTRING`-returning function copies
+  its result into before returning a view of *that* - safe because the
+  caller's own `STRING` assignment copies the characters out immediately,
+  and this package's protocol is strictly one request/response at a time,
+  never concurrent. Documented in `winui.bas` itself as a reusable pattern
+  for any future `--lib` package hitting the same constraint.
+- **Verified live, end-to-end** on real `windows-msvc` (the host, via
+  `msbuild`) and `windows-mingw` (the eBasic side, via `ebpm build`): the
+  compiled `hello_winui.exe` launches the real WinUI3 host, updates its
+  `TextBlock` and window title, and closes it - each step confirmed via
+  the host's own real `OK <command>` acknowledgement, and the process
+  list confirmed no orphaned host process survives `WinUIHostClose`.
+- `examples/winui3_shim/host/` and `hello_winui3.bas` (the original
+  in-tree prototype this package grew out of) were removed from this
+  repository - `examples/winui3_shim/README.md` is now a short pointer to
+  `eb-winui`, per the user's own explicit confirmation to do this cleanup
+  rather than leave two diverging copies of the same C++/WinRT source.
+
+**Deliberately out of scope this round** (real, separate future work, not
+oversights, matching eb-winui's own README): dynamic, multi-widget
+construction (`host/`'s window stays the original fixed one-`TextBlock`-
+one-`Button` layout); re-attempting in-process consumption; a
+`eb-gui-winui` adapter implementing the shared `eb-gui` contract (needs
+dynamic widgets first); non-blocking event polling (`WinUIHostReadEvent`
+is a blocking read; `PeekNamedPipe` is bound but not yet used).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
