@@ -44,12 +44,12 @@ PRINT MakeZero()' \
     "cannot infer type parameter 'T' for 'MakeZero' - no parameter uses it directly"
 
 check_rejected "too few arguments to reach the type-parameter-typed one" \
-'FUNCTION Second(OF T) (a AS INTEGER, b AS T) AS T
-    Second = b
+'FUNCTION PickSecond(OF T) (a AS INTEGER, b AS T) AS T
+    PickSecond = b
 END FUNCTION
 
-PRINT Second(1)' \
-    "'Second' expects at least 2 argument(s) to infer its type parameter from"
+PRINT PickSecond(1)' \
+    "'PickSecond' expects at least 2 argument(s) to infer its type parameter from"
 
 check_rejected "a generic (OF ...) clause is rejected on a TYPE method's out-of-line definition" \
 'TYPE Box
