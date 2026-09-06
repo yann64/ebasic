@@ -6677,6 +6677,27 @@ every other unsupported-PCH case already gets.
   "whenever `-cxx`/`CXX` names `cl`/`clang-cl`" framing was no longer
   accurate) and given its own `clang-cl` subsection.
 
+## v1.9.0: Tenth Tagged Release
+
+With a robust MSVC PCH for `--lib` mode and `clang-cl` as a verified
+backend option both done and CI-green on all five platforms (including
+the new `clang-cl` step within `windows-msvc`, confirmed passing at the
+step level), the user asked to bump/tag `1.9.0` and publish - the same
+sequence as `v1.2.0`-`v1.8.0` above, this time covering two features
+landed since the last bump.
+
+- `project(ebasic VERSION 1.9.0 ...)`, `packaging/rpm/ebasic.spec`
+  (`Version:` + a new `%changelog` entry covering both features),
+  `debian/changelog` (a new `ebasic (1.9.0)` entry stacked above `1.8.0`),
+  the Flatpak metainfo's `<release>` list, and `README.md`'s Status line -
+  all following the same pattern as every prior bump.
+- `packaging/haiku/ebasic-1.8.0.recipe` fast-followed to
+  `ebasic-1.9.0.recipe` immediately after the tag was pushed, same
+  ordering constraint as every prior version - real sha256 of the
+  actually-downloaded `v1.9.0` tarball via `curl`+`sha256sum`.
+- Local `windows-mingw` rebuild confirmed live: `ebc --version` reports
+  `ebc 1.9.0 (bca7607)`.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.
