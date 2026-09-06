@@ -414,6 +414,10 @@ add_test(
     NAME cli_msvc_pch_lib_mode
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/cli/msvc_pch_lib_mode.sh $<TARGET_FILE:ebc>
 )
+add_test(
+    NAME cli_clang_cl
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/cli/clang_cl.sh $<TARGET_FILE:ebc>
+)
 
 # LSP-1: a protocol-level smoke test - speaks real Content-Length-framed
 # JSON-RPC over ebasic_lsp's stdio (initialize/didOpen/didChange/didClose/

@@ -94,6 +94,21 @@ jobs:
         run: cmake --build --preset windows-msvc
       - name: Test
         run: ctest --preset windows-msvc
+      - name: Install clang-cl
+        run: choco install llvm -y --no-progress
+      - name: Test (clang-cl as the generated-code backend, not just ebc's own build compiler)
+        # Same two-independent-choices point as linux-clang's own second
+        # Test step above: which compiler builds ebc itself (still real
+        # cl.exe, via windows-msvc's own preset - unchanged) vs. which
+        # compiler ebc invokes to compile *generated* C++ (-cxx/CXX).
+        # clang-cl shares cl.exe's `/`-style flag syntax (isMsvcToolchain)
+        # but deliberately never gets the MSVC PCH speedup (isClangCl,
+        # main.cpp) - the two toolchains' PCH formats aren't
+        # interchangeable, verified live rather than assumed.
+        run: |
+          $env:PATH = "C:\Program Files\LLVM\bin;$env:PATH"
+          $env:CXX = "clang-cl"
+          ctest --preset windows-msvc
 
   # Haiku is not part of this matrix - no GitHub-hosted Haiku image exists.
   # The real path to Haiku CI is registering the SSH-reachable box as a

@@ -142,8 +142,11 @@ header the way `g++ -x c++-header` can) via `cl /Ycebasic/runtime/runtime.hpp
 directory the GCC `.gch` uses (different filename, no collision - only one
 toolchain's file is ever relevant to a given `ebc` invocation).
 `runtimeIncludeArgs()` passes the matching `/Yu<header>`/`/Fp<path>` flags
-whenever `-cxx`/`CXX` names `cl`/`clang-cl` and a real `.pch` exists for
-this build. Unlike GCC, MSVC has **no automatic lookup and no graceful
+whenever `-cxx`/`CXX` names real `cl` and a real `.pch` exists for this
+build - **never `clang-cl`** (see below: MSVC's PDB-based PCH format and
+Clang's own AST-based one aren't interchangeable, so the `.pch` a real
+`cl.exe` built here would be useless, or worse, to `clang-cl`). Unlike
+GCC, MSVC has **no automatic lookup and no graceful
 fallback**: `/Yu`/`/Fp` are mandatory explicit flags, and a stale/
 mismatched `.pch` is a *hard* compile error (`C1852` "is not a valid
 precompiled header file" confirmed live against real `cl.exe`; `C1010`/
@@ -189,6 +192,31 @@ solve the cross-environment case (a `--lib` archive built with PCH
 available, later linked where PCH isn't available at all) - an inherent
 limitation of MSVC's PCH model for any prebuilt artifact, not unique to
 this mechanism.
+
+### `clang-cl` as a genuinely verified backend option
+
+`isMsvcToolchain()` matches `clang-cl` (Clang's own MSVC-compatible
+driver mode) alongside `cl` for flag-syntax purposes - `/std:c++17`,
+`/EHsc`, `/c`, `/Fo:`/`/Fe:`, `/link`/`/LIBPATH:`, `lib.exe` archiving,
+all shared, by LLVM's own design goal of drop-in `cl.exe` compatibility.
+Verified live against a real `clang-cl.exe`: a trivial program, an
+`EXTERN`/`Stdcall` case, a `TYPE`-field/`PROPERTY` function-pointer case,
+and a `--lib`+consuming-exe round trip (the last two also proving
+`lib.exe` archiving and `/LIBPATH:` linking work unchanged against a
+`clang-cl`-compiled object) all compile, link, and run with correct
+output - as does the *entire* existing test suite with `CXX=clang-cl`
+forced as the backend for every `ebc` invocation.
+
+**`clang-cl` never gets the MSVC PCH speedup, by design**: `isClangCl()`
+(`compiler/src/driver/main.cpp`) gates PCH usage off specifically for
+`clang-cl` even though `isMsvcToolchain()` is still true - the only
+`.pch` that could ever exist was built by real `cl.exe`
+(`runtime/CMakeLists.txt`'s MSVC PCH block), and MSVC's PDB-based PCH
+serialization isn't interchangeable with Clang's own AST-based one.
+`clang-cl` gets the same graceful "no PCH available, just slower" path
+every other unsupported-PCH case already gets - no `/Yu`/`/Fp` is ever
+emitted, so none of the fallback/retry/companion-object machinery above
+is ever exercised for it either.
 
 ## Relocatable installs (M8e)
 

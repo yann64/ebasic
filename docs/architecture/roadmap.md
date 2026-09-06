@@ -6611,6 +6611,72 @@ case" costs nothing everywhere else.
   on retry, confirmed unrelated since `pkg/` source was never touched by
   this change).
 
+## clang-cl as a genuinely verified backend option
+
+The original MSVC feasibility study named `clang-cl` (Clang's MSVC-
+compatible driver mode) as "a cheaper middle option... same `/`-style
+flags as `cl.exe`" - purely theoretical at the time (not installed on
+this machine). `isMsvcToolchain()` already matched it alongside `cl` for
+flag-syntax purposes, and the CLI help text already documented it, but
+nothing had ever actually run against a real `clang-cl.exe`.
+
+**A real, unverified bug found by reading the code, before any live
+testing**: the MSVC PCH mechanism's availability check was gated purely
+on `isMsvcToolchain()` being true (true for both `cl` and `clang-cl`),
+but the `.pch` itself is only ever built by literal `cl.exe`
+(`runtime/CMakeLists.txt`). MSVC's PDB-based PCH format and Clang's own
+AST-based one aren't interchangeable - feeding `clang-cl` a `cl.exe`-
+built `.pch` via `/Yu`/`/Fp` would very likely have hard-failed on every
+compile the moment a real PCH existed. Fixed with a new, narrower
+`isClangCl()` check (`compiler/src/driver/main.cpp`), used specifically
+to gate PCH off even when `isMsvcToolchain()` is true - `clang-cl` keeps
+every other MSVC-style flag/tool, just never `/Yu`/`/Fp`/the PCH
+companion object, the same graceful "no PCH available, just slower" path
+every other unsupported-PCH case already gets.
+
+- The user asked to install `clang-cl` first (`winget install LLVM.LLVM`)
+  before implementing anything, explicitly citing this session's own
+  established standard: every MSVC-toolchain feature shipped so far only
+  became correct after live testing caught real bugs (a quoting bug, a
+  linker requirement, a wrong error code) that pure reasoning never would
+  have found. LLVM 22.1.8 installed; `clang-cl.exe` confirmed working
+  from a `vcvarsall.bat`-sourced prompt (real Visual Studio already
+  installed supplies `lib.exe`/`link.exe`, so no separate linker
+  toolchain was needed).
+- Verified live, comprehensively: a trivial program (confirmed **no**
+  `/Yu`/`/Fp` in the invocation - the deliberate-skip proof); an
+  `EXTERN`/`Stdcall` case (real ABI compatibility, not just flag
+  compatibility); the `typed_function_pointers` case (`Stdcall` function
+  pointers, `TYPE` fields, `PROPERTY` calls, real `EXTERN` linking against
+  `ebfixturec`) - all produced byte-for-byte correct output; a `--lib`
+  archive built with `clang-cl`, consumed by a `clang-cl`-built
+  executable, linked and ran correctly (confirming `lib.exe` archiving
+  and `/LIBPATH:` linking both work unchanged from a `clang-cl`-compiled
+  object). Finally, the **entire existing test suite** (all 72 cases)
+  passed twice in a row under `windows-msvc` - once with the normal
+  `cl.exe` backend, once with `CXX=clang-cl` forced for every `ebc`
+  invocation - not just a handful of hand-picked smoke cases.
+- One harmless, noted-but-not-acted-on observation: `lld-link` (the
+  linker `clang-cl` invokes under the hood) emits `LNK4217` warnings
+  ("locally defined symbol imported: free/malloc") when linking against
+  `ebfixturec` - a benign warning about mixing a statically-compiled C
+  fixture with the dynamic CRT, confirmed harmless since the programs
+  using it still ran with fully correct output.
+- New `tests/cli/clang_cl.sh` (`clang-cl`-only, no-op elsewhere,
+  mirroring `cli/msvc_pch.sh`'s own pattern): the mirror image of that
+  test's own `/Yu`-presence check - confirms `/Yu` does **not** appear,
+  proving the deliberate PCH skip is real, not an accident.
+- CI: extended the existing `windows-msvc` job with one more step,
+  following `linux-clang`'s own established two-birds-one-job pattern
+  exactly (`CXX=clang++ ctest --preset linux-clang` there; `choco install
+  llvm` + `CXX=clang-cl ctest --preset windows-msvc` here) - not a whole
+  new job, since the *host* compiler building `ebc` itself is unchanged
+  (still real `cl.exe`); only the *generated-code* backend choice
+  changes.
+- `docs/developer/architecture.md`'s MSVC PCH section revised (the old
+  "whenever `-cxx`/`CXX` names `cl`/`clang-cl`" framing was no longer
+  accurate) and given its own `clang-cl` subsection.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

@@ -373,8 +373,8 @@ fs::path msvcRuntimePchObjectPath(const std::vector<std::string>& runtimeInclude
 /// - not across environments with differing PCH availability, which is
 /// an inherent limitation of MSVC's PCH model for any prebuilt artifact,
 /// not something specific to this mechanism.
-fs::path msvcRuntimePchObjectIfAvailable(const std::string& argv0, bool msvc) {
-    if (!msvc) return {};
+fs::path msvcRuntimePchObjectIfAvailable(const std::string& argv0, bool msvc, bool clangCl) {
+    if (!msvc || clangCl) return {};
     return msvcRuntimePchObjectPath(runtimeIncludeArgs(argv0, msvc, /*usePch=*/true));
 }
 
@@ -437,6 +437,26 @@ bool isMsvcToolchain(const std::string& cxx) {
     std::string stem = fs::path(cxx).stem().string();
     for (char& c : stem) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return stem == "cl" || stem == "clang-cl";
+}
+
+/// True specifically for `clang-cl` (never `cl`) - used to gate the MSVC
+/// PCH mechanism off even when `isMsvcToolchain` is true. `clang-cl`
+/// shares `cl.exe`'s `/`-style flag syntax (matched by `isMsvcToolchain`
+/// above), but not its PCH file format: `runtime/CMakeLists.txt`'s MSVC
+/// PCH block only ever builds `runtime.pch` with literal `cl` - MSVC's
+/// PDB-based PCH serialization and Clang's own AST-based one are not
+/// interchangeable, so feeding `clang-cl` a `cl.exe`-built `.pch` via
+/// `/Yu`/`/Fp` would be expected to hard-fail on every compile, not
+/// gracefully degrade the way GCC's own `.gch` lookup does for an
+/// unsupported toolchain. `clang-cl` still gets every other MSVC-style
+/// flag/tool (`/std:c++17`, `/EHsc`, `lib.exe`, `/LIBPATH:`, ...) - just
+/// never `/Yu`/`/Fp`/the PCH companion object, the same "no PCH
+/// available, just slower" path every other unsupported-PCH case already
+/// gets.
+bool isClangCl(const std::string& cxx) {
+    std::string stem = fs::path(cxx).stem().string();
+    for (char& c : stem) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return stem == "clang-cl";
 }
 
 /// Builds the "compile one .gen.cpp to one object file" step shared by all
@@ -834,8 +854,10 @@ int main(int argc, char** argv) {
         /// object may carry is satisfied there, not here. `lib.exe`
         /// itself never links (no `LNK2011` risk in *this* invocation),
         /// so no PCH-object handling is needed for the archiving step
-        /// below.
-        std::vector<std::string> runtimeIncludes = runtimeIncludeArgs(argv[0], msvc);
+        /// below. `!isClangCl(cxx)` - see isClangCl's own doc comment:
+        /// clang-cl never gets `/Yu`/`/Fp` at all, since the only `.pch`
+        /// that could ever exist here was built by real `cl.exe`.
+        std::vector<std::string> runtimeIncludes = runtimeIncludeArgs(argv[0], msvc, /*usePch=*/!isClangCl(cxx));
         std::vector<std::string> compileArgs =
             compileToObjectArgs(cxx, msvc, runtimeIncludes, cppPath, objPath, /*positionIndependent=*/false);
         rc = runCompilerStepWithPchFallback(
@@ -885,7 +907,11 @@ int main(int argc, char** argv) {
         /// shared object itself is linked against).
         fs::path importLibPath = outDir / ("lib" + libName + ".dll.a");
 
-        std::vector<std::string> runtimeIncludes = runtimeIncludeArgs(argv[0], msvc);
+        /// `!isClangCl(cxx)` - see isClangCl's own doc comment: clang-cl
+        /// never gets `/Yu`/`/Fp` at all, since the only `.pch` that could
+        /// ever exist here was built by real `cl.exe`.
+        std::vector<std::string> runtimeIncludes =
+            runtimeIncludeArgs(argv[0], msvc, /*usePch=*/!isClangCl(cxx));
         std::vector<std::string> compileArgs =
             compileToObjectArgs(cxx, msvc, runtimeIncludes, cppPath, objPath, /*positionIndependent=*/!isWindows);
         rc = runCompilerStepWithPchFallback(
@@ -905,7 +931,7 @@ int main(int argc, char** argv) {
             /// libNames) might need it regardless.
             std::vector<std::string> linkArgs =
                 sharedLinkArgs(cxx, msvc, targetOS, objPath, sharedLibPath, importLibPath, opts.libDirs, libNames,
-                               msvcRuntimePchObjectIfAvailable(argv[0], msvc));
+                               msvcRuntimePchObjectIfAvailable(argv[0], msvc, isClangCl(cxx)));
             rc = ebasic::runProcess(ebasic::hostExecArgs(linkArgs));
         }
         if (rc == 0) {
@@ -929,10 +955,10 @@ int main(int argc, char** argv) {
         /// static archive (opts.libDirs/libNames, e.g. from an earlier
         /// `ebc --lib` build) may need this object even when this
         /// invocation's own compile doesn't.
-        fs::path pchObjectToLink = msvcRuntimePchObjectIfAvailable(argv[0], msvc);
+        fs::path pchObjectToLink = msvcRuntimePchObjectIfAvailable(argv[0], msvc, isClangCl(cxx));
         std::vector<std::string> compileArgs =
-            exeCompileLinkArgs(cxx, msvc, runtimeIncludeArgs(argv[0], msvc), cppPath, opts.outputPath, opts.libDirs,
-                                libNames, pchObjectToLink);
+            exeCompileLinkArgs(cxx, msvc, runtimeIncludeArgs(argv[0], msvc, /*usePch=*/!isClangCl(cxx)), cppPath,
+                                opts.outputPath, opts.libDirs, libNames, pchObjectToLink);
         rc = runCompilerStepWithPchFallback(
             compileArgs, msvc,
             [&]() {
