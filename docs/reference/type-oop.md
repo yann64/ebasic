@@ -157,10 +157,12 @@ TYPE Derived EXTENDS Base
 END TYPE
 ```
 
-Single inheritance only (one base, not a list). A method declared `Virtual`
-in the base and `Override` in a derived type participates in dynamic
-dispatch - called through a `BYREF`/pointer reference to the base type, it
-still resolves to the derived type's own override, not the base's:
+At most one *ordinary* (fielded) base - see "Interfaces" below for
+implementing more than one contract at once via `EXTENDS Base,
+Interface1, Interface2`. A method declared `Virtual` in the base and
+`Override` in a derived type participates in dynamic dispatch - called
+through a `BYREF`/pointer reference to the base type, it still resolves
+to the derived type's own override, not the base's:
 
 ```basic
 TYPE Shape
@@ -200,6 +202,74 @@ Virtual Function Circle.Describe() AS STRING
     Describe = Base.Describe() & " (circle)"
 End Function
 ```
+
+### Interfaces
+
+A TYPE with zero fields where every declared method is `Virtual` is a
+*pure interface* - a contract with no data of its own. `EXTENDS` accepts
+a comma-separated list naming at most one ordinary base plus any number
+of interfaces:
+
+```basic
+TYPE IClickable
+    Declare Virtual Sub OnClick()
+END TYPE
+
+TYPE IResizable
+    Declare Virtual Sub OnResize(w AS INTEGER, h AS INTEGER)
+END TYPE
+
+TYPE BaseWidget
+    label AS STRING
+END TYPE
+
+TYPE Widget EXTENDS BaseWidget, IClickable, IResizable
+    clicks AS INTEGER
+    Declare Virtual Sub OnClick()
+    Declare Virtual Sub OnResize(w AS INTEGER, h AS INTEGER)
+END TYPE
+
+Virtual Sub Widget.OnClick()
+    This.clicks = This.clicks + 1
+End Sub
+
+Virtual Sub Widget.OnResize(w AS INTEGER, h AS INTEGER)
+    ' ...
+End Sub
+```
+
+An interface's own declared methods have no out-of-line definition (real
+C++ pure virtuals under the hood - a TYPE that implements an interface
+without providing every one of its methods stays abstract, a real
+backend compile error if anything ever tries to `DIM` it). To
+*implement* an interface, a TYPE redeclares each of that interface's
+methods in its own body (as `Widget` does with `OnClick`/`OnResize`
+above) and provides real out-of-line definitions for them - exactly the
+same "declared within, defined outside" shape ordinary `Virtual`/
+`Override` methods already use.
+
+A value of any TYPE that implements a given interface (directly, or
+transitively through an ordinary base) is assignable to a `BYREF`
+parameter (or variable) of that interface's own type - real dynamic
+dispatch through the reference, the same polymorphism ordinary `EXTENDS`
+already gives a base-typed `BYREF` parameter:
+
+```basic
+SUB PokeClickable(c AS IClickable)
+    CALL c.OnClick()   ' dispatches to whichever concrete TYPE was passed
+END SUB
+
+DIM w AS Widget
+CALL PokeClickable(w)
+```
+
+**Not yet supported** (deliberate scope cuts, not oversights): a TYPE
+naming more than one ordinary (fielded) base; an interface itself using
+`EXTENDS` (interface-of-interface inheritance); and upcasting through a
+`PTR` (`DIM c AS IClickable PTR : c = @w` is rejected today - only the
+`BYREF`-parameter/variable form above works, matching this language's
+existing single-inheritance upcast machinery, which has the identical
+PTR-vs-BYREF gap already).
 
 ## `PROPERTY`
 

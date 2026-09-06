@@ -361,9 +361,17 @@ StmtPtr Parser::parseRecordDecl() {
     stmt->loc = loc;
     stmt->name = nameTok.text;
     if (match(TokenKind::KwExtends)) {
-        /// Left for Sema to reject on a UNION (single inheritance only
-        /// applies to TYPE in this version).
-        stmt->baseTypeName = expect(TokenKind::Identifier, "expected a base TYPE name after EXTENDS").text;
+        /// M11: a comma-separated list - at most one ordinary (non-
+        /// interface) base plus zero or more pure-interface bases, but the
+        /// parser itself doesn't know which is which yet (that needs each
+        /// name's own already-parsed shape - see Sema's collectTypes); it
+        /// just collects the raw name list. Left for Sema to reject
+        /// entirely on a UNION (EXTENDS only applies to TYPE in this
+        /// version).
+        do {
+            stmt->extendsNames.push_back(
+                expect(TokenKind::Identifier, "expected a base TYPE name after EXTENDS").text);
+        } while (match(TokenKind::Comma));
     }
     expectStmtEnd();
     skipNewlines();

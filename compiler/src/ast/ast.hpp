@@ -479,9 +479,43 @@ struct Stmt {
     /// rule). UNION cannot have any (Sema-rejected - FB unions may not
     /// contain members with constructors/destructors).
     std::vector<StmtPtr> methods;
-    /// TypeDecl only: the name after EXTENDS, empty if none. FreeBASIC is
-    /// single-inheritance only - one base, not a list.
+    /// TypeDecl/UnionDecl only: the raw, comma-separated name list from an
+    /// EXTENDS clause, exactly as parsed (M11, multiple-interface
+    /// implementation) - e.g. `EXTENDS BaseWidget, IClickable, IResizable`
+    /// parses to `["BaseWidget", "IClickable", "IResizable"]`. UNION still
+    /// cannot actually use EXTENDS (Sema-rejected, unchanged) - the parser
+    /// itself doesn't know that yet, matching how baseTypeName's own
+    /// rejection was already Sema's job, not the parser's.
+    std::vector<std::string> extendsNames;
+    /// TypeDecl only, set by Sema's collectTypes (not the parser - classifying
+    /// each `extendsNames` entry needs that name's own already-parsed shape,
+    /// which the parser doesn't have visibility into): the *one* name from
+    /// `extendsNames` that resolved to an ordinary (non-interface) base, or
+    /// empty if none - the single-inheritance chain every existing
+    /// baseName-walking check (cycle detection, Override-matches-Virtual,
+    /// field/method/property lookup) still follows completely unchanged.
     std::string baseTypeName;
+    /// TypeDecl only, set by Sema's collectTypes: every other `extendsNames`
+    /// entry that resolved to a *pure interface* (a TYPE with zero fields,
+    /// no constructor/destructor, and every method Virtual) - additional
+    /// `: public InterfaceX` base clauses Codegen emits alongside
+    /// `baseTypeName`'s own. Checked by findMethodInChain/findPropertyInChain/
+    /// isSameOrDerivedFrom at every level of the baseTypeName chain (see
+    /// their own doc comments), not just the starting TYPE, so a
+    /// transitively-derived TYPE still sees an ancestor's own interfaces.
+    std::vector<std::string> interfaceNames;
+    /// TypeDecl only, set by Sema's collectTypes: true when *this* TYPE's
+    /// own shape (zero fields, no ctor/dtor, every declared method Virtual,
+    /// at least one method) itself qualifies as a pure interface - the
+    /// classification a *different* TYPE's own `extendsNames` resolution
+    /// consults to decide whether a named base belongs in `baseTypeName` or
+    /// `interfaceNames`. An interface's own declared methods are exempt
+    /// from the ordinary "declared but never defined" check (Sema's Pass 6)
+    /// and are emitted `= 0` (a real pure virtual, no out-of-line body -
+    /// see Codegen) rather than expecting one - the whole point of an
+    /// interface is that *implementers* provide the body, not the
+    /// interface TYPE itself.
+    bool isInterface = false;
 
     /// If: one condition per IF/ELSEIF branch, and one body per branch in
     /// `blocks`. If hasElse, `blocks` has one extra trailing entry for ELSE.

@@ -17,6 +17,35 @@ bool isCaseCompatible(TypeKind a, TypeKind b) {
     return (isNumericType(a) && isNumericType(b)) || (a == TypeKind::StringT && b == TypeKind::StringT);
 }
 
+/// M11 (multiple-interface implementation): is `typeStmt` itself shaped like
+/// a pure interface - zero fields, no constructor/destructor, no PROPERTY,
+/// at least one method, and every one of those methods Virtual? Operates
+/// directly on the raw, already-parsed Stmt (never on a resolved
+/// RecordInfo), so it needs no cross-TYPE resolution at all and is safe to
+/// call regardless of declaration order - see Stmt::isInterface's own doc
+/// comment for why this matters (classifying a *different* TYPE's own
+/// EXTENDS list needs this before that different TYPE's own RecordInfo
+/// necessarily exists yet).
+bool isPureInterfaceShape(const Stmt& typeStmt) {
+    if (typeStmt.kind != StmtKind::TypeDecl) return false;
+    if (!typeStmt.fields.empty()) return false;
+    /// A "pure" interface has no EXTENDS of *any* kind, not even to
+    /// another interface (interface-of-interface inheritance isn't
+    /// supported this round - see Stmt::isInterface's own doc comment) and
+    /// not to an ordinary base either: without this, a TYPE that itself
+    /// declares zero fields but genuinely EXTENDS one or more ordinary,
+    /// data-carrying bases (inheriting *their* fields) would be wrongly
+    /// classified as a zero-data interface just because it adds no field
+    /// of its own - a real bug caught by testing, not assumed away.
+    if (!typeStmt.extendsNames.empty()) return false;
+    if (typeStmt.methods.empty()) return false;
+    for (const StmtPtr& method : typeStmt.methods) {
+        if (method->isCtor || method->isDtor || method->isProperty) return false;
+        if (!method->isVirtual) return false;
+    }
+    return true;
+}
+
 /// Strict pointee-type identity (NOT the looser numeric-widening rule that
 /// isAssignCompatible allows between plain variables - C++ pointers have no
 /// implicit float*<->int* conversion, so `Integer PTR = Single PTR` must be
@@ -150,12 +179,22 @@ void Sema::check(Module& module) {
 void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
     auto isRecordDecl = [](StmtKind k) { return k == StmtKind::TypeDecl || k == StmtKind::UnionDecl; };
 
+    /// M11: canonical name -> raw Stmt*, built alongside Pass 1 below -
+    /// lets Pass 2's own EXTENDS resolution classify each named base as
+    /// ordinary-vs-interface via isPureInterfaceShape *regardless of
+    /// declaration order*, since that predicate only needs the base's own
+    /// already-parsed shape (fields/methods straight off the AST), never a
+    /// cross-TYPE-resolved RecordInfo - see isPureInterfaceShape's own doc
+    /// comment.
+    std::unordered_map<std::string, const Stmt*> typeStmtByKey;
+
     /// Pass 1: register every TYPE/UNION's name first, so a field can
     /// reference one declared later in the file (mirrors
     /// collectProcedures/labels).
     for (auto& stmt : stmts) {
         if (!isRecordDecl(stmt->kind)) continue;
         std::string key = canonicalName(stmt->name);
+        typeStmtByKey[key] = stmt.get();
         if (procedures_.count(key) || structs_.count(key)) {
             diags_.error(stmt->loc, "'" + stmt->name + "' is already declared");
             continue;
@@ -192,24 +231,62 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
             info.fields.push_back(field);
         }
 
-        /// EXTENDS (single inheritance only) - UNION cannot use it (kept
-        /// simple: real FB allows a restricted form, but combining UNION's
-        /// own "no complex members" restriction with inheritance isn't
-        /// needed to prove TYPE inheritance/virtual dispatch, this slice's
-        /// actual goal).
-        if (!stmt->baseTypeName.empty()) {
+        /// EXTENDS - UNION cannot use it at all (kept simple: real FB
+        /// allows a restricted form, but combining UNION's own "no complex
+        /// members" restriction with inheritance isn't needed to prove
+        /// TYPE inheritance/virtual dispatch). M11: a TYPE's own EXTENDS
+        /// list may name at most one *ordinary* (ordinary meaning: not
+        /// itself classified a pure interface) base - that one becomes
+        /// `info.baseName`/`stmt->baseTypeName`, the single-inheritance
+        /// chain every existing baseName-walking check still follows
+        /// unchanged - plus any number of additional *pure-interface*
+        /// bases, collected into `info.interfaceNames`/
+        /// `stmt->interfaceNames`. Classification uses each named base's
+        /// own already-parsed shape (isPureInterfaceShape, via
+        /// typeStmtByKey - safe regardless of declaration order), not a
+        /// resolved RecordInfo.
+        info.isInterface = isPureInterfaceShape(*stmt);
+        if (!stmt->extendsNames.empty()) {
             if (stmt->kind == StmtKind::UnionDecl) {
                 diags_.error(stmt->loc, "UNION cannot use EXTENDS");
             } else {
-                std::string baseKey = canonicalName(stmt->baseTypeName);
-                if (!structs_.count(baseKey)) {
-                    diags_.error(stmt->loc,
-                                 "unknown base TYPE '" + stmt->baseTypeName + "' in EXTENDS");
-                } else {
-                    info.baseName = baseKey;
+                /// A TYPE with a non-empty extendsNames is, by construction
+                /// of isPureInterfaceShape above, never itself classified
+                /// isInterface - so a name here that resolves to another
+                /// interface just becomes one of *this* (necessarily
+                /// non-interface) TYPE's own interfaceNames below, same as
+                /// any other interface base. Trying to build a real
+                /// interface-of-interface this way (a TYPE with zero
+                /// fields/only-Virtual methods of its own, additionally
+                /// EXTENDing another interface) still surfaces a real,
+                /// specific diagnostic - Pass 6's own "declares method but
+                /// never defines it" - once this (now correctly ordinary,
+                /// not exempted) TYPE's undefined Virtual methods are
+                /// checked, rather than a silent misclassification.
+                for (const std::string& rawName : stmt->extendsNames) {
+                    std::string baseKey = canonicalName(rawName);
+                    auto baseStmtIt = typeStmtByKey.find(baseKey);
+                    if (baseStmtIt == typeStmtByKey.end() || !structs_.count(baseKey)) {
+                        diags_.error(stmt->loc, "unknown base TYPE '" + rawName + "' in EXTENDS");
+                        continue;
+                    }
+                    if (isPureInterfaceShape(*baseStmtIt->second)) {
+                        info.interfaceNames.push_back(baseKey);
+                    } else if (!info.baseName.empty()) {
+                        diags_.error(stmt->loc, "TYPE '" + stmt->name + "' names more than one "
+                                                 "non-interface base in EXTENDS ('" +
+                                                     info.baseName + "' and '" + rawName +
+                                                     "') - at most one ordinary base is allowed, "
+                                                     "alongside any number of interfaces");
+                    } else {
+                        info.baseName = baseKey;
+                    }
                 }
             }
         }
+        stmt->baseTypeName = info.baseName;
+        stmt->interfaceNames = info.interfaceNames;
+        stmt->isInterface = info.isInterface;
 
         /// Method/constructor/destructor prototypes (Declare ... inside the
         /// TYPE body) - UNION cannot have any (FreeBASIC unions may not
@@ -314,9 +391,15 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
         /// and no EXTENDS is an opaque external handle - computed here since
         /// every field/method/EXTENDS check above has already run for this
         /// TYPE. Deliberately excludes UnionDecl (an empty UNION is a
-        /// degenerate case, not this feature's target).
+        /// degenerate case, not this feature's target). M11: also excludes
+        /// a TYPE with a non-empty `interfaceNames` even when it declares
+        /// nothing of its own - it's a real (if vacuous) interface
+        /// implementer, not an opaque external handle, and must still
+        /// generate a real `: public InterfaceX` struct body, not a bare
+        /// forward declaration.
         info.isOpaque = stmt->kind == StmtKind::TypeDecl && info.fields.empty() && info.methods.empty() &&
-                         info.properties.empty() && !info.hasCtor && !info.hasDtor && info.baseName.empty();
+                         info.properties.empty() && !info.hasCtor && !info.hasDtor &&
+                         info.baseName.empty() && info.interfaceNames.empty();
         it->second = std::move(info);
     }
     /// Pass 3: M4d opaque-TYPE restrictions that need every TYPE/UNION's
@@ -446,6 +529,14 @@ void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
         auto it = structs_.find(canonicalName(stmt->name));
         if (it == structs_.end()) continue;
         RecordInfo& info = it->second;
+        /// M11: a pure interface's own declared methods are *meant* to stay
+        /// undefined here - see Stmt::isInterface's own doc comment. An
+        /// interface has no ctor/dtor/properties by construction
+        /// (isPureInterfaceShape already requires that), so skipping this
+        /// whole per-TYPE check is exactly equivalent to "every one of
+        /// those sub-checks would vacuously pass anyway", not a real
+        /// carve-out of anything else.
+        if (info.isInterface) continue;
         if (info.hasCtor && !info.ctorDefined) {
             diags_.error(stmt->loc,
                          "TYPE '" + stmt->name + "' declares a constructor but never defines it");
@@ -765,7 +856,10 @@ StmtPtr Sema::cloneStmt(const Stmt& s) {
     out->fields = s.fields; // FieldDecl owns no pointers - a plain copy is a full clone
     out->methods.reserve(s.methods.size());
     for (const StmtPtr& m : s.methods) out->methods.push_back(cloneStmt(*m));
+    out->extendsNames = s.extendsNames;
     out->baseTypeName = s.baseTypeName;
+    out->interfaceNames = s.interfaceNames;
+    out->isInterface = s.isInterface;
     out->conditions.reserve(s.conditions.size());
     for (const ExprPtr& c : s.conditions) out->conditions.push_back(cloneExpr(*c));
     out->blocks.reserve(s.blocks.size());
@@ -1011,6 +1105,17 @@ bool Sema::isSameOrDerivedFrom(const std::string& typeKey, const std::string& ba
         if (key == baseKey) return true;
         auto it = structs_.find(key);
         if (it == structs_.end()) return false;
+        /// M11: `baseKey` naming an interface implemented at *this* level
+        /// (not just an ordinary ancestor) is equally a valid upcast - the
+        /// whole point of an interface is that a value of any implementing
+        /// TYPE (or anything transitively derived from one) is compatible
+        /// with an interface-typed target, matching real C++'s own
+        /// multiple-inheritance upcast rules (with the same accepted
+        /// by-value-slicing caveat plain single-inheritance upcasting
+        /// already has here - see isAssignCompatible's own comment).
+        for (const std::string& iface : it->second.interfaceNames) {
+            if (iface == baseKey) return true;
+        }
         key = it->second.baseName;
     }
     return false;

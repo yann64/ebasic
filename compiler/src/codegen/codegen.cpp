@@ -694,7 +694,7 @@ void Codegen::genTypeDecl(const Stmt& stmt) {
     /// layout against the real library's actual, unknown one. Only ever legal
     /// via PTR; Sema already rejects by-value DIM/embedding/EXTENDS of it.
     if (stmt.kind == StmtKind::TypeDecl && stmt.fields.empty() && stmt.methods.empty() &&
-        stmt.baseTypeName.empty()) {
+        stmt.baseTypeName.empty() && stmt.interfaceNames.empty()) {
         typesOut_ << "struct " << mangleName(stmt.name) << ";\n\n";
         typesBeingEmitted_.erase(key);
         typesEmitted_.insert(key);
@@ -709,9 +709,14 @@ void Codegen::genTypeDecl(const Stmt& stmt) {
     /// A base class needs its *full* definition above the derived struct too
     /// (inheriting from an incomplete type is illegal, same reason an
     /// embedded-by-value field does) - so it's a dependency exactly like one.
+    /// M11: every interface base is the identical dependency, one per name.
     if (!stmt.baseTypeName.empty()) {
         auto baseIt = typeDeclsByName_.find(canonicalName(stmt.baseTypeName));
         if (baseIt != typeDeclsByName_.end()) genTypeDecl(*baseIt->second);
+    }
+    for (const std::string& ifaceName : stmt.interfaceNames) {
+        auto ifaceIt = typeDeclsByName_.find(ifaceName);
+        if (ifaceIt != typeDeclsByName_.end()) genTypeDecl(*ifaceIt->second);
     }
 
     /// A C++ union may have at most one member with a default (in-class)
@@ -723,8 +728,15 @@ void Codegen::genTypeDecl(const Stmt& stmt) {
     /// are Sema-rejected from UNIONs entirely - see collectTypes).
     bool isUnion = stmt.kind == StmtKind::UnionDecl;
     typesOut_ << (isUnion ? "union " : "struct ") << mangleName(stmt.name);
-    if (!stmt.baseTypeName.empty()) {
-        typesOut_ << " : public " << mangleName(stmt.baseTypeName);
+    /// M11: `: public Base, public Interface1, public Interface2, ...` -
+    /// real C++ multiple inheritance handles multi-vtable dispatch
+    /// natively; no further Codegen change is needed for a call through
+    /// any of these bases to resolve correctly.
+    std::vector<std::string> allBases;
+    if (!stmt.baseTypeName.empty()) allBases.push_back(mangleName(stmt.baseTypeName));
+    for (const std::string& ifaceName : stmt.interfaceNames) allBases.push_back(mangleName(ifaceName));
+    for (size_t i = 0; i < allBases.size(); ++i) {
+        typesOut_ << (i == 0 ? " : public " : ", public ") << allBases[i];
     }
     typesOut_ << " {\n";
     for (const FieldDecl& field : stmt.fields) {
@@ -764,7 +776,17 @@ void Codegen::genTypeDecl(const Stmt& stmt) {
         typesOut_ << ind(1) << (isVirtual ? "virtual " : "") << retType << " "
                    << mangleName(method->name) << "("
                    << buildParamList(method->params, /*includeDefaults=*/true) << ")"
-                   << (method->isOverride ? " override" : "") << ";\n";
+                   << (method->isOverride ? " override" : "")
+                   /// M11: an interface TYPE's own methods are always pure
+                   /// virtual (`= 0`) - Sema deliberately never requires (or
+                   /// expects) an out-of-line body for them, so there is no
+                   /// definition anywhere for this declaration to resolve
+                   /// to; `= 0` is what makes that legal C++ instead of an
+                   /// undefined-vtable-entry link error, and correctly
+                   /// makes any TYPE that doesn't itself implement this
+                   /// method abstract (a clear compile error, not a
+                   /// confusing one) if it's ever instantiated.
+                   << (stmt.isInterface ? " = 0" : "") << ";\n";
     }
     typesOut_ << "};\n\n";
 

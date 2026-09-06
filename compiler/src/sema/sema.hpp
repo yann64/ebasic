@@ -83,10 +83,23 @@ struct RecordInfo {
     bool hasDtor = false; // a Declare Destructor() was found
     bool ctorDefined = false;
     bool dtorDefined = false;
-    /// Canonical name of the immediate EXTENDS base TYPE, empty if none.
-    /// FreeBASIC is single-inheritance only - one base, not a list. UNION
-    /// never populates this (Sema-rejected).
+    /// Canonical name of the immediate, ordinary (non-interface) EXTENDS
+    /// base TYPE, empty if none - the single-inheritance chain every
+    /// existing baseName-walking check still follows unchanged (M11 keeps
+    /// this genuinely single, at most one ordinary base; only
+    /// `interfaceNames` below can hold more than one name). UNION never
+    /// populates this (Sema-rejected).
     std::string baseName;
+    /// M11 (multiple-interface implementation): every other `extendsNames`
+    /// entry that resolved to a *pure interface* (RecordInfo::isInterface
+    /// true for that name) - see Stmt::interfaceNames's own doc comment for
+    /// the full design. Canonical names, never namespace-qualified (TYPE
+    /// stays global-only, matching `structs_` itself).
+    std::vector<std::string> interfaceNames;
+    /// True when THIS TYPE's own shape (zero fields, no ctor/dtor, every
+    /// declared method Virtual, at least one method) itself qualifies as a
+    /// pure interface - see Stmt::isInterface's own doc comment.
+    bool isInterface = false;
     std::unordered_map<std::string, PropertyInfo> properties; // canonical property name -> value type
     std::unordered_set<std::string> definedGetters;
     std::unordered_set<std::string> definedSetters;

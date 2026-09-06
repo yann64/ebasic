@@ -6831,6 +6831,142 @@ synthesized instantiation, the same class of "sometimes surfaces late,
 at the real compiler" behavior EXTERN/`ANY PTR` misuse can already
 produce today).
 
+## M11: Multiple-interface implementation
+
+Second of the three portable compiler milestones from the approved
+templates/interfaces/coroutines roadmap (see M10 above for the full
+context) - a TYPE may now `EXTENDS` at most one *ordinary* (fielded)
+base plus any number of *pure interfaces* (a TYPE with zero fields
+where every declared method is `Virtual`), reusing real C++ multiple
+inheritance directly rather than hand-rolling any dispatch mechanism -
+the same "reuse the real backend compiler" philosophy single-`EXTENDS`
+already used.
+
+**Design, confirmed against the real architecture before writing code,
+same discipline as M10**: `RecordInfo::baseName`/`Stmt::baseTypeName`
+(a single string) is genuinely load-bearing across ~15 call sites in
+Sema and Codegen (cycle detection, the Override-matches-Virtual check,
+field/method/property chain lookup, forward-declaration dependency
+ordering, the `--lib` plain-data export walk, `Base.Method()`
+resolution) - converting it wholesale to a list, everywhere, was judged
+too high-risk for one slice. Instead: `baseTypeName` keeps its *exact*
+existing single-string meaning and every one of those ~15 sites stays
+completely unchanged; a new, purely additive `Stmt::interfaceNames`/
+`RecordInfo::interfaceNames` (`vector<string>`) carries the *additional*
+pure-interface bases, and only the handful of places that actually need
+to know about them were touched:
+
+- **Classification, not position, decides ordinary-vs-interface**: the
+  parser just collects a raw, comma-separated `Stmt::extendsNames` list
+  (no semantic meaning yet); `collectTypes` classifies each name via a
+  new `isPureInterfaceShape(const Stmt&)` predicate - zero fields, no
+  ctor/dtor/property, at least one method, every method `Virtual`, **and
+  no `EXTENDS` of its own at all** (the last condition, found necessary
+  by testing, not assumed - see the real bug below). The predicate
+  operates on a name's own already-parsed `Stmt` (via a new
+  `typeStmtByKey` map built during the existing Pass 1), never on a
+  resolved `RecordInfo`, so it's safe regardless of forward-reference
+  order - classifying `Widget EXTENDS IClickable` doesn't need
+  `IClickable` (declared anywhere in the file) to have been *resolved*
+  yet, only *parsed*. At most one non-interface name is allowed into
+  `baseName`; a second is a clear diagnostic instead of silently
+  overwriting or a confusing backend error.
+- **A real bug found by testing, not assumed**: the predicate's first
+  version didn't check `extendsNames.empty()` - a TYPE like `Widget
+  EXTENDS Base1, Base2, IClickable` (zero fields *of its own*, one
+  `Virtual` method of its own) was wrongly classified as a pure
+  interface itself (it only checked *own* fields, not inherited ones),
+  then hit a bogus "interface cannot itself use EXTENDS" rejection.
+  Fixed by requiring a pure interface to have no EXTENDS of any kind -
+  which, as a side effect, also cleanly subsumes "interface-of-interface
+  inheritance isn't supported" into the *existing* "declares method but
+  never defines it" diagnostic (Pass 6) instead of needing a second,
+  separate rejection path: `IResizable EXTENDS IClickable` (both
+  otherwise-interface-shaped) no longer classifies `IResizable` as an
+  interface at all (non-empty `extendsNames`), so it's checked as an
+  *ordinary* TYPE - and correctly reports its own undefined `Virtual`
+  methods rather than being silently misclassified.
+- **A second real bug found by testing**: `RecordInfo::isOpaque`/its
+  Codegen-side recomputation (M4d's "zero fields, zero methods, no
+  EXTENDS" external-handle detection) didn't check `interfaceNames`
+  either - a TYPE that implements an interface but declares nothing
+  else of its own (`TYPE VacuousWidget EXTENDS IClickable END TYPE`)
+  was wrongly classified opaque, emitting a bare forward declaration
+  with **no base clause at all** - silently dropping the interface
+  implementation entirely, with no diagnostic. Fixed in both places
+  (Sema's `isOpaque` computation and Codegen's own independent
+  recomputation, since Codegen has no access to Sema's internal
+  tables and already duplicated this exact check before this feature).
+- **An interface's own declared methods are pure virtual** (`= 0` in
+  the generated C++), not required to have an out-of-line definition
+  (Pass 6 exempts a TYPE classified `isInterface`) - the whole point of
+  an interface is that *implementers* provide the body. A TYPE that
+  EXTENDS an interface without itself redeclaring+defining every one of
+  its methods stays a real, abstract C++ class - `DIM`ing one is a
+  real, clear backend compile error ("cannot declare variable ... to be
+  of abstract type", confirmed live against real `g++`), not a silent
+  miscompile or a confusing link error.
+- **Codegen**: `struct Name : public Base, public Interface1, public
+  Interface2 { ... };` - a plain list of comma-separated base clauses;
+  real C++ multiple inheritance/multi-vtable dispatch needs no further
+  Codegen support at all. The dependency-ordering walk (a base needs
+  its full definition emitted first, same reason an embedded-by-value
+  field does) was extended to also walk each interface, one line.
+- **`isSameOrDerivedFrom` extended, the other three chain-walkers
+  deliberately not**: assigning/passing a value of an implementing TYPE
+  to an interface-typed `BYREF` parameter or variable (the actual
+  polymorphism interfaces exist for) needs `isSameOrDerivedFrom` to
+  also recognize "implements this interface at any level of the
+  ordinary-base chain," so it was extended. `findFieldInChain` doesn't
+  need it at all (interfaces have zero fields by definition).
+  `findMethodInChain`/`findPropertyInChain` were deliberately *not*
+  extended - since an implementing TYPE must redeclare+define an
+  interface's methods in its own body anyway (there being no other way
+  to give them a real C++ body), ordinary lookup already finds them
+  without walking `interfaceNames` at all; calling through an
+  interface-typed variable already works too, since the interface TYPE
+  itself has its own methods registered completely normally, on its
+  own dedicated `RecordInfo`, the exact same way every other TYPE's
+  methods are.
+- **The Extern/`--lib` boundary rule needed no change at all** - the
+  pre-existing `hasVirtualMethod` check already rejects any TYPE with
+  a virtual method (which every interface-implementing TYPE
+  necessarily has) from crossing an EXTERN boundary; confirmed, not
+  assumed, with a real negative test.
+
+**Verified live** (both `windows-mingw`/real `g++` and `windows-msvc`/
+real `cl.exe`, identical output on both): a TYPE implementing two
+interfaces plus one ordinary base, calling its own methods directly;
+real dynamic dispatch through a `BYREF` interface-typed parameter,
+resolving to the concrete TYPE actually passed; both real bugs above,
+each caught by a failing test before being fixed, not found by
+inspection alone; the "at most one non-interface base," "interface-of-
+interface surfaces as a real undefined-method diagnostic," and
+"abstract-class instantiation is a real backend error" negative cases;
+the pre-existing EXTERN-boundary rejection, confirmed unaffected. A
+broad regression sweep (16 pre-existing e2e cases, `type_records`
+through `generics`) found zero regression to ordinary single-
+inheritance behavior. Local `ctest` itself was blocked again by this
+machine's own recurring Application/Device Guard policy (see M10's own
+note) - every case above was instead verified by direct `ebc`
+invocation; CI is the authoritative full-suite confirmation once
+pushed.
+
+**Deliberately out of scope this round** (real, separate future work,
+not oversights): more than one ordinary (fielded) base; interface-of-
+interface inheritance (surfaces a real, specific diagnostic today
+rather than being silently accepted or crashing); upcasting through a
+`PTR` to an interface type (`DIM c AS IClickable PTR: c = @w` is
+rejected - `pointeesIdentical`, the strict pointee-equality check
+`isAssignCompatible` uses for the Pointer-to-Pointer case, was found
+during testing to already reject *ordinary* single-inheritance PTR
+upcasting too, a pre-existing gap this round didn't introduce and
+didn't expand scope to fix - only the already-supported `BYREF`
+parameter/variable form works); a same-named method declared with
+incompatible signatures across two different interfaces implemented by
+one TYPE (not specially diagnosed by Sema - surfaces as whatever real
+ambiguous-override error the backend C++ compiler produces).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

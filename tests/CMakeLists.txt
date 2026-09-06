@@ -179,6 +179,18 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/generics_errors.sh $<TARGET_FILE:ebc>
 )
 
+# M11: multiple-interface implementation - a TYPE may EXTENDS at most one
+# ordinary (fielded) base plus any number of pure interfaces.
+add_test(
+    NAME e2e_interfaces
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/interfaces ${EBASIC_FIXTURE_LIB_DIR}
+)
+
+add_test(
+    NAME e2e_interfaces_errors
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/interfaces_errors.sh $<TARGET_FILE:ebc>
+)
+
 # M8f: Stdcall calling convention on a DECLARE - a real ABI difference from
 # the plain-Cdecl e2e_extern_c above, not just syntax: eb_fixture_stdcall_add
 # is genuinely compiled __stdcall (fixture.c), proving caller/callee actually
