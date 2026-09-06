@@ -32,7 +32,7 @@ if(GXX_EXECUTABLE)
     add_custom_command(
         OUTPUT ${EBASIC_RUNTIME_PCH_FILE}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${EBASIC_RUNTIME_PCH_DIR}/ebasic/runtime
-        COMMAND ${GXX_EXECUTABLE} -std=c++17 -I ${CMAKE_CURRENT_SOURCE_DIR}/include
+        COMMAND ${GXX_EXECUTABLE} -std=c++20 -I ${CMAKE_CURRENT_SOURCE_DIR}/include
                 -x c++-header ${CMAKE_CURRENT_SOURCE_DIR}/include/ebasic/runtime/runtime.hpp
                 -o ${EBASIC_RUNTIME_PCH_FILE}
         DEPENDS
@@ -66,7 +66,7 @@ if(CL_EXECUTABLE)
     add_custom_command(
         OUTPUT ${EBASIC_RUNTIME_PCH_MSVC_FILE}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${EBASIC_RUNTIME_PCH_DIR}/ebasic/runtime
-        COMMAND ${CL_EXECUTABLE} /nologo /std:c++17 /EHsc
+        COMMAND ${CL_EXECUTABLE} /nologo /std:c++20 /EHsc
                 /I ${CMAKE_CURRENT_SOURCE_DIR}/include
                 /c ${CMAKE_CURRENT_SOURCE_DIR}/pch/runtime_pch.cpp
                 /Ycebasic/runtime/runtime.hpp

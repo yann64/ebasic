@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 # C/C++ interop e2e tests to link against something real and reproducible.
 project(ebasic VERSION 1.9.0 LANGUAGES CXX C)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 

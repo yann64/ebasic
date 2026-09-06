@@ -449,7 +449,7 @@ bool isMsvcToolchain(const std::string& cxx) {
 /// `/Yu`/`/Fp` would be expected to hard-fail on every compile, not
 /// gracefully degrade the way GCC's own `.gch` lookup does for an
 /// unsupported toolchain. `clang-cl` still gets every other MSVC-style
-/// flag/tool (`/std:c++17`, `/EHsc`, `lib.exe`, `/LIBPATH:`, ...) - just
+/// flag/tool (`/std:c++20`, `/EHsc`, `lib.exe`, `/LIBPATH:`, ...) - just
 /// never `/Yu`/`/Fp`/the PCH companion object, the same "no PCH
 /// available, just slower" path every other unsupported-PCH case already
 /// gets.
@@ -479,7 +479,7 @@ std::vector<std::string> compileToObjectArgs(const std::string& cxx, bool msvc,
     std::vector<std::string> args = {cxx};
     if (msvc) {
         args.push_back("/nologo");
-        args.push_back("/std:c++17");
+        args.push_back("/std:c++20");
         /// C++/WinRT and most real-world Windows C++ needs the standard
         /// (synchronous) exception-unwind model turned on explicitly -
         /// unlike GCC/Clang, MSVC doesn't enable it by default.
@@ -489,7 +489,7 @@ std::vector<std::string> compileToObjectArgs(const std::string& cxx, bool msvc,
         args.push_back(cppPath.string());
         args.push_back("/Fo:" + objPath.string());
     } else {
-        args.push_back("-std=c++17");
+        args.push_back("-std=c++20");
         for (const std::string& a : runtimeIncludes) args.push_back(a);
         if (positionIndependent) args.push_back("-fPIC");
         args.push_back("-c");
@@ -679,7 +679,7 @@ std::vector<std::string> exeCompileLinkArgs(const std::string& cxx, bool msvc,
     std::vector<std::string> args = {cxx};
     if (msvc) {
         args.push_back("/nologo");
-        args.push_back("/std:c++17");
+        args.push_back("/std:c++20");
         args.push_back("/EHsc");
         for (const std::string& a : runtimeIncludes) args.push_back(a == "-I" ? "/I" : a);
         args.push_back(cppPath.string());
@@ -697,7 +697,7 @@ std::vector<std::string> exeCompileLinkArgs(const std::string& cxx, bool msvc,
         }
         return args;
     }
-    args.push_back("-std=c++17");
+    args.push_back("-std=c++20");
     for (const std::string& a : runtimeIncludes) args.push_back(a);
     args.push_back(cppPath.string());
     args.push_back("-o");
