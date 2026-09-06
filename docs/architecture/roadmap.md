@@ -6698,6 +6698,139 @@ landed since the last bump.
 - Local `windows-mingw` rebuild confirmed live: `ebc --version` reports
   `ebc 1.9.0 (bca7607)`.
 
+## M10: Generics (templates), first slice - a single type parameter on a free SUB/FUNCTION
+
+Prompted by the user asking to plan out the three compiler-level
+prerequisites (templates, COM/interface modeling, coroutines) the
+WinUI3 feasibility study's Phase 3 had named as blocking - and whether
+they should be Windows-specific (they shouldn't: templates/interfaces/
+coroutines are all general-purpose language capabilities useful on
+every platform `ebc` targets; only real COM/WinRT ABI fidelity itself
+is genuinely Windows-only, and that's scoped as a distinct, later
+follow-on, not part of this work). A design/roadmap plan for all three
+was written and approved first; this is the first of the three,
+implemented as its own real, narrowly-scoped, fully verified slice
+(free `SUB`/`FUNCTION`, one type parameter, inferred from a call-site
+argument) rather than attempting the full breadth (generic `TYPE`,
+multiple type parameters, explicit instantiation syntax) at once,
+matching this project's own established one-feature-at-a-time
+discipline.
+
+**Design, confirmed against the real Sema/Codegen architecture before
+writing any code**: no generics/overloading infrastructure existed at
+all (`procedures_` is a flat `unordered_map<string, ProcedureInfo>` -
+two same-named procedures is a hard "already declared" error; no
+deferred/two-pass type-checking existed anywhere). Rather than build
+real deferred checking or emit literal C++ `template<typename T>`
+syntax, this compiles a generic declaration to **compiler-side
+monomorphization**: a generic `(OF T)`-carrying declaration's own body
+is parsed but never type-checked or emitted directly; the first time a
+call site is seen with a given concrete type substituted for `T`, Sema
+clones the whole declaration (a real, hand-written recursive
+`cloneStmt`/`cloneExpr` - no clone/deep-copy mechanism existed at all
+before this), rewrites every `declaredType`/`Param::type` occurrence of
+`T` to the concrete type (`substituteGenericType`, recursing through
+`body`/`blocks`/`cases[].body` - the only places a TYPE annotation can
+appear inside a procedure body), re-derives each substituted
+parameter's own `BYREF`/`BYVAL` from the *concrete* type's real default
+rule (needed a new `Param::explicitByRef`/`explicitByVal` pair, since a
+`T`-typed parameter parses as BYREF by default - an unresolved type
+parameter parses as an ordinary `UserDefined` type - which is only
+ever correct once `T` becomes `STRING`/another `UserDefined` type, not
+a numeric one), checks the resulting fully-concrete clone exactly like
+an ordinary declaration (reusing the identical save/restore-locals
+dance `checkStmt`'s own `SubDecl`/`FunctionDecl` case already does),
+and registers it into `procedures_` under a mangled name
+(`max_of_integer` - `_of_`, not e.g. `$$`, deliberately: `$` is
+accepted in identifiers by every backend this project targets as a
+non-standard extension, not a portability guarantee, so a
+plain-ASCII-identifier-safe separator was chosen instead). The call
+site's own callee name is rewritten to that mangled name - Codegen
+needs **zero changes to how it emits a call** (it already just does
+`mangleName(stringValue)(args...)`); it only needs two narrow "skip a
+still-generic declaration itself" guards (the main `generate()` walk
+and `generateLibraryInterface`'s `--lib`/`--shared-lib` export walk),
+since every synthesized concrete instantiation reaches Codegen as an
+entirely ordinary `FunctionDecl`/`SubDecl` Stmt.
+
+- **A real, load-bearing subtlety found by reasoning about Sema's own
+  control flow before writing the fix, not by testing**: an
+  instantiation is triggered from *inside* `check()`'s own top-level
+  `checkBlock(module.stmts, true)` walk (deep inside a nested
+  `checkExpr`/`checkCallArgs` call) - appending the synthesized Stmt
+  directly to that same `module.stmts` vector while it's being
+  range-for-iterated would be undefined behavior (a reallocation could
+  dangle the loop's own iterator). Every instantiation is instead
+  appended to a separate `pendingInstantiations_` side list, spliced
+  into `module.stmts` only once `check()`'s own top-level walk has
+  fully returned - safe, since Codegen always runs strictly after
+  `check()` returns anyway, and each instantiation's own *body* was
+  already fully checked synchronously (immediately, via a direct
+  `checkBlock` call) at the moment it was created, regardless of when
+  it's spliced in.
+- `compiler/src/ast/ast.hpp`: `Stmt::typeParams` (non-empty marks a
+  `SubDecl`/`FunctionDecl` as generic); `Param::explicitByRef`/
+  `explicitByVal` (see above).
+- `compiler/src/lexer/lexer.{hpp,cpp}`: new `KwOf` keyword.
+- `compiler/src/parser/parser.cpp`: `parseOptionalTypeParams` - a
+  `(OF T[, U...])` clause right after the name, before the regular
+  parameter list, disambiguated from that regular list by a 1-token
+  lookahead (`OF` can never start a real parameter list) - no
+  backtracking needed. Rejects the clause outright (immediate
+  diagnostic) on a TYPE method's own declaration - generics are
+  free-procedure-only this first slice.
+- `compiler/src/sema/sema.{hpp,cpp}`: `genericProcedures_` (registered
+  by `collectProcedures` instead of the normal `procedures_` entry -
+  never both); `cloneStmt`/`cloneExpr`; `substituteGenericType`;
+  `typeManglingSuffix`; `instantiateGeneric` (infers `T` from whichever
+  parameter is declared `AS T` - the first argument beyond that index
+  supplies the concrete type; reports a clear diagnostic, not a crash,
+  when no parameter uses `T` directly or too few arguments were given
+  to reach it); the two `findProcedure`-then-`genericProcedures_`
+  fallback call sites (`checkExpr`'s unqualified `Call` case,
+  `checkStmt`'s unqualified `CallStmt` case) - a qualified/method call
+  (`obj.Generic(...)`) is out of scope this slice (generics are
+  free-procedure-only).
+- `compiler/src/codegen/codegen.cpp`: two `if (!stmt.typeParams.empty())
+  continue;`-style guards (see above) - the only Codegen change needed.
+
+**Verified live** (`windows-mingw`, real `g++`): a generic `Max(OF T)`
+instantiated at `INTEGER` and `DOUBLE` in the same program (confirmed,
+via the generated C++, exactly one `eb_max_of_integer` definition
+despite three separate call sites - real deduplication, not
+redefinition); a generic `SUB` (`BumpX(OF T)`) instantiated at a
+`UserDefined` TYPE (`Point`), confirming the BYREF-recomputation path
+mutates the caller's own value through the generic call, and that
+substitution correctly reaches a field access (`p.x = p.x + 100`)
+inside the generic's own body; the inference-failure diagnostic path
+(no parameter uses `T` directly; too few arguments to reach the
+`T`-typed one). Also confirmed: the identical generated C++ compiles
+cleanly under real `cl.exe` (`windows-msvc`) - only the plain-ASCII
+`_of_` mangling avoids betting on any GCC/Clang-specific `$`-in-
+identifier extension MSVC might not share. A full local `ctest`
+pass on this machine was blocked by this session's own well-documented,
+recurring Windows Application/Device Guard policy (freshly-built
+binaries needing a scan/reputation delay before they're allowed to
+run) rather than being completed end-to-end locally - a broad,
+representative manual regression sweep (14 pre-existing e2e cases
+spanning arithmetic, control flow, TYPE/OOP, inheritance, properties,
+operators, EXTERN/C interop, function pointers, `Stdcall`, and the
+string/math standard libraries) all passed with correct output when
+invoked directly, and the real CI matrix (unaffected by this local
+policy) is the authoritative confirmation once pushed.
+
+**Deliberately out of scope this first slice** (each a real, separate
+future round, not an oversight): a generic `TYPE`; more than one type
+parameter; a generic method; explicit instantiation syntax (only
+inference from a call-site argument is supported - a type parameter
+that appears only in the return type, like a `MakeZero(OF T) () AS T`
+factory with no `T`-typed parameter at all, is a clear compile error
+today, not silently accepted); any constraint/"concept" checking on
+`T` (a misuse surfaces as a real backend C++ error inside the
+synthesized instantiation, the same class of "sometimes surfaces late,
+at the real compiler" behavior EXTERN/`ANY PTR` misuse can already
+produce today).
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

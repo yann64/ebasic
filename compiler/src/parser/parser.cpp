@@ -1120,6 +1120,8 @@ std::vector<Param> Parser::parseParamList() {
             p.type = type;
             p.byRef = byRef;
             p.loc = loc;
+            p.explicitByRef = explicitByRef;
+            p.explicitByVal = explicitByVal;
 
             if (match(TokenKind::Equals)) {
                 ExprPtr defaultExpr = parseExpr();
@@ -1168,6 +1170,26 @@ void Parser::parseOptionalCallConv(Stmt& stmt) {
     }
 }
 
+/// M10 (generics): an optional `(OF T[, U...])` clause right after a
+/// SUB/FUNCTION's own name, before its regular parameter list - distinguished
+/// from that regular list by a 1-token lookahead (`OF` can never start a real
+/// parameter list, whose first token is always a parameter name or a
+/// BYVAL/BYREF keyword), so this never needs backtracking.
+void Parser::parseOptionalTypeParams(Stmt& stmt) {
+    if (!check(TokenKind::LParen) || peek(1).kind != TokenKind::KwOf) return;
+    advance(); // (
+    advance(); // OF
+    do {
+        const Token& paramTok = expect(TokenKind::Identifier, "expected a type parameter name after OF");
+        stmt.typeParams.push_back(paramTok.text);
+    } while (match(TokenKind::Comma));
+    expect(TokenKind::RParen, "expected ')' after the type parameter list");
+    if (!stmt.ownerType.empty()) {
+        diags_.error(stmt.loc, "'" + stmt.name + "' is a TYPE method - a generic (OF ...) type "
+                                "parameter is only supported on a top-level SUB/FUNCTION");
+    }
+}
+
 StmtPtr Parser::parseSub() {
     /// An optional leading VIRTUAL on an out-of-line method definition
     /// mirrors real FreeBASIC syntax (`Virtual Sub Foo.Bar(...)`), but real
@@ -1191,6 +1213,7 @@ StmtPtr Parser::parseSub() {
         stmt->name = nameTok.text;
     }
     parseOptionalCallConv(*stmt);
+    parseOptionalTypeParams(*stmt);
     stmt->params = parseParamList();
     match(TokenKind::KwOverride); // ditto: parsed-and-discarded here
     expectStmtEnd();
@@ -1219,6 +1242,7 @@ StmtPtr Parser::parseFunction() {
         stmt->name = nameTok.text;
     }
     parseOptionalCallConv(*stmt);
+    parseOptionalTypeParams(*stmt);
     stmt->params = parseParamList();
     expect(TokenKind::KwAs, "expected AS <return type> after FUNCTION parameter list");
     stmt->declaredType = parseTypeKeyword();

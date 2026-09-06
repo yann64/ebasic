@@ -135,6 +135,16 @@ void Sema::check(Module& module) {
     collectExternSignatureChecks(module.stmts);
     collectGosubUsage(module.stmts);
     checkBlock(module.stmts, /*atTopLevel=*/true);
+    /// M10 (generics): every call-site instantiation triggered during the
+    /// walk just above is appended here, only now that it's safe to mutate
+    /// module.stmts (see pendingInstantiations_'s own doc comment) - each
+    /// one was already fully type-checked (instantiateGeneric calls
+    /// checkBlock on its own body immediately, synchronously) and is only
+    /// being added here for Codegen's sake, which runs after check() returns.
+    for (auto& stmt : pendingInstantiations_) {
+        module.stmts.push_back(std::move(stmt));
+    }
+    pendingInstantiations_.clear();
 }
 
 void Sema::collectTypes(std::vector<StmtPtr>& stmts) {
@@ -676,8 +686,19 @@ void Sema::collectProcedures(std::vector<StmtPtr>& stmts, const std::string& pre
         /// name (its `name` is just the symbol text, for diagnostics only).
         if (stmt->isOperator) continue;
         std::string key = prefix.empty() ? canonicalName(stmt->name) : prefix + "::" + canonicalName(stmt->name);
-        if (symbols_.count(key) || procedures_.count(key)) {
+        if (symbols_.count(key) || procedures_.count(key) || genericProcedures_.count(key)) {
             diags_.error(stmt->loc, "'" + stmt->name + "' is already declared");
+            continue;
+        }
+        /// M10 (generics): a `(OF T)`-carrying declaration is registered
+        /// into genericProcedures_ instead - it has no real, checkable
+        /// signature yet (its own params/return type reference a
+        /// placeholder type name, not a real TYPE), so it's neither
+        /// type-checked here nor ever itself walked by checkBlock/Codegen;
+        /// see instantiateGeneric for where a concrete copy is produced,
+        /// on demand, per call site.
+        if (!stmt->typeParams.empty()) {
+            genericProcedures_[key] = stmt.get();
             continue;
         }
         ProcedureInfo info;
@@ -689,6 +710,263 @@ void Sema::collectProcedures(std::vector<StmtPtr>& stmts, const std::string& pre
         info.declLoc = stmt->loc;
         procedures_[key] = std::move(info);
     }
+}
+
+/// M10 (generics): see sema.hpp's own doc comment on cloneStmt/cloneExpr.
+/// A pristine (never Sema-checked) parse tree, so every Sema-only
+/// annotation field (Expr::type/pointerCastTo/isProperty/isProcAddress) is
+/// still at its default - nothing beyond a plain structural copy is needed;
+/// checking the clone afterward fills those in correctly for real.
+ExprPtr Sema::cloneExpr(const Expr& e) {
+    auto out = std::make_unique<Expr>();
+    out->kind = e.kind;
+    out->loc = e.loc;
+    out->type = e.type;
+    out->pointerCastTo = e.pointerCastTo;
+    out->suppressStringWrap = e.suppressStringWrap;
+    out->intValue = e.intValue;
+    out->doubleValue = e.doubleValue;
+    out->stringValue = e.stringValue;
+    out->binOp = e.binOp;
+    if (e.lhs) out->lhs = cloneExpr(*e.lhs);
+    if (e.rhs) out->rhs = cloneExpr(*e.rhs);
+    out->args.reserve(e.args.size());
+    for (const ExprPtr& a : e.args) out->args.push_back(cloneExpr(*a));
+    out->isProperty = e.isProperty;
+    out->isProcAddress = e.isProcAddress;
+    return out;
+}
+
+StmtPtr Sema::cloneStmt(const Stmt& s) {
+    auto out = std::make_unique<Stmt>();
+    out->kind = s.kind;
+    out->loc = s.loc;
+    out->docComment = s.docComment;
+    out->name = s.name;
+    out->declaredType = s.declaredType;
+    if (s.expr) out->expr = cloneExpr(*s.expr);
+    out->args.reserve(s.args.size());
+    for (const ExprPtr& a : s.args) out->args.push_back(cloneExpr(*a));
+    out->isArray = s.isArray;
+    if (s.arrayLower) out->arrayLower = cloneExpr(*s.arrayLower);
+    if (s.arrayUpper) out->arrayUpper = cloneExpr(*s.arrayUpper);
+    if (s.index) out->index = cloneExpr(*s.index);
+    if (s.target) out->target = cloneExpr(*s.target);
+    out->preserve = s.preserve;
+    out->enumMembers.reserve(s.enumMembers.size());
+    for (const EnumMember& m : s.enumMembers) {
+        EnumMember cm;
+        cm.name = m.name;
+        if (m.value) cm.value = cloneExpr(*m.value);
+        cm.loc = m.loc;
+        cm.resolvedValue = m.resolvedValue;
+        out->enumMembers.push_back(std::move(cm));
+    }
+    out->fields = s.fields; // FieldDecl owns no pointers - a plain copy is a full clone
+    out->methods.reserve(s.methods.size());
+    for (const StmtPtr& m : s.methods) out->methods.push_back(cloneStmt(*m));
+    out->baseTypeName = s.baseTypeName;
+    out->conditions.reserve(s.conditions.size());
+    for (const ExprPtr& c : s.conditions) out->conditions.push_back(cloneExpr(*c));
+    out->blocks.reserve(s.blocks.size());
+    for (const std::vector<StmtPtr>& block : s.blocks) {
+        std::vector<StmtPtr> cb;
+        cb.reserve(block.size());
+        for (const StmtPtr& st : block) cb.push_back(cloneStmt(*st));
+        out->blocks.push_back(std::move(cb));
+    }
+    out->hasElse = s.hasElse;
+    out->cases.reserve(s.cases.size());
+    for (const CaseArm& arm : s.cases) {
+        CaseArm ca;
+        ca.matches.reserve(arm.matches.size());
+        for (const ExprPtr& m : arm.matches) ca.matches.push_back(cloneExpr(*m));
+        ca.isElse = arm.isElse;
+        ca.body.reserve(arm.body.size());
+        for (const StmtPtr& st : arm.body) ca.body.push_back(cloneStmt(*st));
+        out->cases.push_back(std::move(ca));
+    }
+    if (s.forEnd) out->forEnd = cloneExpr(*s.forEnd);
+    if (s.forStep) out->forStep = cloneExpr(*s.forStep);
+    out->body.reserve(s.body.size());
+    for (const StmtPtr& st : s.body) out->body.push_back(cloneStmt(*st));
+    out->preTest = s.preTest;
+    if (s.preCond) out->preCond = cloneExpr(*s.preCond);
+    out->postTest = s.postTest;
+    if (s.postCond) out->postCond = cloneExpr(*s.postCond);
+    out->exitKind = s.exitKind;
+    out->params = s.params; // Param owns no unique_ptr - a plain copy is a full clone
+    out->isReturnAssign = s.isReturnAssign;
+    out->typeParams = s.typeParams;
+    out->ownerType = s.ownerType;
+    out->isCtor = s.isCtor;
+    out->isDtor = s.isDtor;
+    out->isVirtual = s.isVirtual;
+    out->isOverride = s.isOverride;
+    out->isProperty = s.isProperty;
+    out->isOperator = s.isOperator;
+    out->operatorBinOp = s.operatorBinOp;
+    out->isExtern = s.isExtern;
+    out->externLinkage = s.externLinkage;
+    out->externAlias = s.externAlias;
+    out->externLib = s.externLib;
+    out->callConv = s.callConv;
+    out->isExported = s.isExported;
+    return out;
+}
+
+void Sema::substituteGenericType(Stmt& s, const std::string& paramKey, const Type& concrete) const {
+    auto substituteOne = [&](Type& t) {
+        if (t.kind == TypeKind::UserDefined && canonicalName(t.typeName) == paramKey) t = concrete;
+    };
+    substituteOne(s.declaredType);
+    for (Param& p : s.params) {
+        bool wasParam = p.type.kind == TypeKind::UserDefined && canonicalName(p.type.typeName) == paramKey;
+        substituteOne(p.type);
+        if (wasParam) {
+            /// Re-derive BYREF from the real, now-substituted type - see
+            /// this method's own doc comment in sema.hpp for why.
+            p.byRef = p.explicitByRef || (!p.explicitByVal && (p.type.kind == TypeKind::StringT ||
+                                                                 p.type.kind == TypeKind::UserDefined));
+        }
+    }
+    for (StmtPtr& st : s.body) substituteGenericType(*st, paramKey, concrete);
+    for (std::vector<StmtPtr>& block : s.blocks) {
+        for (StmtPtr& st : block) substituteGenericType(*st, paramKey, concrete);
+    }
+    for (CaseArm& arm : s.cases) {
+        for (StmtPtr& st : arm.body) substituteGenericType(*st, paramKey, concrete);
+    }
+}
+
+bool Sema::typeManglingSuffix(const Type& t, std::string& outSuffix) const {
+    switch (t.kind) {
+        case TypeKind::Byte: outSuffix = "byte"; return true;
+        case TypeKind::UByte: outSuffix = "ubyte"; return true;
+        case TypeKind::Short: outSuffix = "short"; return true;
+        case TypeKind::UShort: outSuffix = "ushort"; return true;
+        case TypeKind::Integer: outSuffix = "integer"; return true;
+        case TypeKind::Long: outSuffix = "long"; return true;
+        case TypeKind::UInteger: outSuffix = "uinteger"; return true;
+        case TypeKind::LongInt: outSuffix = "longint"; return true;
+        case TypeKind::ULongInt: outSuffix = "ulongint"; return true;
+        case TypeKind::Single: outSuffix = "single"; return true;
+        case TypeKind::Double: outSuffix = "double"; return true;
+        case TypeKind::Boolean: outSuffix = "boolean"; return true;
+        case TypeKind::StringT: outSuffix = "string"; return true;
+        case TypeKind::ZStringT: outSuffix = "zstring"; return true;
+        case TypeKind::UserDefined: outSuffix = canonicalName(t.typeName); return true;
+        case TypeKind::Pointer:
+            if (!t.pointee) { outSuffix = "anyptr"; return true; }
+            {
+                std::string inner;
+                if (!typeManglingSuffix(*t.pointee, inner)) return false;
+                outSuffix = inner + "ptr";
+                return true;
+            }
+        default:
+            return false; // FunctionPointer/Unknown: out of scope for this first slice
+    }
+}
+
+const ProcedureInfo* Sema::instantiateGeneric(const std::string& genericKey, const Stmt& generic,
+                                               std::vector<ExprPtr>& args, SourceLoc loc,
+                                               std::string& outMangledName) {
+    std::string paramKey = canonicalName(generic.typeParams.front());
+    size_t tParamIndex = generic.params.size();
+    for (size_t i = 0; i < generic.params.size(); ++i) {
+        const Type& pt = generic.params[i].type;
+        if (pt.kind == TypeKind::UserDefined && canonicalName(pt.typeName) == paramKey) {
+            tParamIndex = i;
+            break;
+        }
+    }
+    if (tParamIndex == generic.params.size()) {
+        diags_.error(loc, "cannot infer type parameter '" + generic.typeParams.front() +
+                               "' for '" + generic.name + "' - no parameter uses it directly");
+        return nullptr;
+    }
+    if (args.size() <= tParamIndex) {
+        diags_.error(loc, "'" + generic.name + "' expects at least " +
+                               std::to_string(tParamIndex + 1) +
+                               " argument(s) to infer its type parameter from");
+        return nullptr;
+    }
+    /// The one argument re-checked here (checkCallArgs, called by every
+    /// caller of this function once it returns a real ProcedureInfo, checks
+    /// every argument again, this one included - a small, accepted amount
+    /// of redundant work, not a correctness issue: checkExpr is otherwise
+    /// side-effect-free, and re-resolving an already-cached instantiation
+    /// below is itself a cheap no-op).
+    Type concrete = checkExpr(*args[tParamIndex]);
+    if (concrete.kind == TypeKind::Unknown) return nullptr; // already reported by checkExpr
+    std::string suffix;
+    if (!typeManglingSuffix(concrete, suffix)) {
+        diags_.error(loc, "'" + generic.name + "' cannot be instantiated with this argument's "
+                               "type (not yet supported as a generic type argument)");
+        return nullptr;
+    }
+    /// "_of_" (not e.g. "$$") - `$` is accepted in identifiers by every
+    /// backend this project targets (GCC/Clang/MSVC all extend the
+    /// standard to allow it) but is still a non-standard extension, not a
+    /// guarantee; a plain, always-standard-C++-identifier-safe separator
+    /// avoids betting portability on it. A user-written function that
+    /// happens to literally collide with a synthesized name like this is
+    /// a real, accepted (and, given the double "_of_", exceedingly
+    /// unlikely) edge case left undetected this first slice, matching
+    /// this codebase's own established pattern of scoping a genuinely
+    /// narrow corner case out rather than adding real complexity for it.
+    std::string mangledName = canonicalName(generic.name) + "_of_" + suffix;
+    outMangledName = mangledName;
+    auto existing = procedures_.find(mangledName);
+    if (existing != procedures_.end()) return &existing->second;
+
+    StmtPtr synth = cloneStmt(generic);
+    synth->name = mangledName;
+    synth->typeParams.clear();
+    substituteGenericType(*synth, paramKey, concrete);
+
+    ProcedureInfo info;
+    info.isFunction = synth->kind == StmtKind::FunctionDecl;
+    info.returnType = synth->declaredType;
+    info.params = synth->params;
+    info.isExtern = false;
+    info.callConv = synth->callConv;
+    info.declLoc = synth->loc;
+    ProcedureInfo* infoPtr = &(procedures_[mangledName] = std::move(info));
+
+    /// Check the synthesized, now fully concrete body - the exact same
+    /// save/restore-locals/insideProcedure_/currentFunctionReturnType_/
+    /// currentClassName_ dance checkStmt's own SubDecl/FunctionDecl case
+    /// does for an ordinary declaration (currentClassName_ is always empty
+    /// here - generics are free-function-only this first slice - restored
+    /// anyway for symmetry/future-proofing).
+    std::unordered_map<std::string, SymbolInfo> savedLocals = std::move(locals_);
+    bool savedInsideProcedure = insideProcedure_;
+    Type savedReturnType = currentFunctionReturnType_;
+    std::string savedClassName = currentClassName_;
+
+    locals_.clear();
+    insideProcedure_ = true;
+    currentFunctionReturnType_ = info.isFunction ? synth->declaredType : Type(TypeKind::Unknown);
+    currentClassName_.clear();
+    for (const Param& param : synth->params) {
+        SymbolInfo si;
+        si.type = param.type;
+        si.declLoc = param.loc;
+        locals_[canonicalName(param.name)] = si;
+    }
+    loopStack_.push_back(info.isFunction ? LoopKind::Function : LoopKind::Sub);
+    checkBlock(synth->body, /*atTopLevel=*/false);
+    loopStack_.pop_back();
+
+    locals_ = std::move(savedLocals);
+    insideProcedure_ = savedInsideProcedure;
+    currentFunctionReturnType_ = savedReturnType;
+    currentClassName_ = savedClassName;
+
+    pendingInstantiations_.push_back(std::move(synth));
+    return infoPtr;
 }
 
 std::string Sema::qualifiedKey(const std::string& name) const {
@@ -953,6 +1231,16 @@ void Sema::checkIndirectCallArgs(const Type& fnType, std::vector<ExprPtr>& args,
 
 void Sema::checkBlock(std::vector<StmtPtr>& stmts, bool atTopLevel) {
     for (auto& stmt : stmts) {
+        /// M10 (generics): a generic declaration itself is never checked
+        /// (see collectProcedures) - only its per-instantiation, concrete
+        /// clones are, each already checked (and appended to
+        /// topLevelStmts_, so a later iteration of *this same loop*, for
+        /// the top-level case, would otherwise check it a second time)
+        /// at the moment instantiateGeneric creates them.
+        if (!stmt->typeParams.empty() &&
+            (stmt->kind == StmtKind::SubDecl || stmt->kind == StmtKind::FunctionDecl)) {
+            continue;
+        }
         checkStmt(*stmt, atTopLevel);
     }
 }
@@ -1405,8 +1693,23 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                 checkCallArgs(*method, stmt.args, stmt.loc);
                 return;
             }
-            const ProcedureInfo* proc = findProcedure(canonicalName(stmt.name));
+            std::string calleeKey = canonicalName(stmt.name);
+            const ProcedureInfo* proc = findProcedure(calleeKey);
             if (!proc) {
+                /// M10 (generics): `CALL Name(args)` where `Name` is a
+                /// generic free SUB/FUNCTION - see checkExpr's own
+                /// ExprKind::Call case for the mirror-image expression-
+                /// position handling.
+                auto genIt = genericProcedures_.find(calleeKey);
+                if (genIt != genericProcedures_.end()) {
+                    std::string mangledName;
+                    const ProcedureInfo* inst =
+                        instantiateGeneric(calleeKey, *genIt->second, stmt.args, stmt.loc, mangledName);
+                    if (!inst) return; // instantiateGeneric already reported a diagnostic
+                    stmt.name = mangledName;
+                    checkCallArgs(*inst, stmt.args, stmt.loc);
+                    return;
+                }
                 /// Calling through a stored function pointer as a statement
                 /// (`CALL cb(1, 2)`) - see checkExpr's ExprKind::Call case
                 /// for the same check on the expression side. Unlike that
@@ -1415,8 +1718,7 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                 /// matching how a plain FUNCTION proc call is already
                 /// allowed as a CALL with no isFunction check below).
                 SymbolInfo info;
-                if (lookupSymbol(canonicalName(stmt.name), info) &&
-                    info.type.kind == TypeKind::FunctionPointer) {
+                if (lookupSymbol(calleeKey, info) && info.type.kind == TypeKind::FunctionPointer) {
                     checkIndirectCallArgs(info.type, stmt.args, stmt.loc);
                     return;
                 }
@@ -1785,6 +2087,29 @@ Type Sema::checkExpr(Expr& expr) {
                 }
                 checkCallArgs(*proc, expr.args, expr.loc);
                 expr.type = proc->returnType;
+                return expr.type;
+            }
+            /// M10 (generics): `Name(args)` where `Name` is a generic free
+            /// SUB/FUNCTION - infer+instantiate on first use per distinct
+            /// concrete type, then rewrite this call site's own callee name
+            /// to the real, synthesized instantiation so Codegen (unchanged)
+            /// emits a call to it - see instantiateGeneric's own doc comment.
+            auto genIt = genericProcedures_.find(key);
+            if (genIt != genericProcedures_.end()) {
+                std::string mangledName;
+                const ProcedureInfo* inst =
+                    instantiateGeneric(key, *genIt->second, expr.args, expr.loc, mangledName);
+                if (!inst) {
+                    expr.type = TypeKind::Unknown;
+                    return expr.type;
+                }
+                expr.stringValue = mangledName;
+                if (!inst->isFunction) {
+                    diags_.error(expr.loc, "'" + genIt->second->name +
+                                                "' is a SUB and cannot be used in an expression");
+                }
+                checkCallArgs(*inst, expr.args, expr.loc);
+                expr.type = inst->returnType;
                 return expr.type;
             }
             if (isVar) {

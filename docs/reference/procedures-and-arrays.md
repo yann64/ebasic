@@ -149,6 +149,73 @@ PRINT FirstPositive(-1, 42)   ' 42
 PRINT FirstPositive(7, 42)    ' 7
 ```
 
+## Generics (`OF`)
+
+A free (non-method) `SUB`/`FUNCTION` may declare a single type parameter
+with an `(OF T)` clause right after its own name, before the regular
+parameter list:
+
+```basic
+FUNCTION Max(OF T) (a AS T, b AS T) AS T
+    IF a > b THEN
+        Max = a
+    ELSE
+        Max = b
+    END IF
+END FUNCTION
+
+PRINT Max(1, 2)         ' 2 - T = INTEGER
+PRINT Max(1.5, 2.5)     ' 2.5 - T = DOUBLE, a separate instantiation
+```
+
+`T` is usable as an ordinary type name anywhere in the parameter list,
+return type, and body. There's no separate "instantiate" step to write -
+the concrete type is inferred from whichever argument is declared with
+`T`'s own type at the call site (`Max(1, 2)` infers `T = INTEGER` from
+either argument), and a fresh, fully type-checked copy of the
+declaration is compiled for each distinct concrete type actually used,
+deduplicated automatically (calling `Max` a second time with two more
+`INTEGER`s reuses the same compiled copy, not a new one). A type that
+can't be inferred (no parameter is declared `AS T`) or that needs more
+arguments than were given to see it is a compile error, not a runtime
+one:
+
+```basic
+FUNCTION MakeZero(OF T) () AS T
+    MakeZero = 0
+END FUNCTION
+
+PRINT MakeZero()   ' error: cannot infer type parameter 'T' - no
+                    ' parameter uses it directly
+```
+
+A `BYVAL`/`BYREF` parameter typed `AS T` follows the *concrete* type's
+own default once instantiated (`BYVAL` for a numeric type, `BYREF` for
+`STRING` or a `TYPE`) unless written explicitly - the same rule an
+ordinary, non-generic parameter already follows:
+
+```basic
+TYPE Point
+    x AS INTEGER
+    y AS INTEGER
+END TYPE
+
+SUB BumpX(OF T) (p AS T)   ' T = Point here -> BYREF, mutates the caller's own value
+    p.x = p.x + 100
+END SUB
+
+DIM pt AS Point
+pt.x = 10
+CALL BumpX(pt)
+PRINT pt.x   ' 110
+```
+
+Not yet supported: a generic `TYPE` (only `SUB`/`FUNCTION` can take an
+`(OF T)` clause today), more than one type parameter, and a generic
+*method* (an `(OF T)` clause on a TYPE's own member procedure is a
+compile error) - each a deliberate, documented scope cut for this first
+slice, not an oversight.
+
 ## Scoping
 
 A variable `DIM`'d inside a `SUB`/`FUNCTION` is local to it, and shadows a

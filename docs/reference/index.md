@@ -140,6 +140,7 @@ redeclare one of these names).
 | `NAMESPACE` | [`NAMESPACE`](namespaces-pointers-unions.md#namespace) |
 | `NEXT` | [`FOR`](control-flow.md#for-to-step-next) |
 | `NOT` | [Operators](operators.md#and-or-xor-not) |
+| `OF` | [Generics](procedures-and-arrays.md#generics-of) |
 | `OPERATOR` | [Operator overloading](type-oop.md#operator-overloading) |
 | `OR` | [Operators](operators.md#and-or-xor-not) |
 | `OVERRIDE` | [`EXTENDS`](type-oop.md#extends---inheritance) |

@@ -116,6 +116,7 @@ enum class TokenKind {
     KwCdecl,
     KwStdcall,
     KwZString,
+    KwOf, // M10: a generic SUB/FUNCTION's `(OF T)` clause
 };
 
 /// One lexed token - `intValue`/`doubleValue` are only meaningful for

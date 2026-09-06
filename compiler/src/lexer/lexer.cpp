@@ -184,6 +184,7 @@ Token Lexer::lexIdentifierOrKeyword() {
         {"CDECL", TokenKind::KwCdecl},
         {"STDCALL", TokenKind::KwStdcall},
         {"ZSTRING", TokenKind::KwZString},
+        {"OF", TokenKind::KwOf}, // M10: a generic SUB/FUNCTION's `(OF T)` clause
     };
 
     auto it = keywords.find(upper);

@@ -271,6 +271,80 @@ private:
     bool insideGosubBody_ = false;
     std::vector<LoopKind> loopStack_;
     DiagnosticEngine& diags_;
+
+    /// M10 (generics): a generic (non-empty Stmt::typeParams) free
+    /// SUB/FUNCTION's raw, uninstantiated Stmt, keyed the same way
+    /// procedures_ is (registered by collectProcedures *instead of* the
+    /// normal procedures_ entry - never both). The pointee is owned by
+    /// module.stmts (which outlives this Sema object for the whole of
+    /// check()), so a raw pointer is safe, mirroring how SemaIndex's own
+    /// snapshot already borrows from data it doesn't own.
+    std::unordered_map<std::string, const Stmt*> genericProcedures_;
+    /// Every concrete Stmt instantiateGeneric synthesizes, in creation
+    /// order - deliberately NOT appended directly to module.stmts while
+    /// still inside check()'s own top-level `checkBlock(module.stmts,
+    /// true)` walk (a call site deep inside that same walk is exactly
+    /// where an instantiation is triggered, and mutating a std::vector
+    /// while range-for-iterating it is undefined behavior - a possible
+    /// reallocation would dangle that loop's own iterator). check() splices
+    /// this into module.stmts itself only once the top-level walk has
+    /// fully returned, so Codegen (which runs strictly after check(), over
+    /// that same now-final module.stmts) sees every instantiation exactly
+    /// like an ordinary, hand-written function - no Codegen change needed.
+    std::vector<StmtPtr> pendingInstantiations_;
+
+    /// Deep-copies `s`/`e` (and everything they own) into a fresh owned
+    /// node - needed because a generic declaration's one parsed AST must
+    /// produce one independent, mutable copy per concrete instantiation
+    /// (`substituteGenericType` then rewrites *that* copy's type
+    /// annotations in place; the original, still-generic Stmt is left
+    /// untouched so a second, different instantiation can clone it again).
+    static StmtPtr cloneStmt(const Stmt& s);
+    static ExprPtr cloneExpr(const Expr& e);
+
+    /// Rewrites every `declaredType`/`Param::type` in `s` and everything it
+    /// contains (recursing into body/blocks/cases[].body, the only places a
+    /// TYPE annotation can appear inside a SUB/FUNCTION body) from the
+    /// generic's own placeholder (`paramKey`, already canonical) to
+    /// `concrete` - the "monomorphization" step. A substituted `Param`'s
+    /// `byRef` is also recomputed from `concrete`'s own real default-BYREF
+    /// rule (see Param::explicitByRef/explicitByVal) - the placeholder
+    /// parsed as BYREF (an unresolved type parses as an ordinary
+    /// UserDefined type, which defaults to BYREF), which is only ever
+    /// correct once `concrete` is itself a STRING/UserDefined; a numeric
+    /// `concrete` must become BYVAL instead, unless the user explicitly
+    /// wrote BYVAL/BYREF themselves. Never touches `Expr` at all - an
+    /// expression's own `.type` is always (re)computed fresh by checkExpr
+    /// when the clone's body is later checked, so there is nothing in an
+    /// Expr tree that substitution itself needs to rewrite.
+    void substituteGenericType(Stmt& s, const std::string& paramKey, const Type& concrete) const;
+
+    /// A short, human-readable, canonical-cased suffix identifying
+    /// `concrete` for a mangled instantiation name (e.g. "integer", or a
+    /// UserDefined TYPE's own canonical name) - primitives/ZSTRING/ANY PTR
+    /// only; a generic argument itself being a FunctionPointer/other
+    /// TYPE-parameter is out of scope for this first slice (reported as an
+    /// inference error rather than silently mismangled).
+    bool typeManglingSuffix(const Type& t, std::string& outSuffix) const;
+
+    /// Resolves a call to a generic free SUB/FUNCTION (`generic`, the raw
+    /// Stmt registered in genericProcedures_ under `genericKey`): infers
+    /// the single type parameter's concrete type from whichever argument
+    /// (`args`) is declared with that parameter's own type in `generic`'s
+    /// own signature, then returns the already-instantiated (cached, keyed
+    /// by mangled name in procedures_) or newly cloned+substituted+checked+
+    /// registered-and-appended-to-pendingInstantiations_ concrete
+    /// ProcedureInfo for that specific concrete type - or nullptr (having
+    /// already reported a
+    /// diagnostic) if inference itself fails. `outMangledName` receives the
+    /// concrete instantiation's own real name either way a non-null result
+    /// is returned - the caller must overwrite its own call-site
+    /// stringValue/name with it so Codegen (unchanged) calls the right,
+    /// real, synthesized function instead of the never-emitted generic
+    /// placeholder name.
+    const ProcedureInfo* instantiateGeneric(const std::string& genericKey, const Stmt& generic,
+                                             std::vector<ExprPtr>& args, SourceLoc loc,
+                                             std::string& outMangledName);
 };
 
 } // namespace ebasic

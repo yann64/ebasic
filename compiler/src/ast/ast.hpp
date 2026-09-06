@@ -383,6 +383,17 @@ struct Param {
     bool byRef;
     SourceLoc loc;
     std::shared_ptr<Expr> defaultValue;
+    /// M10 (generics): whether `byRef` above came from an explicit
+    /// BYVAL/BYREF keyword rather than the FreeBASIC default rule -
+    /// meaningless for an ordinary (non-generic) declaration, but needed
+    /// when a generic SUB/FUNCTION's own type-parameter-typed parameter
+    /// (defaulted to BYREF at parse time, since an unresolved type
+    /// parameter parses as an ordinary UserDefined type) gets instantiated
+    /// against a concrete type: Sema must re-derive `byRef` from the real,
+    /// substituted type's own default (BYVAL for e.g. INTEGER) unless the
+    /// user explicitly wrote BYVAL/BYREF themselves, which always wins.
+    bool explicitByRef = false;
+    bool explicitByVal = false;
 };
 
 /// One field of a TYPE. Deliberately not reusing Param - fields need no byRef.
@@ -492,6 +503,21 @@ struct Stmt {
     LoopKind exitKind = LoopKind::For; // ExitLoop: which loop kind to exit
 
     std::vector<Param> params;  // SubDecl/FunctionDecl (declaredType holds the FUNCTION's return type)
+    /// SubDecl/FunctionDecl only (M10, generics): one or more type-parameter
+    /// names from a `(OF T[, U...])` clause after the name, before the
+    /// regular parameter list. Non-empty marks this declaration as generic -
+    /// `T`/`U`/... are usable as ordinary type names anywhere in `params`/
+    /// `declaredType`/`body` (parsed as an ordinary UserDefined Type, same as
+    /// any ordinary TYPE reference; nothing in the parser itself needs to
+    /// know these names are special). A generic declaration is never fully
+    /// type-checked at its own definition site - only registered - and is
+    /// never itself emitted by Codegen; Sema instead clones+substitutes a
+    /// concrete copy per distinct call-site instantiation and appends that
+    /// synthesized, ordinary (non-generic) Stmt to the module's own
+    /// top-level stmts (see Sema's genericProcedures_/instantiations_).
+    /// Only free (non-method, `ownerType` empty) SUB/FUNCTION supports this
+    /// so far - a generic TYPE is a separate, later feature.
+    std::vector<std::string> typeParams;
     /// Assign: true if `name` is not a real variable but the enclosing
     /// FUNCTION's own name, used as its return-value pseudo-assignment
     /// (`FuncName = value` inside FUNCTION FuncName ... END FUNCTION).

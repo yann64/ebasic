@@ -1103,6 +1103,15 @@ std::string Codegen::generate(const Module& module, bool libMode, bool sharedLib
                 genStmt(stmt, mainOut, 1);
             }
         } else if (stmt.kind == StmtKind::SubDecl || stmt.kind == StmtKind::FunctionDecl) {
+            /// M10 (generics): a generic declaration itself (non-empty
+            /// typeParams) is never emitted - it has no real, concrete C++
+            /// type to compile against (its own params/return type still
+            /// name an unresolved placeholder). Sema already appended one
+            /// ordinary, fully concrete (typeParams cleared) synthesized
+            /// Stmt per call-site instantiation to this same module.stmts,
+            /// each of which reaches this exact branch like any other
+            /// hand-written FunctionDecl/SubDecl.
+            if (!stmt.typeParams.empty()) continue;
             if (stmt.ownerType.empty()) {
                 genProcedure(stmt);
             } else {
@@ -1275,7 +1284,13 @@ std::string Codegen::generateLibraryInterface(const Module& module, const std::s
             isExportablePlainData(stmt)) {
             emitType(stmt);
         } else if ((stmt.kind == StmtKind::SubDecl || stmt.kind == StmtKind::FunctionDecl) &&
-                   stmt.ownerType.empty() && !stmt.isExtern) {
+                   stmt.ownerType.empty() && !stmt.isExtern && stmt.typeParams.empty()) {
+            /// M10 (generics): the generic declaration itself is never
+            /// exported (see the identical guard in generate() above) - a
+            /// consumer of this --lib archive can only ever call a real,
+            /// already-instantiated concrete function, each of which
+            /// reaches this same branch as an ordinary FunctionDecl/SubDecl
+            /// (typeParams cleared by Sema) and is exported normally.
             /// Only export a signature whose C++ representation is
             /// identical whether declared normally or via Extern/Declare -
             /// true for primitives, ZSTRING, Pointer, and a plain-data/
