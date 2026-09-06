@@ -289,11 +289,15 @@ struct Expr {
     std::unique_ptr<Expr> lhs;
     std::unique_ptr<Expr> rhs;
     std::vector<std::unique_ptr<Expr>> args; // Call
-    /// Member only: true when `stringValue` names a PROPERTY rather than a
+    /// Member: true when `stringValue` names a PROPERTY rather than a
     /// plain field - set by Sema, read by Codegen to rewrite the access into
     /// a getter/setter method call (`.eb_name_get()` / `.eb_name_set(v)`)
     /// instead of plain `.eb_name` field access, since C++ has no native
-    /// property syntax.
+    /// property syntax. Also set on a qualified Call (`expr.lhs` non-null)
+    /// when `stringValue` names a function-pointer-typed PROPERTY being
+    /// called through (`obj.SomeProp(1, 2)`) - Codegen appends the same
+    /// `_get()` suffix before the call's own parens
+    /// (`.eb_someprop_get()(1, 2)`: call the getter, then call its result).
     bool isProperty = false;
     /// AddressOf only: true when the operand (`lhs`, an Ident) names a
     /// top-level, non-extern, non-method SUB/FUNCTION (`@ProcName`) rather
@@ -523,6 +527,12 @@ struct Stmt {
     /// same type) - deliberately simpler than allowing a read-only/write-
     /// only property, which would need read/write-context-sensitive
     /// resolution at every use site instead of always-both being assumed.
+    /// Also reused, on a `StmtKind::CallStmt` node specifically, for the
+    /// unrelated-but-analogous "calling through a function-pointer-typed
+    /// PROPERTY as a statement" case (`CALL obj.SomeProp(1, 2)`) - safe
+    /// since a single Stmt is never simultaneously a SubDecl/FunctionDecl
+    /// and a CallStmt; see Expr::isProperty's own doc comment for the
+    /// expression-position sibling of this same feature.
     bool isProperty = false;
     /// `Operator SYMBOL(lhs, rhs) AS type ... End Operator` - a free-standing
     /// (global) binary operator overload, always `kind == FunctionDecl` and

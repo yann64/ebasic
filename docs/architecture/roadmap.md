@@ -6470,6 +6470,60 @@ publish - the same sequence as `v1.2.0`-`v1.6.0` above.
 - Local `windows-mingw` rebuild confirmed live: `ebc --version` reports
   `ebc 1.7.0 (18d884d)`.
 
+## Calling through a PROPERTY of function-pointer type
+
+The one case explicitly scoped out of the previous feature (calling
+through a TYPE field of function-pointer type): a `PROPERTY` of
+function-pointer type, previously rejected outright ("...is not
+supported (only a plain field)") because a property read renders as a
+getter call (`.eb_name_get()`), not plain `.eb_name` field access -
+`obj.SomeProp(1, 2)` needs `.eb_name_get()(1, 2)` (call the getter, then
+call its result), a different Codegen shape than the plain-field case.
+
+Rather than inventing a parallel mechanism, this reuses the exact flag
+that already makes a plain property *read* render as a getter call:
+`Expr::isProperty` (`compiler/src/ast/ast.hpp`, previously documented
+"Member only") is now also set on a qualified `Call` node when the
+callee resolves to a function-pointer-typed `PROPERTY` - Codegen's `Call`
+rendering just needed to check it and append the same `_get()` suffix.
+`StmtKind::CallStmt` has no `Expr` node of its own for the callee name,
+so its statement-form counterpart reuses `Stmt::isProperty` instead - a
+field that already existed for a different, unrelated purpose (marking a
+`SubDecl`/`FunctionDecl` as itself being a property getter/setter
+*definition*) but is safe to double up on: a single `Stmt` is never
+simultaneously both kinds.
+
+- Both existing rejection blocks (`checkExpr`'s qualified `Call` case,
+  `checkStmt`'s `CallStmt` qualified branch) changed from erroring to
+  real support - reusing `findPropertyInChain` and the already-existing
+  `checkIndirectCallArgs` helper unchanged, plus the one new line each
+  (`expr.isProperty = true` / `stmt.isProperty = true`) that signals the
+  getter-call rendering to Codegen. A property whose own getter always
+  returns a value can still hold a *SUB-shaped* function pointer as its
+  value - calling that retrieved pointer in an expression context is
+  still correctly rejected, mirroring the plain-field case's own check.
+- A `PROPERTY` that exists but isn't function-pointer-typed (e.g. a plain
+  `SINGLE` property) still gets its own clear diagnostic ("is a
+  PROPERTY, not a method or a function pointer, and cannot be called")
+  rather than a misleading fallthrough.
+- `Codegen`'s `Call` rendering (both the expression case and `CallStmt`)
+  appends `"_get()"` to the resolved callee name when `isProperty` is
+  set - the exact same suffix the plain `Member`-read case already uses,
+  confirmed live: `obj.SomeProp(1, 2)` renders as
+  `eb_obj.eb_someprop_get()(1, 2)`, and `This.SomeProp(1, 2)` from inside
+  a method as `this->eb_someprop_get()(1, 2)`.
+- The now-stale negative test in `typed_function_pointer_errors.sh`
+  ("calling a function-pointer-typed PROPERTY is rejected...") was
+  removed and replaced with the real remaining rejection (a non-function-
+  pointer `PROPERTY`, using the exact `Celsius` shape from
+  `tests/e2e/properties/input.bas`).
+- Verified live under both `windows-mingw` and real `windows-msvc`: a
+  `PROPERTY` of function-pointer type set then called as both an
+  expression and a `CALL` statement, and via `This.` from inside a
+  method; the non-function-pointer-`PROPERTY` rejection; full suite green
+  on both, including `e2e_properties` and every prior field/unqualified-
+  call test unaffected.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

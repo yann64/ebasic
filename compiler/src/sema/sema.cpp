@@ -1378,12 +1378,22 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                         for (auto& arg : stmt.args) checkExpr(*arg);
                         return;
                     }
-                    if (const PropertyInfo* prop = findPropertyInChain(typeKey, canonicalName(stmt.name));
-                        prop && prop->type.kind == TypeKind::FunctionPointer) {
-                        diags_.error(stmt.loc, "'" + stmt.name + "' is a PROPERTY of function-"
-                                                    "pointer type - calling through a "
-                                                    "PROPERTY-typed function pointer is not "
-                                                    "supported (only a plain field)");
+                    /// Calling through a function-pointer-typed PROPERTY
+                    /// as a statement - see checkExpr's qualified Call
+                    /// case for the identical logic and why `stmt.isProperty`
+                    /// (not `expr.isProperty` - CallStmt has no Expr node
+                    /// of its own for the callee name) signals the getter-
+                    /// call rendering to Codegen. No SUB-shaped rejection
+                    /// here, matching the field-fallback/unqualified
+                    /// CallStmt pattern (a CALL discards any return value).
+                    if (const PropertyInfo* prop = findPropertyInChain(typeKey, canonicalName(stmt.name))) {
+                        if (prop->type.kind == TypeKind::FunctionPointer) {
+                            checkIndirectCallArgs(prop->type, stmt.args, stmt.loc);
+                            stmt.isProperty = true;
+                            return;
+                        }
+                        diags_.error(stmt.loc, "'" + stmt.name + "' is a PROPERTY, not a method or "
+                                                    "a function pointer, and cannot be called");
                         for (auto& arg : stmt.args) checkExpr(*arg);
                         return;
                     }
@@ -1647,19 +1657,35 @@ Type Sema::checkExpr(Expr& expr) {
                         return expr.type;
                     }
                     /// A PROPERTY looks exactly like a field at the access
-                    /// site, but a property read renders as a getter call
-                    /// (`.eb_name_get()`) - calling through a function-
-                    /// pointer-typed PROPERTY would need `.eb_name_get()(1, 2)`,
-                    /// a genuinely different codegen shape not implemented
-                    /// here. Rejected explicitly (a clear, actionable
-                    /// diagnostic) rather than silently falling through to
-                    /// "has no method" or miscompiling.
-                    if (const PropertyInfo* prop = findPropertyInChain(typeKey, canonicalName(expr.stringValue));
-                        prop && prop->type.kind == TypeKind::FunctionPointer) {
-                        diags_.error(expr.loc, "'" + expr.stringValue + "' is a PROPERTY of "
-                                                    "function-pointer type - calling through a "
-                                                    "PROPERTY-typed function pointer is not "
-                                                    "supported (only a plain field)");
+                    /// site - calling through a function-pointer-typed one
+                    /// (`obj.SomeProp(1, 2)`) means "call the getter, then
+                    /// call its result" (`.eb_someprop_get()(1, 2)`),
+                    /// signaled to Codegen via `expr.isProperty` (the same
+                    /// flag that already rewrites a plain property *read*
+                    /// into a getter call).
+                    if (const PropertyInfo* prop = findPropertyInChain(typeKey, canonicalName(expr.stringValue))) {
+                        if (prop->type.kind == TypeKind::FunctionPointer) {
+                            /// The property's own getter always returns a
+                            /// value (a real, structural requirement of
+                            /// PROPERTY itself) - but the *value* it
+                            /// returns can still be a SUB-shaped function
+                            /// pointer, and calling *that* retrieved
+                            /// pointer in an expression context is exactly
+                            /// as invalid as the plain-field case.
+                            if (!prop->type.funcReturnType) {
+                                diags_.error(expr.loc, "'" + expr.stringValue +
+                                                            "' is a SUB-shaped function pointer "
+                                                            "and cannot be used in an expression");
+                            }
+                            checkIndirectCallArgs(prop->type, expr.args, expr.loc);
+                            expr.type = prop->type.funcReturnType ? *prop->type.funcReturnType
+                                                                   : Type(TypeKind::Unknown);
+                            expr.isProperty = true;
+                            return expr.type;
+                        }
+                        diags_.error(expr.loc, "'" + expr.stringValue + "' is a PROPERTY, not a "
+                                                    "method or a function pointer, and cannot be "
+                                                    "called");
                         for (auto& arg : expr.args) checkExpr(*arg);
                         expr.type = TypeKind::Unknown;
                         return expr.type;

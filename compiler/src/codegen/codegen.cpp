@@ -248,7 +248,14 @@ std::string Codegen::genExprBase(const Expr& expr) {
                 /// `Base::method()` from inside a derived member function);
                 /// anything else (a variable, a field, ...) is a plain
                 /// method call on that receiver -> eb_recv.eb_name(args).
-                std::string result = resolveCalleeName(expr.lhs.get(), expr.stringValue) + "(";
+                /// A function-pointer-typed PROPERTY being called through
+                /// (`expr.isProperty`, set by Sema) needs the same
+                /// `_get()` suffix a plain property *read* already gets
+                /// (see the Member case below) - call the getter, then
+                /// call its result: eb_recv.eb_name_get()(args).
+                std::string calleeName = resolveCalleeName(expr.lhs.get(), expr.stringValue);
+                if (expr.isProperty) calleeName += "_get()";
+                std::string result = calleeName + "(";
                 for (size_t i = 0; i < expr.args.size(); ++i) {
                     if (i > 0) result += ", ";
                     result += genExpr(*expr.args[i]);
@@ -640,8 +647,12 @@ void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out, int indent) {
             /// Namespace.Name(args) qualifier (`::`), a This.Method(args)
             /// receiver (`->`), a Base.Method(args) qualified non-virtual
             /// call (`eb_base::`), an obj.Method(args) receiver (`.`), or a
-            /// plain free-function call (no prefix).
+            /// plain free-function call (no prefix). `stmt.isProperty`
+            /// (set by Sema) is this statement-form's counterpart to the
+            /// expression-side `expr.isProperty` - see genExprBase's Call
+            /// case's own comment.
             std::string calleeName = resolveCalleeName(stmt.target.get(), stmt.name);
+            if (stmt.isProperty) calleeName += "_get()";
             out << ind(indent) << calleeName << "(";
             for (size_t i = 0; i < stmt.args.size(); ++i) {
                 if (i > 0) out << ", ";

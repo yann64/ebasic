@@ -96,30 +96,30 @@ DIM f AS Foo
 PRINT f.x(1, 2)' \
     "is a field, not a method or a function pointer, and cannot be called"
 
-check_rejected "calling a function-pointer-typed PROPERTY is rejected (only a plain field is supported)" \
-'FUNCTION Compare(BYVAL a AS INTEGER, BYVAL b AS INTEGER) AS INTEGER
-    RETURN 0
-END FUNCTION
+check_rejected "calling a non-function-pointer PROPERTY is rejected with a clear diagnostic" \
+'TYPE Thermometer
+    cTemp AS SINGLE
 
-TYPE Foo
-    cbField AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER
-
-    Declare Property Cb() AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER
-    Declare Property Cb(BYVAL v AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER)
+    Declare Constructor()
+    Declare Property Celsius() AS SINGLE
+    Declare Property Celsius(BYVAL value AS SINGLE)
 END TYPE
 
-Property Foo.Cb() AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER
-    Cb = This.cbField
+Constructor Thermometer()
+    cTemp = 0
+End Constructor
+
+Property Thermometer.Celsius() AS SINGLE
+    Celsius = cTemp
 End Property
 
-Property Foo.Cb(BYVAL v AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER)
-    This.cbField = v
+Property Thermometer.Celsius(BYVAL value AS SINGLE)
+    cTemp = value
 End Property
 
-DIM f AS Foo
-f.Cb = @Compare
-PRINT f.Cb(1, 2)' \
-    "is a PROPERTY of function-pointer type - calling through a PROPERTY-typed function pointer is not supported"
+DIM t AS Thermometer
+PRINT t.Celsius(1, 2)' \
+    "is a PROPERTY, not a method or a function pointer, and cannot be called"
 
 check_rejected "Stdcall is rejected on a TYPE method's out-of-line definition" \
 'TYPE Point

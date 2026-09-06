@@ -279,14 +279,33 @@ END TYPE
 DIM c AS Callbacks
 c.cmp = @Compare
 PRINT c.cmp(3, 7)                ' a TYPE field, via a qualified receiver: -1
+
+TYPE PropCallbacks
+    cbField AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER
+
+    Declare Property Cb() AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER
+    Declare Property Cb(BYVAL v AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER)
+End Type
+
+Property PropCallbacks.Cb() AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER
+    Cb = This.cbField
+End Property
+
+Property PropCallbacks.Cb(BYVAL v AS FUNCTION (BYVAL AS INTEGER, BYVAL AS INTEGER) AS INTEGER)
+    This.cbField = v
+End Property
+
+DIM p AS PropCallbacks
+p.Cb = @Compare
+PRINT p.Cb(3, 7)                ' a PROPERTY: calls the getter, then calls its result - -1
 ```
 
 A `SUB (...)`-shaped (no return value) pointer may be called as a
 statement (`CALL cb(...)`) but not used in an expression - the same rule
 an ordinary `SUB` call already follows. Not supported: calling through a
-`PROPERTY` of function-pointer type (`f.SomeProp(1, 2)`, where `SomeProp`
-is declared via `Declare Property`, not a plain field) - only a plain
-`TYPE` field.
+`PROPERTY` that isn't itself function-pointer-typed (e.g. a plain
+`SINGLE` property) - only a method, a field, or a `PROPERTY` whose own
+value type is a function pointer.
 
 ### `Stdcall` on an eBasic-defined callback
 
