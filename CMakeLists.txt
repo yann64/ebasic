@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 # C is enabled for tests/fixtures/c's tiny fixture library, used by the M4
 # C/C++ interop e2e tests to link against something real and reproducible.
-project(ebasic VERSION 1.6.0 LANGUAGES CXX C)
+project(ebasic VERSION 1.7.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

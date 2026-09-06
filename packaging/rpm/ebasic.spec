@@ -1,5 +1,5 @@
 Name:           ebasic
-Version:        1.6.0
+Version:        1.7.0
 Release:        1%{?dist}
 Summary:        BASIC-to-C++ transpiler with package manager and doc generator
 Group:          Development/Tools
@@ -61,6 +61,13 @@ ctest --test-dir build --output-on-failure
 %{_mandir}/man1/docgen.1*
 
 %changelog
+* Sun Sep 06 2026 eBasic contributors <noreply@example.com> - 1.7.0-1
+- v1.7.0: calling through a TYPE field of function-pointer type
+  (obj.cb(1, 2), via a plain receiver or This.), completing the "calling
+  through a stored function pointer" feature from 1.6.0. A function-
+  pointer-typed PROPERTY is explicitly rejected with a clear diagnostic
+  (a different, unimplemented codegen shape), not silently mishandled.
+
 * Sat Sep 05 2026 eBasic contributors <noreply@example.com> - 1.6.0-1
 - v1.6.0: calling through a stored function pointer (cb(1, 2), including
   through a function-pointer parameter inside a higher-order FUNCTION),

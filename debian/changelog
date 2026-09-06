@@ -1,3 +1,14 @@
+ebasic (1.7.0) unstable; urgency=medium
+
+  * Calling through a TYPE field of function-pointer type
+    (obj.cb(1, 2), via a plain receiver or This.) - completes the
+    "calling through a stored function pointer" feature from 1.6.0.
+    Again needed no Codegen changes, only Sema. A function-pointer-
+    typed PROPERTY is explicitly rejected with a clear diagnostic
+    rather than silently mishandled.
+
+ -- eBasic contributors <noreply@example.com>  Sun, 06 Sep 2026 09:00:00 +0200
+
 ebasic (1.6.0) unstable; urgency=medium
 
   * Calling through a stored function pointer (cb(1, 2)), including
