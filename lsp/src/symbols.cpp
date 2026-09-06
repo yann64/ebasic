@@ -209,6 +209,7 @@ const std::vector<std::string>& reservedKeywords() {
         "TYPE", "NAMESPACE", "PTR", "ANY", "UNION", "DECLARE", "CONSTRUCTOR", "DESTRUCTOR", "THIS",
         "EXTENDS", "VIRTUAL", "OVERRIDE", "BASE", "PROPERTY", "OPERATOR", "EXTERN", "LIB", "ALIAS",
         "CDECL", "STDCALL", "ZSTRING", "OF",
+        "ASYNC", "AWAIT", "YIELD", "TASK", "GENERATOR",
     };
     return keywords;
 }

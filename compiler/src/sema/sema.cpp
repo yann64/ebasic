@@ -679,6 +679,14 @@ void Sema::collectExternSignatureChecks(std::vector<StmtPtr>& stmts) {
                                "ZSTRING (or ZSTRING PTR) for a C-compatible string");
             return;
         }
+        if (type.kind == TypeKind::Coroutine) {
+            /// M12: TASK(OF T)/GENERATOR(OF T) - a real C++
+            /// `std::coroutine_handle`-holding, move-only class, no more
+            /// C-ABI-compatible than STRING is (arguably less - it isn't
+            /// even copyable). Same rejection shape as STRING above.
+            diags_.error(loc, what + " cannot be TASK/GENERATOR in an EXTERN/DECLARE signature");
+            return;
+        }
         if (type.kind == TypeKind::FunctionPointer) {
             /// Recurse into the callback's own signature - otherwise a
             /// `FUNCTION (BYVAL AS STRING) AS INTEGER` parameter would slip
@@ -906,6 +914,7 @@ StmtPtr Sema::cloneStmt(const Stmt& s) {
     out->externLib = s.externLib;
     out->callConv = s.callConv;
     out->isExported = s.isExported;
+    out->isAsync = s.isAsync;
     return out;
 }
 
@@ -1229,6 +1238,26 @@ bool Sema::isAssignCompatible(const Type& targetType, const Type& valueType) con
     bool valueIsStringLike = valueType.kind == TypeKind::StringT || valueType.kind == TypeKind::ZStringT;
     if (targetIsStringLike || valueIsStringLike) return targetIsStringLike && valueIsStringLike;
 
+    /// M12: TASK(OF T) and GENERATOR(OF T) - structural match required
+    /// (same Task-vs-Generator-ness, and the same value type by this same
+    /// rule, recursively) rather than falling through to the catch-all
+    /// `return true` below, which would otherwise silently accept e.g.
+    /// assigning a `Task(OF STRING)` to a `Generator(OF INTEGER)`-typed
+    /// variable - a real type-safety hole caught by design review, not by
+    /// a failing test (nothing in this first slice's own tests happened
+    /// to exercise a *mismatched* coroutine assignment).
+    bool targetIsCoroutine = targetType.kind == TypeKind::Coroutine;
+    bool valueIsCoroutine = valueType.kind == TypeKind::Coroutine;
+    if (targetIsCoroutine || valueIsCoroutine) {
+        if (!targetIsCoroutine || !valueIsCoroutine) return false;
+        if (targetType.isGenerator != valueType.isGenerator) return false;
+        bool targetHasValue = static_cast<bool>(targetType.coroutineValueType);
+        bool valueHasValue = static_cast<bool>(valueType.coroutineValueType);
+        if (targetHasValue != valueHasValue) return false;
+        if (!targetHasValue) return true; // both void Task
+        return isAssignCompatible(*targetType.coroutineValueType, *valueType.coroutineValueType);
+    }
+
     bool targetIsUser = targetType.kind == TypeKind::UserDefined;
     bool valueIsUser = valueType.kind == TypeKind::UserDefined;
     if (targetIsUser != valueIsUser) return false;
@@ -1476,6 +1505,19 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
         }
         case StmtKind::Assign: {
             if (stmt.isReturnAssign) {
+                /// M12: the `FuncName = value` self-return convention is a
+                /// deliberate scope cut for an Async FUNCTION - Codegen
+                /// has no `Task<T>`/`Generator<T>`-shaped local to assign
+                /// into the way it default-constructs an ordinary `RetType
+                /// eb__ret{}` for this (neither type has a default
+                /// constructor at all - only `get_return_object` ever
+                /// produces one). Use RETURN instead.
+                if (currentFunctionReturnType_.kind == TypeKind::Coroutine) {
+                    diags_.error(stmt.loc, "'" + stmt.name + "' is an Async FUNCTION - use RETURN, "
+                                            "not the FuncName = value convention, to produce a value");
+                    checkExpr(*stmt.expr);
+                    return;
+                }
                 Type exprType = checkExpr(*stmt.expr);
                 if (!isAssignCompatible(currentFunctionReturnType_, exprType)) {
                     diags_.error(stmt.loc, "return value type does not match FUNCTION '" + stmt.name +
@@ -1684,9 +1726,31 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
             Type savedReturnType = currentFunctionReturnType_;
             std::string savedClassName = currentClassName_;
 
+            /// M12: an Async FUNCTION must return TASK/GENERATOR, and
+            /// returning TASK/GENERATOR requires Async - either mismatch
+            /// is a clear diagnostic rather than a confusing later one
+            /// (RETURN-checking below, or a bizarre Codegen shape).
+            if (isFunction) {
+                bool returnsCoroutine = stmt.declaredType.kind == TypeKind::Coroutine;
+                if (stmt.isAsync && !returnsCoroutine) {
+                    diags_.error(stmt.loc, "Async FUNCTION '" + stmt.name +
+                                                "' must return TASK(OF T) or GENERATOR(OF T)");
+                } else if (!stmt.isAsync && returnsCoroutine) {
+                    diags_.error(stmt.loc, "FUNCTION '" + stmt.name +
+                                                "' returns TASK/GENERATOR but is not marked Async");
+                }
+            }
+
             locals_.clear();
             insideProcedure_ = true;
-            currentFunctionReturnType_ = isFunction ? stmt.declaredType : Type(TypeKind::Unknown);
+            /// An Async SUB has no `AS` clause to spell out its own real
+            /// return type - it's implicitly a valueless TASK (Task<void>
+            /// in the generated C++), constructed directly here rather
+            /// than reusing stmt.declaredType (a plain SUB has none at
+            /// all).
+            currentFunctionReturnType_ =
+                isFunction ? stmt.declaredType
+                           : (stmt.isAsync ? Type(TypeKind::Coroutine) : Type(TypeKind::Unknown));
             /// An out-of-line method/constructor/destructor definition
             /// (`ownerType` set) - not a free SUB/FUNCTION. Methods don't
             /// nest, so a plain save/restore (no stack) suffices, mirroring
@@ -1847,21 +1911,75 @@ void Sema::checkStmt(Stmt& stmt, bool atTopLevel) {
                 return;
             }
             if (insideFunction) {
+                /// M12: inside an Async FUNCTION, RETURN's own value (if
+                /// any) is checked against the *unwrapped* value type
+                /// (TASK/GENERATOR's own `(OF T)`), not the full
+                /// TASK(OF T)/GENERATOR(OF T) type itself - real C++'s
+                /// `co_return <expr>;` takes the raw `T`, matching exactly
+                /// what Codegen already emits. A GENERATOR never RETURNs a
+                /// value at all (YIELD produces its values instead) - only
+                /// a bare RETURN, to end the generator early, is allowed.
+                bool isCoroutine = currentFunctionReturnType_.kind == TypeKind::Coroutine;
+                if (isCoroutine && currentFunctionReturnType_.isGenerator) {
+                    if (stmt.expr) {
+                        diags_.error(stmt.expr->loc, "RETURN cannot have a value inside a GENERATOR "
+                                                      "- use YIELD, or a bare RETURN to end the "
+                                                      "generator early");
+                    }
+                    return;
+                }
+                Type effectiveReturnType =
+                    isCoroutine ? (currentFunctionReturnType_.coroutineValueType
+                                       ? *currentFunctionReturnType_.coroutineValueType
+                                       : Type(TypeKind::Unknown))
+                                : currentFunctionReturnType_;
                 if (!stmt.expr) {
                     diags_.error(stmt.loc, "RETURN inside a FUNCTION requires a value");
                     return;
                 }
                 Type exprType = checkExpr(*stmt.expr);
-                if (!isAssignCompatible(currentFunctionReturnType_, exprType)) {
+                if (!isAssignCompatible(effectiveReturnType, exprType)) {
                     diags_.error(stmt.expr->loc,
                                  "RETURN value type does not match the FUNCTION's declared return "
                                  "type");
                 }
-                annotatePointerBridge(currentFunctionReturnType_, *stmt.expr);
+                annotatePointerBridge(effectiveReturnType, *stmt.expr);
             } else if (stmt.expr) {
                 diags_.error(stmt.expr->loc,
                              "a SUB or GOSUB target cannot RETURN a value; use a bare RETURN");
             }
+            return;
+        }
+        case StmtKind::Yield: {
+            /// M12: only valid inside an Async FUNCTION whose real return
+            /// type is GENERATOR(OF T) - checked against loopStack_ the
+            /// same way RETURN is, then against currentFunctionReturnType_
+            /// itself for the GENERATOR-specifically requirement (a
+            /// Sub/GOSUB target, or an Async FUNCTION returning TASK
+            /// instead, both get a clear, specific diagnostic rather than
+            /// a generic "not inside a function" one).
+            bool insideFunction = false;
+            for (auto it = loopStack_.rbegin(); it != loopStack_.rend(); ++it) {
+                if (*it == LoopKind::Function) { insideFunction = true; break; }
+                if (*it == LoopKind::Sub) break;
+            }
+            bool isGenerator = currentFunctionReturnType_.kind == TypeKind::Coroutine &&
+                                currentFunctionReturnType_.isGenerator;
+            if (!insideFunction || !isGenerator) {
+                diags_.error(stmt.loc,
+                              "YIELD is only valid inside an Async FUNCTION returning GENERATOR(OF T)");
+                checkExpr(*stmt.expr);
+                return;
+            }
+            Type valueType = currentFunctionReturnType_.coroutineValueType
+                                  ? *currentFunctionReturnType_.coroutineValueType
+                                  : Type(TypeKind::Unknown);
+            Type exprType = checkExpr(*stmt.expr);
+            if (!isAssignCompatible(valueType, exprType)) {
+                diags_.error(stmt.expr->loc,
+                              "YIELD value type does not match the GENERATOR's declared value type");
+            }
+            annotatePointerBridge(valueType, *stmt.expr);
             return;
         }
         case StmtKind::TypeDecl:
@@ -2012,6 +2130,62 @@ Type Sema::checkExpr(Expr& expr) {
                 /// names" pattern, after array-vs-function Call and
                 /// NAMESPACE's qualified lookup).
                 Type receiverType = checkExpr(*expr.lhs);
+                /// M12: `gen.MoveNext()`/`gen.Current()` on a
+                /// GENERATOR(OF T)-typed receiver - a real, fixed pair of
+                /// runtime methods (runtime/coroutine.hpp's own
+                /// Generator<T>), not something an eBasic TYPE ever
+                /// declares, so this is resolved here directly rather than
+                /// through the ordinary structs_/findMethodInChain
+                /// machinery below (which only ever knows about real
+                /// eBasic TYPEs). TASK(OF T) has no callable method at all
+                /// this round - AWAIT is its own, separate expression form.
+                if (receiverType.kind == TypeKind::Coroutine) {
+                    std::string methodKey = canonicalName(expr.stringValue);
+                    if (receiverType.isGenerator && methodKey == "movenext") {
+                        if (!expr.args.empty()) {
+                            diags_.error(expr.loc, "MoveNext takes no arguments");
+                        }
+                        for (auto& arg : expr.args) checkExpr(*arg);
+                        expr.type = TypeKind::Boolean;
+                        return expr.type;
+                    }
+                    if (receiverType.isGenerator && methodKey == "current") {
+                        if (!expr.args.empty()) {
+                            diags_.error(expr.loc, "Current takes no arguments");
+                        }
+                        for (auto& arg : expr.args) checkExpr(*arg);
+                        expr.type = receiverType.coroutineValueType ? *receiverType.coroutineValueType
+                                                                     : Type(TypeKind::Unknown);
+                        return expr.type;
+                    }
+                    /// Result() - the non-AWAIT way to read an already-
+                    /// completed TASK(OF T)'s value (see Task<T>::Result's
+                    /// own doc comment in runtime/coroutine.hpp for why
+                    /// this exists at all: AWAIT only works inside a real
+                    /// coroutine body, never from top-level code or an
+                    /// ordinary SUB/FUNCTION). Not valid on a valueless
+                    /// TASK (nothing to return) or a GENERATOR (pulled via
+                    /// MoveNext/Current instead).
+                    if (!receiverType.isGenerator && receiverType.coroutineValueType &&
+                        methodKey == "result") {
+                        if (!expr.args.empty()) {
+                            diags_.error(expr.loc, "Result takes no arguments");
+                        }
+                        for (auto& arg : expr.args) checkExpr(*arg);
+                        expr.type = *receiverType.coroutineValueType;
+                        return expr.type;
+                    }
+                    diags_.error(expr.loc, "'" + expr.stringValue + "' is not a valid " +
+                                                (receiverType.isGenerator ? "GENERATOR" : "TASK") +
+                                                " member" +
+                                                (receiverType.isGenerator ? " (only MoveNext/Current)"
+                                                                           : " (only Result, or AWAIT "
+                                                                             "from inside an Async "
+                                                                             "SUB/FUNCTION)"));
+                    for (auto& arg : expr.args) checkExpr(*arg);
+                    expr.type = TypeKind::Unknown;
+                    return expr.type;
+                }
                 if (receiverType.kind != TypeKind::UserDefined) {
                     if (receiverType.kind != TypeKind::Unknown) {
                         diags_.error(expr.loc, "'" + expr.stringValue + "' is not a namespace or "
@@ -2352,6 +2526,47 @@ Type Sema::checkExpr(Expr& expr) {
             expr.type = *operandType.pointee;
             return expr.type;
         }
+        case ExprKind::Await: {
+            /// M12: `AWAIT expr` unwraps a TASK(OF T) into its own value
+            /// type T - scoped to TASK only this round (not GENERATOR,
+            /// pulled via MoveNext/Current instead; not a void TASK
+            /// either, since there is no value to produce here in an
+            /// expression position - an Async SUB call, whose Task<void>
+            /// this runtime already runs synchronously to completion by
+            /// the time the call itself returns, needs no AWAIT at all).
+            ///
+            /// A real, load-bearing constraint found by testing, not
+            /// assumed: `co_await` is only legal inside a real C++
+            /// coroutine body - top-level eBasic code compiles into
+            /// `main()`, which C++ flatly forbids from ever being a
+            /// coroutine, and an ordinary (non-Async) SUB/FUNCTION was
+            /// never given any co_return/co_yield/co_await of its own
+            /// either, so it isn't one. AWAIT is therefore rejected
+            /// outright unless currently inside an Async SUB/FUNCTION's
+            /// own body - a clear eBasic-level diagnostic here instead of
+            /// a confusing "'co_await' cannot be used in the 'main'
+            /// function" backend error.
+            if (!insideProcedure_ || currentFunctionReturnType_.kind != TypeKind::Coroutine) {
+                diags_.error(expr.loc,
+                              "AWAIT can only be used inside an Async SUB/FUNCTION");
+                checkExpr(*expr.lhs);
+                expr.type = TypeKind::Unknown;
+                return expr.type;
+            }
+            Type operandType = checkExpr(*expr.lhs);
+            if (operandType.kind != TypeKind::Coroutine || operandType.isGenerator ||
+                !operandType.coroutineValueType) {
+                if (operandType.kind != TypeKind::Unknown) {
+                    diags_.error(expr.loc,
+                                  "AWAIT requires a TASK(OF T) expression (not GENERATOR, and not a "
+                                  "valueless TASK)");
+                }
+                expr.type = TypeKind::Unknown;
+                return expr.type;
+            }
+            expr.type = *operandType.coroutineValueType;
+            return expr.type;
+        }
         case ExprKind::UnaryNeg: {
             TypeKind t = checkExpr(*expr.lhs);
             if (!isNumericType(t)) {
@@ -2562,6 +2777,8 @@ bool Sema::isConstantExpr(const Expr& expr) const {
         case ExprKind::AddressOf:
         case ExprKind::Deref:
             return false; // pointer ops are never compile-time constants here
+        case ExprKind::Await:
+            return false; // a coroutine result is never a compile-time constant
         case ExprKind::This:
         case ExprKind::Base:
             return false; // the current instance is never a compile-time constant

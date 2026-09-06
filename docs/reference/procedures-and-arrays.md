@@ -216,6 +216,77 @@ Not yet supported: a generic `TYPE` (only `SUB`/`FUNCTION` can take an
 compile error) - each a deliberate, documented scope cut for this first
 slice, not an oversight.
 
+## Coroutines (`Async`)
+
+A `SUB`/`FUNCTION` marked `Async` compiles to a real C++20 coroutine.
+A `FUNCTION` returns either `Task(OF T)` (one eventual value) or
+`Generator(OF T)` (a lazily-pulled sequence); a `SUB` is implicitly a
+valueless `Task` (no `AS` clause needed - a plain `SUB` never has one):
+
+```basic
+FUNCTION CountUp(n AS INTEGER) Async AS Generator(OF INTEGER)
+    DIM i AS INTEGER
+    FOR i = 1 TO n
+        YIELD i
+    NEXT
+END FUNCTION
+
+FUNCTION DoubleIt(x AS INTEGER) Async AS Task(OF INTEGER)
+    RETURN x * 2
+END FUNCTION
+```
+
+A `Generator(OF T)` is consumed with a pull-based `MoveNext()`/
+`Current()` pair (eBasic has no `FOR EACH`/range concept yet to
+consume it more directly) - `MoveNext()` advances to the next `YIELD`ed
+value (or reports there isn't one), `Current()` reads it:
+
+```basic
+DIM gen AS Generator(OF INTEGER)
+gen = CountUp(5)
+DIM total AS INTEGER
+DO WHILE gen.MoveNext()
+    total = total + gen.Current()
+LOOP
+PRINT total   ' 15
+```
+
+`AWAIT expr` unwraps a `Task(OF T)`'s own value - but only from *inside
+another* `Async` `SUB`/`FUNCTION`: real C++ forbids `co_await` in
+`main()`, and top-level eBasic code compiles into `main()`, so `AWAIT`
+at the top level (or inside an ordinary, non-`Async` procedure) is a
+compile error, not a runtime one. From top-level code, read an
+already-completed `Task`'s value with `.Result()` instead - this
+runtime has no real scheduler/thread pool/async I/O yet (eBasic itself
+has no concurrency primitives at all), so a `Task` always runs
+synchronously, straight through to completion, by the time the call
+that produced it returns:
+
+```basic
+FUNCTION AddThemUp() Async AS Task(OF INTEGER)
+    DIM a AS INTEGER
+    a = AWAIT DoubleIt(5)     ' legal: inside another Async FUNCTION
+    RETURN a + (AWAIT DoubleIt(10))
+END FUNCTION
+
+DIM t AS Task(OF INTEGER)
+t = AddThemUp()
+PRINT t.Result()              ' 30 - AWAIT itself would be rejected here
+```
+
+Inside a `Generator`, `RETURN` never takes a value (`YIELD` produces
+its values instead) - only a bare `RETURN`, to end the generator
+early, is allowed. Inside a `Task`-shaped `Async` `FUNCTION`, the
+`FuncName = value` self-return convention ordinary `FUNCTION`s use is
+not supported - use `RETURN` explicitly.
+
+Not yet supported: a real scheduler/thread pool/async I/O (every
+coroutine here runs synchronously - `Async`/`Task`/`Generator` are a
+syntax for suspendable control flow, not concurrency, this round);
+`AWAIT`ing a `Generator` (pull it with `MoveNext`/`Current` instead);
+a `TASK`/`GENERATOR` crossing an `EXTERN`/`DECLARE` boundary (no more
+C-ABI-compatible than `STRING` is).
+
 ## Scoping
 
 A variable `DIM`'d inside a `SUB`/`FUNCTION` is local to it, and shadows a

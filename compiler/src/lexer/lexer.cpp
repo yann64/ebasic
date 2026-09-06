@@ -185,6 +185,12 @@ Token Lexer::lexIdentifierOrKeyword() {
         {"STDCALL", TokenKind::KwStdcall},
         {"ZSTRING", TokenKind::KwZString},
         {"OF", TokenKind::KwOf}, // M10: a generic SUB/FUNCTION's `(OF T)` clause
+        // M12: coroutines.
+        {"ASYNC", TokenKind::KwAsync},
+        {"AWAIT", TokenKind::KwAwait},
+        {"YIELD", TokenKind::KwYield},
+        {"TASK", TokenKind::KwTask},
+        {"GENERATOR", TokenKind::KwGenerator},
     };
 
     auto it = keywords.find(upper);

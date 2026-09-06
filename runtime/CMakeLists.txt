@@ -2,6 +2,20 @@ add_library(ebasic-rt INTERFACE)
 target_include_directories(ebasic-rt INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(ebasic-rt INTERFACE cxx_std_17)
 
+# Every header under include/ebasic/runtime - both PCH custom_commands below
+# DEPEND on this whole list, not just runtime.hpp itself: a plain DEPENDS on
+# runtime.hpp alone (the original M6 shape) only re-triggers the PCH build
+# when runtime.hpp's own text changes, never when one of the headers it
+# #includes does - real, silent stale-PCH bug found live (M12: adding
+# coroutine.hpp and then editing it - a fresh #include propagated
+# immediately, but a same-file edit to an already-`DEPENDS`-untracked header
+# left the .gch/.pch built from the *previous* version, compiling generated
+# code against stale declarations with no warning at all). GLOB_CONFIGURE
+# reruns CMake's own configure step if a header is added/removed (not just
+# edited), keeping this list itself correct across that case too.
+file(GLOB_RECURSE EBASIC_RUNTIME_HEADERS CONFIGURE_DEPENDS
+     ${CMAKE_CURRENT_SOURCE_DIR}/include/ebasic/runtime/*.hpp)
+
 # M6: the runtime header's precompiled form(s), built into the CMake
 # *build* tree (never the source tree) under
 # ${CMAKE_BINARY_DIR}/runtime_pch/ebasic/runtime/ - one toolchain-specific
@@ -35,10 +49,7 @@ if(GXX_EXECUTABLE)
         COMMAND ${GXX_EXECUTABLE} -std=c++20 -I ${CMAKE_CURRENT_SOURCE_DIR}/include
                 -x c++-header ${CMAKE_CURRENT_SOURCE_DIR}/include/ebasic/runtime/runtime.hpp
                 -o ${EBASIC_RUNTIME_PCH_FILE}
-        DEPENDS
-            ${CMAKE_CURRENT_SOURCE_DIR}/include/ebasic/runtime/runtime.hpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/include/ebasic/runtime/bstring.hpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/include/ebasic/runtime/print.hpp
+        DEPENDS ${EBASIC_RUNTIME_HEADERS}
         COMMENT "Precompiling ebasic-rt runtime header (M6 PCH, GCC)"
         VERBATIM
     )
@@ -74,9 +85,7 @@ if(CL_EXECUTABLE)
                 "/Fo${EBASIC_RUNTIME_PCH_MSVC_OBJ}"
         DEPENDS
             ${CMAKE_CURRENT_SOURCE_DIR}/pch/runtime_pch.cpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/include/ebasic/runtime/runtime.hpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/include/ebasic/runtime/bstring.hpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/include/ebasic/runtime/print.hpp
+            ${EBASIC_RUNTIME_HEADERS}
         COMMENT "Precompiling ebasic-rt runtime header (M6 PCH, MSVC)"
         VERBATIM
     )

@@ -67,6 +67,7 @@ private:
     void parseOptionalTypeParams(Stmt& stmt);
     StmtPtr parseCallStmt();
     StmtPtr parseReturn();
+    StmtPtr parseYield();
     StmtPtr parseRecordDecl();
     StmtPtr parseMethodPrototype();
     StmtPtr parseConstructor();
@@ -135,6 +136,7 @@ private:
 
     Type parseTypeKeyword();
     Type parseFunctionPointerType();
+    Type parseCoroutineType();
 
     std::vector<Token> tokens_;
     size_t pos_ = 0;

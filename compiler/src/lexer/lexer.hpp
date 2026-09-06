@@ -117,6 +117,12 @@ enum class TokenKind {
     KwStdcall,
     KwZString,
     KwOf, // M10: a generic SUB/FUNCTION's `(OF T)` clause
+    // M12: coroutines.
+    KwAsync,
+    KwAwait,
+    KwYield,
+    KwTask,
+    KwGenerator,
 };
 
 /// One lexed token - `intValue`/`doubleValue` are only meaningful for

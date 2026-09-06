@@ -191,6 +191,18 @@ add_test(
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/interfaces_errors.sh $<TARGET_FILE:ebc>
 )
 
+# M12: coroutines - Async SUB/FUNCTION, Task(OF T)/Generator(OF T), YIELD,
+# and AWAIT.
+add_test(
+    NAME e2e_coroutines
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_case.sh $<TARGET_FILE:ebc> ${CMAKE_CURRENT_SOURCE_DIR}/e2e/coroutines ${EBASIC_FIXTURE_LIB_DIR}
+)
+
+add_test(
+    NAME e2e_coroutines_errors
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/e2e/coroutines_errors.sh $<TARGET_FILE:ebc>
+)
+
 # M8f: Stdcall calling convention on a DECLARE - a real ABI difference from
 # the plain-Cdecl e2e_extern_c above, not just syntax: eb_fixture_stdcall_add
 # is genuinely compiled __stdcall (fixture.c), proving caller/callee actually

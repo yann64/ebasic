@@ -150,6 +150,8 @@ Type Parser::parseTypeKeyword() {
         /// per FB docs: an Any Ptr Ptr may be dereferenced to yield an Any Ptr).
     } else if (check(TokenKind::KwSub) || check(TokenKind::KwFunction)) {
         base = parseFunctionPointerType();
+    } else if (check(TokenKind::KwTask) || check(TokenKind::KwGenerator)) {
+        base = parseCoroutineType();
     } else if (check(TokenKind::Identifier)) {
         /// A user-defined TYPE name. Whether this identifier actually names a
         /// declared TYPE is a Sema question, not a parser one - same
@@ -173,6 +175,28 @@ Type Parser::parseTypeKeyword() {
         base = wrapped;
     }
     return base;
+}
+
+/// M12: `Task(OF T)` / `Generator(OF T)` - an `Async` SUB/FUNCTION's real
+/// return type. `T` is required here (unlike a bare `Task` with no OF
+/// clause at all, which only ever arises implicitly for an `Async SUB` -
+/// see Stmt::isAsync's own doc comment - never written out by hand in
+/// source). Called from parseTypeKeyword, so this itself never consumes a
+/// trailing PTR suffix - parseTypeKeyword's own loop already handles that
+/// uniformly for every type kind.
+Type Parser::parseCoroutineType() {
+    bool isGenerator = match(TokenKind::KwGenerator);
+    if (!isGenerator) expect(TokenKind::KwTask, "expected TASK or GENERATOR");
+
+    Type t;
+    t.kind = TypeKind::Coroutine;
+    t.isGenerator = isGenerator;
+
+    expect(TokenKind::LParen, "expected '(' after TASK/GENERATOR");
+    expect(TokenKind::KwOf, "expected OF after '(' in a TASK/GENERATOR type");
+    t.coroutineValueType = std::make_shared<Type>(parseTypeKeyword());
+    expect(TokenKind::RParen, "expected ')' after a TASK/GENERATOR type's value type");
+    return t;
 }
 
 /// A typed function-pointer type spec: `SUB|FUNCTION [Cdecl|Stdcall]
@@ -860,6 +884,7 @@ StmtPtr Parser::parseStatement() {
     if (check(TokenKind::KwDeclare)) return parseExternDecl("C", "");
     if (check(TokenKind::KwCall)) return parseCallStmt();
     if (check(TokenKind::KwReturn)) return parseReturn();
+    if (check(TokenKind::KwYield)) return parseYield();
     if (check(TokenKind::Identifier) && peek(1).kind == TokenKind::Newline &&
         peek(1).text == ":") {
         return parseLabel();
@@ -1223,6 +1248,9 @@ StmtPtr Parser::parseSub() {
     parseOptionalCallConv(*stmt);
     parseOptionalTypeParams(*stmt);
     stmt->params = parseParamList();
+    /// M12: `SUB Name(...) Async` - implicitly `Task` with no value (a SUB
+    /// has no `AS` clause at all to spell one out on).
+    stmt->isAsync = match(TokenKind::KwAsync);
     match(TokenKind::KwOverride); // ditto: parsed-and-discarded here
     expectStmtEnd();
 
@@ -1252,6 +1280,10 @@ StmtPtr Parser::parseFunction() {
     parseOptionalCallConv(*stmt);
     parseOptionalTypeParams(*stmt);
     stmt->params = parseParamList();
+    /// M12: `FUNCTION Name(...) Async AS Task(OF T)`/`AS Generator(OF T)` -
+    /// right after the parameter list, before the (still-required) `AS`
+    /// clause; `parseTypeKeyword` itself recognizes `Task`/`Generator`.
+    stmt->isAsync = match(TokenKind::KwAsync);
     expect(TokenKind::KwAs, "expected AS <return type> after FUNCTION parameter list");
     stmt->declaredType = parseTypeKeyword();
     match(TokenKind::KwOverride); // see parseSub's comment
@@ -1524,6 +1556,23 @@ StmtPtr Parser::parseReturn() {
     return stmt;
 }
 
+/// M12: `YIELD expr` - unlike RETURN, always takes a value (there's
+/// nothing useful about "yielding nothing"; a bare RETURN already covers
+/// "end the generator early" inside an Async FUNCTION returning
+/// Generator(OF T) - see Sema's own StmtKind::Yield/Return handling).
+StmtPtr Parser::parseYield() {
+    SourceLoc loc = peek().loc;
+    advance(); // YIELD
+
+    auto stmt = std::make_unique<Stmt>();
+    stmt->kind = StmtKind::Yield;
+    stmt->loc = loc;
+    stmt->expr = parseExpr();
+
+    expectStmtEnd();
+    return stmt;
+}
+
 /// Expression grammar, loosest-binding to tightest-binding, matching
 /// FreeBASIC's documented operator precedence (highest to lowest):
 ///   ^  >  unary -  >  * /  >  \  >  MOD  >  SHL/SHR  >  + -  >  &  >
@@ -1694,8 +1743,19 @@ ExprPtr Parser::parsePow() {
 
 /// '@' (address-of) and unary '*' (dereference) bind tighter than '^',
 /// matching FB's documented precedence table. Right-associative (rare but
-/// harmless: `@@x`/`**p`).
+/// harmless: `@@x`/`**p`). M12: `AWAIT` binds at this same tight level -
+/// `AWAIT SomeCall()` unwraps the immediately-following call's own
+/// `Task(OF T)` result.
 ExprPtr Parser::parseUnaryPtrOps() {
+    if (check(TokenKind::KwAwait)) {
+        SourceLoc loc = peek().loc;
+        advance();
+        auto expr = std::make_unique<Expr>();
+        expr->kind = ExprKind::Await;
+        expr->loc = loc;
+        expr->lhs = parseUnaryPtrOps();
+        return expr;
+    }
     if (check(TokenKind::At)) {
         SourceLoc loc = peek().loc;
         advance();

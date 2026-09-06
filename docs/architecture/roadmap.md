@@ -6967,6 +6967,172 @@ incompatible signatures across two different interfaces implemented by
 one TYPE (not specially diagnosed by Sema - surfaces as whatever real
 ambiguous-override error the backend C++ compiler produces).
 
+## M12: Coroutines - `Async`, `Task(OF T)`/`Generator(OF T)`, `YIELD`/`AWAIT`
+
+Third and last of the three portable compiler milestones from the
+approved templates/interfaces/coroutines roadmap (see M10's own entry
+for the full context on all three). Real C++20 coroutines end to end -
+`Async SUB`/`FUNCTION` compiles to a real `co_return`/`co_yield`/
+`co_await`-using coroutine, backed by two new runtime types
+(`runtime/include/ebasic/runtime/coroutine.hpp`: `Task<T>`,
+`Generator<T>`) implementing the real `promise_type`/Awaitable
+protocols, not an emulation.
+
+**Prerequisite, landed as its own isolated commit first** (per the
+approved plan): bumped `CMAKE_CXX_STANDARD` and every `-std=c++17`/
+`/std:c++17` the driver emits (both the compiler's own self-build and
+the generated-code compile step, GCC/Clang and MSVC alike) to C++20 -
+`<coroutine>` needs it. Verified alone, before any coroutine-specific
+code: a full clean rebuild on both `windows-mingw`/real `g++` and
+`windows-msvc`/real `cl.exe /std:c++20`, full regression sweep, CI-
+green on all 5 platforms.
+
+**Syntax, chosen via a real `AskUserQuestion` to the user** (the
+approved roadmap plan explicitly deferred this exact choice rather
+than deciding it speculatively): `Async`/`AWAIT`/`YIELD` (not the more
+literal `Coroutine`/`Suspend` alternative also offered) -
+`FUNCTION Name(...) Async AS Task(OF T)`/`AS Generator(OF T)` (a `SUB`
+has no `AS` clause to spell one out on - implicitly a valueless
+`Task`), `YIELD expr` inside a `Generator`, `AWAIT expr` to unwrap a
+`Task`'s value.
+
+**Runtime design** (`coroutine.hpp`): `Task<T>` uses `initial_suspend
+= suspend_never` (starts running the instant it's called) since this
+runtime has no real scheduler/thread pool/async I/O at all (eBasic
+itself has no concurrency primitives yet) - every coroutine here runs
+synchronously, straight through to completion or its own nested
+`AWAIT`, by the time control returns to its caller; `Generator<T>`
+uses `initial_suspend = suspend_always` (nothing runs until the first
+pull) and exposes a plain `MoveNext()`/`Current()` pull API rather
+than a C++ range/iterator pair, since eBasic has no `FOR EACH`/range
+concept yet for Codegen to target. Verified **standalone first**,
+outside the compiler entirely (a hand-written `.cpp` exercising
+generators, `Task`-to-`Task` `AWAIT` chaining, and the empty/default-
+constructed edge cases, compiled directly against real `g++`/`cl.exe`)
+before wiring up any Parser/Sema/Codegen support at all - the
+highest-risk of the three milestones, so proven correct in isolation
+first, matching this session's own established discipline.
+
+**Real bugs found live, each with a failing case caught before it
+shipped, not by inspection alone**:
+
+- **`DIM x AS Task(OF T)`/`Generator(OF T)` didn't compile at all** -
+  every `DIM` in this compiler unconditionally value-initializes
+  (`Type var{};`), but the runtime types' *only* constructor was
+  `explicit Task(coroutine_handle)` (no default constructor at all -
+  a real coroutine return-object is normally only ever produced by
+  `get_return_object`). Fixed by adding a real default constructor
+  (an empty, null-`handle` state) to both types, and auditing every
+  member (`MoveNext`, `await_ready`, `await_resume`, `Result`) for
+  null-handle safety rather than assuming a real coroutine always
+  produced the object.
+- **A stale precompiled runtime header, silently serving old
+  declarations** - `runtime/CMakeLists.txt`'s own PCH `DEPENDS` list
+  only ever named `runtime.hpp` itself (plus, incompletely, two of its
+  many `#include`d headers) - editing `coroutine.hpp` a second time,
+  *after* it was already `#include`d into `runtime.hpp`, left the
+  `.gch`/`.pch` built from the previous version with no rebuild
+  triggered at all, silently compiling generated code against stale
+  declarations. This gap predated M12 (only `bstring.hpp`/`print.hpp`
+  were ever tracked, not `datetimelib.hpp`/`filelib.hpp`/`mathlib.hpp`/
+  `processlib.hpp`/`stringlib.hpp` either) but had never been hit
+  before, since no runtime header had needed a second edit after its
+  own creation until this milestone. Fixed properly, not just
+  worked around: both PCH `add_custom_command`s now `DEPENDS` on a
+  `file(GLOB_RECURSE ... CONFIGURE_DEPENDS)` of every header under
+  `include/ebasic/runtime/`, so *any* runtime header edit (not just a
+  new #include) correctly triggers a PCH rebuild from now on.
+- **`AWAIT` at the top level (or inside an ordinary, non-`Async`
+  procedure) doesn't work at all** - real C++ forbids `co_await` in
+  `main()`, and top-level eBasic code compiles into `main()`; an
+  ordinary SUB/FUNCTION was never given any `co_return`/`co_yield`/
+  `co_await` of its own either, so it isn't a real coroutine and
+  can't use `co_await` either. First surfaced as a confusing backend
+  error ("'co_await' cannot be used in the 'main' function"); fixed
+  with a real Sema-level check (`AWAIT` requires
+  `insideProcedure_ && currentFunctionReturnType_.kind ==
+  TypeKind::Coroutine`) giving a clear eBasic-level diagnostic
+  instead, plus a new `Task<T>::Result()` runtime accessor (a plain,
+  non-`co_await` read of an already-completed `Task`'s value - safe
+  unconditionally, since `initial_suspend = suspend_never` guarantees
+  the body has already run to completion by the time any `Task`
+  object exists at all) so top-level/ordinary code has a real way to
+  consume a `Task`'s value without `AWAIT`.
+- **`isAssignCompatible` silently accepted any two TASK/GENERATOR
+  types as mutually compatible** - neither Pointer, FunctionPointer,
+  StringT/ZStringT, nor UserDefined, a Coroutine-kind `Type` fell
+  through to the function's own final, unconditional `return true`
+  (the "any other same-kind primitive" catch-all) with no explicit
+  Coroutine-vs-Coroutine case at all - found by code review before it
+  could ship as a real, silent type-safety hole (e.g. assigning a
+  `Task(OF STRING)` to a `Generator(OF INTEGER)`-typed variable).
+  Fixed with a real structural-match check (same Task-vs-Generator-
+  ness, same value type, recursively).
+- **`generateLibraryInterface` (`--lib`'s own `.iface.bas` export) and
+  `collectExternSignatureChecks` (the `EXTERN`/`DECLARE` boundary)
+  both needed an explicit Coroutine case too** - a `Task`/`Generator`
+  is no more C-ABI-compatible than `STRING` is (arguably less - it
+  isn't even copyable), and `basicTypeName` (used to re-declare an
+  exported signature) had no case for it at all, which would have
+  silently mis-described an exported Async procedure's return type as
+  `INTEGER` (the function's own "unreachable" fallback) rather than
+  refusing to export it. Both fixed with an explicit rejection/
+  exclusion, mirroring `STRING`'s own existing precedent in each
+  place exactly.
+
+**Sema/Codegen integration**: `gen.MoveNext()`/`gen.Current()`/
+`task.Result()` are real, fixed runtime method names, not something
+any eBasic TYPE ever declares - resolved by a dedicated Coroutine-
+receiver special case in the qualified-`Call` checker (parallel to,
+but never going through, the ordinary `structs_`/`findMethodInChain`
+machinery, which only ever knows about real eBasic TYPEs), and
+rendered by Codegen *without* `mangleName` (a new `resolveCalleeName`
+check: a `Coroutine`-typed receiver's method name is emitted verbatim,
+never `eb_`-mangled). `RETURN`/`FuncName = value` inside an ordinary
+FUNCTION uses the existing `RetType eb__ret{}; ... return eb__ret;`
+pattern; an `Async` procedure uses neither (`Task`/`Generator` have no
+default-constructible-then-mutate story compatible with it, and the
+whole `FuncName = value` convention is a deliberate scope cut for
+`Async` - see the negative test below) - `RETURN`/`YIELD` instead emit
+real `co_return`/`co_yield` directly, and a trailing, unconditional
+`co_return;` is appended to every `Async SUB`/`Generator`-shaped
+`FUNCTION` body (harmless dead code after an already-`RETURN`-ed path;
+necessary to guarantee the body is recognized as a real coroutine at
+all when it happens to have no explicit one of its own, e.g. a trivial
+or empty body) - never for a `Task(OF T)`-shaped `FUNCTION` (`T`
+non-void), which has no sensible default value to synthesize and so
+requires its own body to reach a real, explicit `RETURN`.
+
+**Verified live**, identical results on both `windows-mingw`/real
+`g++` and `windows-msvc`/real `cl.exe`: a `Generator` produced via a
+`FOR`/`YIELD` loop and consumed via `MoveNext`/`Current`; `Task`-to-
+`Task` `AWAIT` chaining inside another `Async FUNCTION`; an `Async
+SUB`; `Task::Result()` from top-level code; nine distinct negative
+cases (Async-without-Task/Generator and vice versa, `AWAIT` at the top
+level and inside an ordinary FUNCTION, `RETURN` with a value inside a
+`Generator`, `YIELD` outside a `Generator`-shaped `Async FUNCTION`,
+`AWAIT` on a `Generator`, the `FuncName = value` rejection, and the
+`EXTERN` boundary rejection). A 16-case regression sweep plus the
+existing `e2e_generics`/`e2e_interfaces` tests found zero regression.
+Local `ctest` was blocked again by this machine's own recurring
+Application/Device Guard policy (see M10/M11's own identical note);
+CI is the authoritative confirmation once pushed.
+
+**Deliberately out of scope this round** (real, separate future work,
+not oversights): any real concurrency (a scheduler, a thread pool,
+real async I/O - every coroutine here runs synchronously; `Async`
+today is a syntax for suspendable control flow, not parallelism);
+`FOR EACH`/a range-based consumption syntax for `Generator` (the
+plain `MoveNext`/`Current` pull API is the whole story this round);
+more than one type parameter on `Task`/`Generator` (matches M10's own
+generics scope - a single `(OF T)` throughout); a generic `Async`
+procedure (M10 and M12 don't compose this round); exception
+propagation across an `AWAIT`/`MoveNext` boundary was implemented in
+the runtime (`unhandled_exception`/`std::rethrow_exception`) but not
+exercised by any eBasic-level test - this language has no
+`ON ERROR`/exception-handling story of its own yet for a thrown
+exception to interact with meaningfully.
+
 ## Testing Strategy
 
 - **Golden-file e2e tests** (primary): `tests/e2e/<case>/input.bas` + `expected.stdout` + `expected.exit`, run through the full `ebc → g++ → execute` pipeline and diffed.

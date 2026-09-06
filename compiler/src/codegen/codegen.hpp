@@ -246,6 +246,11 @@ private:
     /// currently being emitted (by genMethodDefinition), or empty. Mirrors
     /// Sema::currentClassName_ - needed to resolve `Base.Method(args)`.
     std::string currentOwnerType_;
+    /// M12: true while genBlock/genStmt is emitting the body of an Async
+    /// SUB/FUNCTION (set/restored by genProcedure) - StmtKind::Return/
+    /// Yield read this to emit `co_return`/`co_yield` instead of a plain
+    /// `return`.
+    bool currentProcedureIsAsync_ = false;
 
     /// `using eb_fpN = RetType(EBASIC_STDCALL *)(ParamTypes...);` alias
     /// lines, one per distinct FunctionPointer signature seen by cppType,

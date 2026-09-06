@@ -79,6 +79,17 @@ std::string Codegen::cppType(const Type& type) {
             funcPtrAliasCache_.emplace(key, alias);
             return alias;
         }
+        case TypeKind::Coroutine: {
+            /// M12: `::ebasic::rt::Task<T>`/`Generator<T>` (runtime/
+            /// coroutine.hpp) - `void` for a valueless TASK (an Async
+            /// SUB's own implicit return type; a GENERATOR always has a
+            /// real value type in practice, Sema doesn't reject a
+            /// valueless one outright, but nothing constructs one this
+            /// round either).
+            std::string valueTok = type.coroutineValueType ? cppType(*type.coroutineValueType) : "void";
+            return std::string("::ebasic::rt::") + (type.isGenerator ? "Generator<" : "Task<") +
+                   valueTok + ">";
+        }
         case TypeKind::Unknown: break;
     }
     throw std::runtime_error("codegen: unresolved type reached codegen");
@@ -172,6 +183,16 @@ std::string Codegen::resolveCalleeName(const Expr* lhs, const std::string& name)
         auto it = externProcNames_.find(key);
         if (it != externProcNames_.end()) return it->second;
         return mangleName(lhs->stringValue) + "::" + mangleName(name);
+    }
+    /// M12: `gen.MoveNext()`/`gen.Current()` on a GENERATOR(OF T)-typed
+    /// receiver call straight into runtime/coroutine.hpp's own
+    /// Generator<T> - real, fixed C++ method names (Sema's own special-
+    /// cased method resolution for a Coroutine receiver, mirroring this
+    /// exactly, never routes any *other* name here), not an eBasic-
+    /// declared method, so this must NOT go through mangleName (which
+    /// would rename `MoveNext` to `eb_movenext`, matching nothing real).
+    if (lhs->type.kind == TypeKind::Coroutine) {
+        return memberReceiverPrefix(*lhs) + name;
     }
     return memberReceiverPrefix(*lhs) + mangleName(name);
 }
@@ -324,6 +345,13 @@ std::string Codegen::genExprBase(const Expr& expr) {
             return "(&(" + genExpr(*expr.lhs) + "))";
         case ExprKind::Deref:
             return "(*(" + genExpr(*expr.lhs) + "))";
+        case ExprKind::Await:
+            /// M12: real C++ `co_await` - Sema already validated `expr.lhs`
+            /// resolves to a TASK(OF T) (never GENERATOR/a valueless
+            /// TASK), so this is always exactly the shape `Task<T>::
+            /// await_ready`/`await_resume` (runtime/coroutine.hpp)
+            /// implement.
+            return "(co_await (" + genExpr(*expr.lhs) + "))";
         case ExprKind::This:
         case ExprKind::Base:
             /// A bare This/Base used as a value (not immediately followed by
@@ -661,12 +689,23 @@ void Codegen::genStmt(const Stmt& stmt, std::ostringstream& out, int indent) {
             out << ");\n";
             return;
         }
-        case StmtKind::Return:
+        case StmtKind::Return: {
+            /// M12: `co_return` inside an Async SUB/FUNCTION - Sema already
+            /// validated `stmt.expr`'s presence/type (a value for TASK, none
+            /// for GENERATOR/an Async SUB), so this only needs to pick the
+            /// right keyword.
+            const char* kw = currentProcedureIsAsync_ ? "co_return" : "return";
             if (stmt.expr) {
-                out << ind(indent) << "return " << genExpr(*stmt.expr) << ";\n";
+                out << ind(indent) << kw << " " << genExpr(*stmt.expr) << ";\n";
             } else {
-                out << ind(indent) << "return;\n";
+                out << ind(indent) << kw << ";\n";
             }
+            return;
+        }
+        case StmtKind::Yield:
+            /// M12: real C++ `co_yield` - only ever reached inside an Async
+            /// FUNCTION returning GENERATOR(OF T) (Sema-enforced).
+            out << ind(indent) << "co_yield " << genExpr(*stmt.expr) << ";\n";
             return;
         case StmtKind::GoSub:
             out << ind(indent) << gosubFunctionName(stmt.name) << "();\n";
@@ -858,7 +897,13 @@ std::string Codegen::cppOperatorToken(BinOp op) {
 
 void Codegen::genProcedure(const Stmt& stmt) {
     bool isFunction = stmt.kind == StmtKind::FunctionDecl;
-    std::string retType = isFunction ? cppType(stmt.declaredType) : "void";
+    /// M12: an Async SUB has no `declaredType` at all to read (a plain SUB
+    /// never does) - its real C++ return type is the implicit, valueless
+    /// `Task<void>` (matches Sema's own currentFunctionReturnType_
+    /// synthesis for this exact case).
+    std::string retType = isFunction ? cppType(stmt.declaredType)
+                           : stmt.isAsync ? "::ebasic::rt::Task<void>"
+                                          : "void";
 
     if (stmt.isExtern) {
         /// A DECLARE/EXTERN signature (M4): no eBasic-side body at all - the
@@ -927,16 +972,43 @@ void Codegen::genProcedure(const Stmt& stmt) {
     protoOut_ << exportPrefix << retType << " " << callConv << name << "(" << protoParamList << ");\n";
 
     procOut_ << exportPrefix << retType << " " << callConv << name << "(" << defParamList << ") {\n";
-    if (isFunction) {
+    /// M12: an Async procedure never uses the ordinary `eb__ret`-local/
+    /// implicit-trailing-return pattern below - `Task<T>`/`Generator<T>`
+    /// have no default constructor to `{}`-initialize one with (real
+    /// coroutine return-object types are only ever produced by
+    /// `get_return_object`, never default-constructed), and the whole
+    /// `FuncName = value` self-assignment convention this pattern exists
+    /// to support is a separate, deliberate scope cut for Async (see
+    /// Sema's own isReturnAssign rejection) - every value-producing exit
+    /// is a real, explicit `co_return`/`co_yield` in the body itself.
+    if (isFunction && !stmt.isAsync) {
         procOut_ << ind(1) << retType << " eb__ret{};\n";
     }
     /// A local array can shadow a global of the same name; save/restore so
     /// that mapping doesn't leak into code generated after this procedure.
     auto savedArrayLowerBounds = arrayLowerBoundVar_;
+    bool savedProcedureIsAsync = currentProcedureIsAsync_;
+    currentProcedureIsAsync_ = stmt.isAsync;
     genBlock(stmt.body, procOut_, 1);
+    currentProcedureIsAsync_ = savedProcedureIsAsync;
     arrayLowerBoundVar_ = savedArrayLowerBounds;
-    if (isFunction) {
+    if (isFunction && !stmt.isAsync) {
         procOut_ << ind(1) << "return eb__ret;\n";
+    } else if (stmt.isAsync && (!isFunction || stmt.declaredType.isGenerator)) {
+        /// A trailing, unconditional `co_return;` - guarantees this body
+        /// is recognized as a real C++ coroutine at all (a function only
+        /// becomes one if its body lexically contains at least one
+        /// co_return/co_yield/co_await *somewhere*) even when the eBasic
+        /// source itself never wrote an explicit RETURN/YIELD (an empty
+        /// or trivial Async SUB/GENERATOR), and correctly implements
+        /// "falls off the end" for one that does. Harmless, unreachable
+        /// code on any path that already ended in its own RETURN/YIELD.
+        /// Never emitted for a TASK(OF T)-shaped FUNCTION (T non-void,
+        /// see the `isFunction && !isGenerator` case) - there is no
+        /// sensible default T to synthesize; that shape requires the
+        /// body's own explicit RETURN to be reachable, a real, accepted
+        /// scope limit (see the M12 roadmap entry).
+        procOut_ << ind(1) << "co_return;\n";
     }
     procOut_ << "}\n\n";
 }
@@ -1340,6 +1412,20 @@ std::string Codegen::generateLibraryInterface(const Module& module, const std::s
                              "which needs a marshaling shim not yet implemented (see the generated "
                              ".iface.bas for this note in context; use ZSTRING/ANY PTR instead, same "
                              "as this package's own runtime-facing functions)\n";
+                continue;
+            }
+            /// M12: an Async SUB/FUNCTION is never exported either - same
+            /// reasoning as STRING above (Task<T>/Generator<T> has no
+            /// C-compatible representation at all, not just a mismatched
+            /// one), and there's no `basicTypeName` spelling for it to
+            /// re-declare across the boundary regardless (Sema's own
+            /// collectExternSignatureChecks already rejects a real EXTERN
+            /// signature using one, for the identical reason).
+            if (stmt.isAsync) {
+                skippedText << "' (not exported: '" << stmt.name << "' is Async)\n";
+                std::cerr << "ebc: warning: '" << stmt.name
+                          << "' not exported from this --lib/--shared-lib build - it is Async "
+                             "(TASK/GENERATOR has no C-compatible representation to export)\n";
                 continue;
             }
             bool isFunction = stmt.kind == StmtKind::FunctionDecl;

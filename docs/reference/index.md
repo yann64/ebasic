@@ -103,6 +103,8 @@ redeclare one of these names).
 | `AND` | [Operators](operators.md#and-or-xor-not) |
 | `ANY` | [Pointers: `ANY PTR`](namespaces-pointers-unions.md#pointers-ptr--) |
 | `AS` | [`DIM`](types-and-literals.md#dim) |
+| `ASYNC` | [Coroutines](procedures-and-arrays.md#coroutines-async) |
+| `AWAIT` | [Coroutines](procedures-and-arrays.md#coroutines-async) |
 | `BASE` | [`EXTENDS`](type-oop.md#extends---inheritance) |
 | `BOOLEAN` | [Primitive types](types-and-literals.md#primitive-types) |
 | `BYREF` | [Parameters](procedures-and-arrays.md#parameters-byval-byref) |
@@ -128,6 +130,7 @@ redeclare one of these names).
 | `FALSE` | [Literals](types-and-literals.md#literals) |
 | `FOR` | [`FOR`](control-flow.md#for-to-step-next) |
 | `FUNCTION` | [`SUB` / `FUNCTION`](procedures-and-arrays.md#sub-function) |
+| `GENERATOR` | [Coroutines](procedures-and-arrays.md#coroutines-async) |
 | `GOSUB` | [`GOSUB` / `RETURN`](control-flow.md#gosub-return) |
 | `GOTO` | [`GOTO` and labels](control-flow.md#goto-and-labels) |
 | `IF` | [`IF`](control-flow.md#if-then-elseif-else-end-if) |
@@ -159,6 +162,7 @@ redeclare one of these names).
 | `STEP` | [`FOR`](control-flow.md#for-to-step-next) |
 | `STRING` | [Primitive types](types-and-literals.md#primitive-types) |
 | `SUB` | [`SUB` / `FUNCTION`](procedures-and-arrays.md#sub-function) |
+| `TASK` | [Coroutines](procedures-and-arrays.md#coroutines-async) |
 | `THEN` | [`IF`](control-flow.md#if-then-elseif-else-end-if) |
 | `THIS` | [Methods](type-oop.md#methods) |
 | `TO` | [`FOR`](control-flow.md#for-to-step-next) |
@@ -174,4 +178,5 @@ redeclare one of these names).
 | `WEND` | [`DO` / `LOOP`](control-flow.md#do-loop-while-wend) |
 | `WHILE` | [`DO` / `LOOP`](control-flow.md#do-loop-while-wend) |
 | `XOR` | [Operators](operators.md#and-or-xor-not) |
+| `YIELD` | [Coroutines](procedures-and-arrays.md#coroutines-async) |
 | `ZSTRING` | [Primitive types](types-and-literals.md#primitive-types), [`EXTERN` interop](extern-interop.md#zstring-at-the-interop-boundary) |

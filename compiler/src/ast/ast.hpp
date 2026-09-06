@@ -56,6 +56,15 @@ enum class TypeKind {
     /// Pointer with a null pointee) in both directions, matching how
     /// AddressOf's existing untyped ANY PTR callers keep working unchanged.
     FunctionPointer,
+    /// M12: `Task(OF T)` (a single eventual value) or `Generator(OF T)` (a
+    /// lazily-pulled sequence) - the return type of an `Async` SUB/
+    /// FUNCTION. See Type::isGenerator/coroutineValueType. `T` (the OF
+    /// clause) is optional only for a bare `Task` with no value at all
+    /// (an `Async SUB`'s implicit return type - `coroutineValueType` null
+    /// means void there); `Generator` always needs one in practice (a
+    /// generator that could never yield anything isn't rejected outright,
+    /// but isn't a useful shape either).
+    Coroutine,
 };
 
 /// Every expression form Expr can represent - see Expr for which fields each
@@ -99,6 +108,14 @@ enum class ExprKind {
     /// non-virtual qualified call to the base's own implementation
     /// (bypassing any override) - Codegen emits literal `eb_base::eb_method(args)`.
     Base,
+    /// M12: `AWAIT expr` - `lhs` is the awaited expression, which must
+    /// resolve to a `Task(OF T)` (not `Generator` - a generator is pulled
+    /// via MoveNext/Current, not awaited; not a void Task either, since
+    /// there is no value to produce in an expression position - see
+    /// Sema's own ExprKind::Await case). Resolves to `T` itself - the
+    /// unwrapped value, exactly like real C++'s `co_await` on an
+    /// Awaitable.
+    Await,
 };
 
 /// Every overloadable/built-in binary operator - Codegen's cppOperatorToken
@@ -236,6 +253,10 @@ struct Type {
     std::shared_ptr<std::vector<Type>> funcParamTypes;  // ByVal-only, in order
     std::string funcCallConv;                           // "" (cdecl) or "stdcall"
 
+    // set when kind == Coroutine (M12):
+    bool isGenerator = false;                    // false == Task, true == Generator
+    std::shared_ptr<Type> coroutineValueType;    // null == void (Task only - see TypeKind::Coroutine)
+
     Type() = default;
     Type(TypeKind k) : kind(k) {}
     operator TypeKind() const { return kind; }
@@ -346,6 +367,10 @@ enum class StmtKind {
     /// separate StmtKind (rather than a bool flag on TypeDecl) so that
     /// distinction reads directly off `stmt.kind` at every use site.
     UnionDecl,
+    /// M12: `YIELD expr` - reuses `Stmt::expr`, the same shape `Return`
+    /// already uses for its own value. Only valid inside an `Async`
+    /// FUNCTION/SUB whose real return type is `Generator(OF T)`.
+    Yield,
 };
 
 /// Which loop- or procedure-introducing keyword a scope was opened with.
@@ -655,6 +680,17 @@ struct Stmt {
     /// a stable ABI boundary) and `externLib` is unused/empty (no `Lib`
     /// clause is meaningful for a real definition).
     bool isExported = false;
+    /// M12: SubDecl/FunctionDecl only - an `Async` SUB/FUNCTION, parsed
+    /// right after the parameter list (`FUNCTION Name(...) Async AS
+    /// Task(OF T)` / `SUB Name(...) Async`). A FUNCTION's `declaredType`
+    /// is the *full* `Task(OF T)`/`Generator(OF T)` Coroutine type (what
+    /// calling it as a plain expression, without AWAIT, produces - real
+    /// C++'s own "calling a coroutine function returns its coroutine
+    /// return-object type immediately" semantics); a SUB's is implicitly
+    /// `Task` with no value (never written explicitly - a bare SUB has no
+    /// `AS` clause at all, matching every ordinary SUB). Never combined
+    /// with a TYPE method or a generic (OF T) clause this round.
+    bool isAsync = false;
 };
 
 /// The parsed result of one compilation: every top-level statement, plus the
